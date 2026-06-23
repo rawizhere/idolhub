@@ -1,0 +1,39 @@
+/* Clean 2026 Theme Styles & Overrides */
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* PhotoSwipe video aspect ratio */
+.pswp__video {
+  max-width: 90vw;
+  max-height: 85vh;
+  width: auto;
+  height: auto;
+}
+
+/* Performance: skip rendering off-screen gallery items */
+.gallery-item {
+  content-visibility: auto;
+  contain-intrinsic-size: 240px 240px;
+}
+
+/* PhotoSwipe root */
+.pswp {
+  --pswp-bg: #000;
+}

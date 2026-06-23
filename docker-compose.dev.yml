@@ -1,0 +1,30 @@
+services:
+  idolhub:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    container_name: idolhub
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:${PORT:-8080}"
+    volumes:
+      - ./configs:/app/configs
+      - ./downloads:/app/downloads
+    environment:
+      - TZ=${TZ:-Europe/Moscow}
+      - PORT=${PORT:-8080}
+    shm_size: "2gb"
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+        reservations:
+          cpus: "1"
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8080}/api/config"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

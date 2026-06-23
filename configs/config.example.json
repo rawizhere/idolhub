@@ -1,0 +1,25 @@
+{
+  "accounts": [
+    {
+      "username": "example_user",
+      "platform": "twitter",
+      "save_text": true,
+      "skip_retweets": false,
+      "filters": [],
+      "download_photos": true,
+      "download_videos": true
+    },
+    {
+      "username": "example_instagram",
+      "platform": "instagram",
+      "save_text": true,
+      "download_photos": true,
+      "download_videos": true
+    }
+  ],
+  "concurrency": 5,
+  "twitter_auth_token": "",
+  "instagram_session_id": "",
+  "instagram_mode": "picuki",
+  "auto_sync_interval": 10
+}

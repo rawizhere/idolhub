@@ -1,0 +1,54 @@
+# --- OS ---
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# --- IDE ---
+.idea/
+.idea/*.iml
+*.iml
+.vscode/
+*.sublime-*
+docs/
+.superpowers/
+
+# --- Build ---
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.out
+*.test
+*.test.exe
+*.o
+*.obj
+*.a
+*.lib
+tmp/
+bin/
+
+# --- Go ---
+/vendor/
+*_templ.go
+*.swp
+*.swo
+*~
+
+# --- Config ---
+configs/config.json
+.env
+
+# --- Generated ---
+cmd/parser/web/static/app.css
+node_modules/
+package.json
+package-lock.json
+
+# --- Editor/merge leftovers ---
+*.orig
+*.bak
+*.local
+
+# --- Media ---
+downloads/
