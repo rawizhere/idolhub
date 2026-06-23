@@ -1,0 +1,59 @@
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE & tools
+.idea/
+.vscode/
+*.sublime-*
+.agents/
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.out
+*.test
+*.test.exe
+*.o
+*.obj
+*.a
+*.lib
+tmp/
+bin/
+
+# Go
+/vendor/
+*.swp
+*.swo
+*~
+
+# Config & secrets (mounted at runtime)
+configs/
+.env
+
+# Data (mounted at runtime)
+downloads/
+
+# Generated
+*_templ.go
+cmd/parser/web/static/app.css
+node_modules/
+package.json
+package-lock.json
+
+# VCS
+.git/
+.gitignore
+
+# Docs
+*.md
+
+# Deploy (not needed for build context)
+.github/
+
+# Environment defaults
+.env.example
