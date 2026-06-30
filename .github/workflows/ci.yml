@@ -10,8 +10,8 @@ jobs:
   static-analysis:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.26.4"
           cache: false
@@ -29,8 +29,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.26.4"
           cache: false
@@ -39,18 +39,16 @@ jobs:
           go install github.com/a-h/templ/cmd/templ@v0.3.1020
           templ generate -path ./cmd/parser/web/templates/
       - name: check dependencies
-        uses: golang/govulncheck-action@v1
-        with:
-          go-version-input: "1.26.4"
-          check-latest: false
-          repo-checkout: false
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
 
   unit-tests:
     runs-on: ubuntu-latest
     needs: [static-analysis, vulnerability-scan]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.26.4"
           cache: false
@@ -70,8 +68,8 @@ jobs:
     env:
       DOCKER_IMAGE: ${{ github.repository }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: "1.26.4"
           cache: false
@@ -80,20 +78,20 @@ jobs:
           go install github.com/a-h/templ/cmd/templ@v0.3.1020
           templ generate -path ./cmd/parser/web/templates/
       - name: setup buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       - name: login to dockerhub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: generate metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.DOCKER_IMAGE }}
           tags: type=raw,value=latest
       - name: build and push image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./deploy/Dockerfile
