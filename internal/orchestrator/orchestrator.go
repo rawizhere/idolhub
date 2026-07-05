@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +16,17 @@ import (
 	"idolhub/internal/gallery"
 	"idolhub/internal/scraper"
 )
+
+const numScrapeWorkers = 3
+
+type scrapeJob struct {
+	username      string
+	platform      string
+	saveText      bool
+	lastSync      time.Time
+	forceFullSync bool
+	beforeCount   int
+}
 
 const maxTaskLogs = 1000
 
@@ -59,6 +71,7 @@ type Orchestrator struct {
 	autoSyncCtx    context.Context
 	autoSyncCancel context.CancelFunc
 	mediaIndex     *gallery.Index
+	jobCh          chan scrapeJob
 }
 
 var GlobalOrchestrator *Orchestrator
@@ -73,6 +86,7 @@ func InitOrchestrator(mediaIndex *gallery.Index) {
 		autoSyncCtx:    autoSyncCtx,
 		autoSyncCancel: autoSyncCancel,
 		mediaIndex:     mediaIndex,
+		jobCh:          make(chan scrapeJob, 100),
 	}
 	GlobalOrchestrator = orch
 
@@ -83,6 +97,12 @@ func InitOrchestrator(mediaIndex *gallery.Index) {
 		orch: orch,
 	}))
 
+	for i := 0; i < numScrapeWorkers; i++ {
+		go orch.worker()
+	}
+
+	scraper.EnsureYTDLP(context.Background())
+	scraper.StartYTDLPUpdateLoop(autoSyncCtx)
 	go orch.StartAutoSyncLoop(autoSyncCtx)
 }
 
@@ -168,8 +188,8 @@ func (o *Orchestrator) SyncTargets(accounts []config.Account) {
 		current[acc.Username] = true
 		if _, exists := o.progress[acc.Username]; !exists {
 			status, updatedAt := loadPersistedSyncInfo(acc.Username)
-			// Stale "running" status from a previous instance — reset to idle
-			if status == "running" {
+			// Stale "running" or "queued" status from a previous instance — reset to idle
+			if status == "running" || status == "queued" {
 				status = "idle"
 				SavePersistedSyncInfo(acc.Username, "idle", updatedAt)
 			}
@@ -229,21 +249,20 @@ func (o *Orchestrator) AppendTaskLog(username string, t time.Time, level, msg st
 	})
 
 	// Estimate progress based on log message content
-	if status == "running" {
+	if status == "running" || status == "queued" {
 		progress := currentProgress
 		if progress < 10 {
 			progress = 10
 		}
-		if strings.Contains(strings.ToLower(msg), "navigating") || strings.Contains(strings.ToLower(msg), "testing twitter mirror") || strings.Contains(strings.ToLower(msg), "instagram session is valid") {
+		ml := strings.ToLower(msg)
+		if strings.Contains(ml, "navigating") || strings.Contains(ml, "testing twitter mirror") || strings.Contains(ml, "session is valid") || strings.Contains(ml, "yt-dlp using cookies") {
 			progress = 20
-		} else if strings.Contains(strings.ToLower(msg), "timeline page parsed") || strings.Contains(strings.ToLower(msg), "instagram post count") || strings.Contains(strings.ToLower(msg), "instagram feed page parsed") || strings.Contains(strings.ToLower(msg), "resolved instagram user id") {
+		} else if strings.Contains(ml, "timeline page parsed") || strings.Contains(ml, "instagram post count") || strings.Contains(ml, "instagram feed page parsed") || strings.Contains(ml, "resolved instagram user id") || strings.Contains(ml, "yt-dlp progress") {
 			progress = 50
-		} else if strings.Contains(strings.ToLower(msg), "concurrent download workers") {
+		} else if strings.Contains(ml, "concurrent download workers") {
 			progress = 70
-		} else if strings.Contains(strings.ToLower(msg), "file downloaded") || strings.Contains(strings.ToLower(msg), "instagram file downloaded") {
-			if progress < 95 {
-				progress += 2
-			}
+		} else if strings.Contains(ml, "file downloaded") || strings.Contains(ml, "instagram file downloaded") || strings.Contains(ml, "yt-dlp scrape completed") {
+			progress = 90
 		}
 		if progress != currentProgress {
 			o.mu.Lock()
@@ -268,9 +287,9 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 		o.progress[username] = p
 	}
 
-	if p.Status == "running" {
+	if p.Status == "running" || p.Status == "queued" {
 		o.mu.Unlock()
-		slog.Warn("Scraping task is already running for user", "user", username)
+		slog.Warn("Scraping task already running or queued", "user", username)
 		return
 	}
 
@@ -281,152 +300,201 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 	}
 
 	lastSync := p.UpdatedAt
-	forceFullTwitterSync := false
-	if platform == "twitter" && saveText {
-		postsPath := filepath.Join("downloads", "twitter", username, "posts.json")
+	forceFullSync := false
+	if saveText || platform == "tiktok" {
+		postsPath := filepath.Join("downloads", platform, username, "posts.json")
 		if _, err := os.Stat(postsPath); os.IsNotExist(err) {
-			forceFullTwitterSync = true
+			forceFullSync = true
 			lastSync = time.Time{}
-		}
-	}
-	forceFullInstagramSync := false
-	if platform == "instagram" {
-		if saveText {
-			postsPath := filepath.Join("downloads", "instagram", username, "posts.json")
-			if _, err := os.Stat(postsPath); os.IsNotExist(err) {
-				forceFullInstagramSync = true
+		} else if !forceFullSync {
+			forceFullSync = isPostsCorrupted(postsPath)
+			if forceFullSync {
 				lastSync = time.Time{}
 			}
 		}
 	}
 
+	beforeCount := o.countDownloadedMedia(platform, username)
+	p.Status = "queued"
+	p.Logs = []TaskLog{}
+	p.AuthError = false
+	o.mu.Unlock()
+
+	if forceFullSync {
+		slog.Info("Forcing full sync for target", "user", username)
+	}
+
+	o.jobCh <- scrapeJob{
+		username:      username,
+		platform:      platform,
+		saveText:      saveText,
+		lastSync:      lastSync,
+		forceFullSync: forceFullSync,
+		beforeCount:   beforeCount,
+	}
+
+	o.broadcast(SSEEvent{Type: "status", Username: username, Status: "queued", Progress: 0})
+	SavePersistedSyncInfo(username, "queued", p.UpdatedAt)
+}
+
+func (o *Orchestrator) worker() {
+	for job := range o.jobCh {
+		o.mu.RLock()
+		p, ok := o.progress[job.username]
+		skip := ok && p.Status != "queued"
+		o.mu.RUnlock()
+		if skip {
+			continue
+		}
+		o.runScrape(job)
+	}
+}
+
+func (o *Orchestrator) runScrape(job scrapeJob) {
+	username := job.username
+	platform := job.platform
+	saveText := job.saveText
+	lastSync := job.lastSync
+	beforeCount := job.beforeCount
+
+	o.mu.Lock()
+	p := o.progress[username]
 	p.Status = "running"
 	p.Progress = 5
-	p.Logs = []TaskLog{} // clear old logs
-	p.AuthError = false
 	persistUser := p.Username
 	persistStatus := p.Status
 	persistUpdated := p.UpdatedAt
-	beforeCount := o.countDownloadedMedia(platform, username)
 	o.mu.Unlock()
 
-	if forceFullTwitterSync || forceFullInstagramSync {
-		slog.Info("Posts.json not found for target, forcing full sync", "user", username)
+	o.broadcast(SSEEvent{Type: "status", Username: username, Status: "running", Progress: 5})
+	SavePersistedSyncInfo(persistUser, persistStatus, persistUpdated)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 2*time.Hour)
+	defer timeoutCancel()
+
+	o.mu.Lock()
+	o.cancels[username] = cancel
+	o.mu.Unlock()
+
+	var err error
+	var scrapeFn func(ctx context.Context, username string, saveText bool, lastSync time.Time) error
+	switch platform {
+	case "instagram":
+		scrapeFn = func(ctx context.Context, username string, saveText bool, lastSync time.Time) error {
+			return scraper.ScrapeInstagramUser(ctx, username, saveText, lastSync)
+		}
+	case "twitter":
+		scrapeFn = func(ctx context.Context, username string, saveText bool, lastSync time.Time) error {
+			c := config.GetConfig()
+			var skipRetweets bool
+			var filters []string
+			downloadPhotos := true
+			downloadVideos := true
+			for _, acc := range c.Accounts {
+				if strings.EqualFold(acc.Username, username) {
+					skipRetweets = acc.SkipRetweets
+					filters = acc.Filters
+					downloadPhotos = acc.ShouldDownloadPhotos()
+					downloadVideos = acc.ShouldDownloadVideos()
+					break
+				}
+			}
+			return scraper.ScrapeTwitterUser(ctx, username, saveText, skipRetweets, filters, downloadPhotos, downloadVideos, lastSync)
+		}
+	case "tiktok":
+		scrapeFn = func(ctx context.Context, username string, saveText bool, lastSync time.Time) error {
+			return scraper.ScrapeYTDLP(ctx, platform, username, saveText, lastSync)
+		}
+	default:
+		err = fmt.Errorf("unknown platform: %s", platform)
+	}
+	if err == nil {
+		err = scrapeFn(timeoutCtx, username, saveText, lastSync)
 	}
 
-	o.broadcast(SSEEvent{Type: "status", Username: username, Status: "running", Progress: 5})
-
-	SavePersistedSyncInfo(persistUser, persistStatus, persistUpdated)
-	go func() {
-		ctx, cancel := context.WithCancel(context.Background())
-		timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 2*time.Hour)
-		defer timeoutCancel()
-
-		o.mu.Lock()
-		o.cancels[username] = cancel
-		o.mu.Unlock()
-
-		var err error
-		var scrapeFn func(ctx context.Context, username string, saveText bool, lastSync time.Time) error
-		switch platform {
-		case "instagram":
-			scrapeFn = func(ctx context.Context, username string, saveText bool, lastSync time.Time) error {
-				return scraper.ScrapeInstagramUser(ctx, username, saveText, lastSync)
-			}
-		case "twitter":
-			scrapeFn = func(ctx context.Context, username string, saveText bool, lastSync time.Time) error {
-				c := config.GetConfig()
-				var skipRetweets bool
-				var filters []string
-				downloadPhotos := true
-				downloadVideos := true
-				for _, acc := range c.Accounts {
-					if strings.EqualFold(acc.Username, username) {
-						skipRetweets = acc.SkipRetweets
-						filters = acc.Filters
-						downloadPhotos = acc.ShouldDownloadPhotos()
-						downloadVideos = acc.ShouldDownloadVideos()
-						break
-					}
-				}
-				return scraper.ScrapeTwitterUser(ctx, username, saveText, skipRetweets, filters, downloadPhotos, downloadVideos, lastSync)
-			}
-		default:
-			err = fmt.Errorf("unknown platform: %s", platform)
-		}
-		if err == nil {
-			err = scrapeFn(timeoutCtx, username, saveText, lastSync)
-		}
-		o.mu.Lock()
-		delete(o.cancels, username)
-		if err != nil {
-			if ctx.Err() != nil {
-				p.Status = "idle"
-				p.Progress = 0
-			} else {
-				p.Status = "failed"
-				p.Progress = 100
-			}
-			p.AuthError = errors.Is(err, scraper.ErrAuthExpired)
+	o.mu.Lock()
+	delete(o.cancels, username)
+	if err != nil {
+		if ctx.Err() != nil {
+			p.Status = "idle"
+			p.Progress = 0
 		} else {
-			p.Status = "completed"
+			p.Status = "failed"
 			p.Progress = 100
-			p.AuthError = false
 		}
-		p.UpdatedAt = time.Now()
-		p.mediaCountCachedAt = time.Time{} // force recount on next poll
-		if o.mediaIndex != nil {
-			o.mediaIndex.Invalidate(platform, username)
-		}
-		afterCount := o.countDownloadedMedia(platform, username)
-		newCount := afterCount - beforeCount
-		if newCount < 0 {
-			newCount = 0
-		}
-		p.NewCount = newCount
-		p.mediaCountCached = afterCount
-		p.mediaCountCachedAt = time.Now()
-		SavePersistedSyncInfo(p.Username, p.Status, p.UpdatedAt)
-		o.mu.Unlock()
+		p.AuthError = errors.Is(err, scraper.ErrAuthExpired)
+	} else {
+		p.Status = "completed"
+		p.Progress = 100
+		p.AuthError = false
+	}
+	p.UpdatedAt = time.Now()
+	p.mediaCountCachedAt = time.Time{}
+	if o.mediaIndex != nil {
+		o.mediaIndex.Invalidate(platform, username)
+	}
+	afterCount := o.countDownloadedMedia(platform, username)
+	newCount := afterCount - beforeCount
+	if newCount < 0 {
+		newCount = 0
+	}
+	p.NewCount = newCount
+	p.mediaCountCached = afterCount
+	p.mediaCountCachedAt = time.Now()
+	SavePersistedSyncInfo(p.Username, p.Status, p.UpdatedAt)
+	o.mu.Unlock()
 
-		o.broadcast(SSEEvent{Type: "status", Username: username, Status: p.Status, Progress: p.Progress})
+	o.broadcast(SSEEvent{Type: "status", Username: username, Status: p.Status, Progress: p.Progress})
 
-		if err != nil {
-			if ctx.Err() != nil {
-				o.AppendTaskLog(username, time.Now(), "ERROR", "Scraping task cancelled by user.")
-			} else {
-				o.AppendTaskLog(username, time.Now(), "ERROR", fmt.Sprintf("Scraping task aborted with error: %v", err))
-			}
+	if err != nil {
+		if ctx.Err() != nil {
+			o.AppendTaskLog(username, time.Now(), "ERROR", "Scraping task cancelled by user.")
 		} else {
-			o.AppendTaskLog(username, time.Now(), "INFO", "Scraping completed successfully.")
+			o.AppendTaskLog(username, time.Now(), "ERROR", fmt.Sprintf("Scraping task aborted with error: %v", err))
 		}
-	}()
+	} else {
+		o.AppendTaskLog(username, time.Now(), "INFO", "Scraping completed successfully.")
+	}
 }
 
-// CancelAll cancels all running scrape tasks
+// CancelAll cancels all running and queued scrape tasks.
 func (o *Orchestrator) CancelAll() {
 	o.mu.Lock()
 	for username, cancel := range o.cancels {
 		delete(o.cancels, username)
 		cancel()
-		slog.Debug("Cancelled scrape task", "user", username)
+	}
+	for i := 0; i < len(o.jobCh); i++ {
+		job := <-o.jobCh
+		if p, ok := o.progress[job.username]; ok && p.Status == "queued" {
+			p.Status = "idle"
+			p.Progress = 0
+		}
 	}
 	o.mu.Unlock()
 }
 
-// CancelScrape cancels a single scrape task by username
+// CancelScrape cancels a single scrape task by username, running or queued.
 func (o *Orchestrator) CancelScrape(username string) bool {
 	o.mu.Lock()
 	cancel, ok := o.cancels[username]
 	if ok {
 		delete(o.cancels, username)
 	}
+	if p, exists := o.progress[username]; exists && p.Status == "queued" {
+		p.Status = "idle"
+		p.Progress = 0
+		SavePersistedSyncInfo(username, "idle", time.Now())
+		o.mu.Unlock()
+		o.broadcast(SSEEvent{Type: "status", Username: username, Status: "idle", Progress: 0})
+		return true
+	}
 	o.mu.Unlock()
 	if !ok || cancel == nil {
 		return false
 	}
 	cancel()
-	slog.Info("Cancel signal sent for scraping task", "user", username)
 	return true
 }
 
@@ -521,11 +589,11 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 
 			if timeSinceLastSync >= time.Duration(interval)*time.Hour {
 				slog.Info("Auto-sync interval reached, triggering sync for all accounts", "interval_hours", interval)
-				// Skip accounts that are currently running to avoid spam
+				// Skip accounts that are currently running or queued to avoid spam
 				o.mu.RLock()
 				runningSet := make(map[string]bool)
 				for _, p := range o.progress {
-					if p.Status == "running" {
+					if p.Status == "running" || p.Status == "queued" {
 						runningSet[p.Username] = true
 					}
 				}
@@ -533,11 +601,10 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 
 				for _, acc := range c.Accounts {
 					if runningSet[acc.Username] {
-						slog.Info("Skipping auto-sync, task already running", "user", acc.Username)
+						slog.Debug("Skipping auto-sync, task already running or queued", "user", acc.Username)
 						continue
 					}
 					o.StartScrape(acc.Username, acc.Platform, acc.SaveText)
-					// Stagger launches so we don't hammer every platform at once
 					time.Sleep(10 * time.Second)
 				}
 				o.mu.Lock()
@@ -546,4 +613,18 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// isPostsCorrupted returns true when posts.json has ≤5 entries (old overwrite-bug ate the rest).
+func isPostsCorrupted(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var entries []map[string]interface{}
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return false
+	}
+	// 5 is arbitrary — accounts with ≤5 real posts also resync, harmless since media already exists.
+	return len(entries) <= 5
 }

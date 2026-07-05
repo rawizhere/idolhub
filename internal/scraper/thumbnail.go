@@ -31,7 +31,7 @@ func GenerateThumbnail(srcPath, dstPath string) error {
 		}
 
 		// Run ffmpeg to extract a frame at 0.1s
-		cmd := exec.Command("ffmpeg", "-y", "-ss", "00:00:00.100", "-i", srcPath, "-frames:v", "1", "-vf", "scale=320:-1", "-q:v", "5", dstPath)
+		cmd := exec.Command("ffmpeg", "-y", "-ss", "00:00:00.100", "-i", srcPath, "-frames:v", "1", "-vf", "scale=320:-1", "-q:v", "5", "-update", "1", dstPath)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			slog.Warn("ffmpeg failed to extract video thumbnail", "src", srcPath, "error", err, "output", string(out))
 			return err

@@ -20,6 +20,7 @@ type GalleryPostYoutubeURL struct {
 // GalleryPostData describes a post with media and text
 type GalleryPostData struct {
 	TweetID, TweetIDSuffix, DateLabel, CleanText string
+	Platform                                     string
 	LocalFiles                                   []GalleryPostMediaFile
 	YoutubeURLs                                  []GalleryPostYoutubeURL
 }

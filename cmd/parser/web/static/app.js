@@ -156,7 +156,7 @@ async function pollProgress() {
     console.error("Error loading progress:", err);
   }
   if (sseConnected) return;
-  const isRunning = cachedProgress.some(t => t.status === "running");
+  const isRunning = cachedProgress.some(t => t.status === "running" || t.status === "queued");
   const delay = isRunning ? 1500 : 5000;
   progressPollTimeout = setTimeout(pollProgress, delay);
 }
@@ -293,9 +293,9 @@ async function loadConfig() {
     const res = await fetch("/api/config");
     if (!res.ok) throw new Error("Failed to load configuration");
     const data = await res.json();
-    document.getElementById("concurrency").value = data.concurrency || 5;
     document.getElementById("twitter-auth-token").value = data.twitter_auth_token || "";
     document.getElementById("instagram-session-id").value = data.instagram_session_id || "";
+    document.getElementById("tiktok-cookies").value = data.tiktok_cookies || "";
     document.getElementById("auto-sync-interval").value = data.auto_sync_interval || 0;
   } catch (err) {
     console.error("Config load error:", err);
@@ -306,16 +306,16 @@ async function loadConfig() {
 async function saveSettings() {
   const btn = document.getElementById("btn-save-settings");
   await withLoading(btn, async () => {
-    const concurrency = parseInt(document.getElementById("concurrency").value);
     const twitterAuthToken = document.getElementById("twitter-auth-token").value;
     const instagramSessionID = document.getElementById("instagram-session-id").value;
+    const tiktokCookies = document.getElementById("tiktok-cookies").value;
     const autoSyncInterval = parseInt(document.getElementById("auto-sync-interval").value) || 0;
     try {
       const res = await fetch("/api/config");
       const current = await res.json();
-      current.concurrency = concurrency;
       current.twitter_auth_token = twitterAuthToken;
       current.instagram_session_id = instagramSessionID;
+      current.tiktok_cookies = tiktokCookies;
       current.auto_sync_interval = autoSyncInterval;
       const saveRes = await fetch("/api/config", {
         method: "POST",
@@ -436,11 +436,15 @@ function renderDashboardSidebar() {
     let platformBadgeClass = "bg-pink-50 text-pink-700 border-pink-100";
     if (target.platform === "twitter") {
       platformBadgeClass = "bg-sky-50 text-sky-700 border-sky-100";
+    } else if (target.platform === "tiktok") {
+      platformBadgeClass = "bg-slate-100 text-slate-700 border-slate-300";
     }
 
     let statusDotClass = "bg-slate-350";
     if (target.status === "running") {
       statusDotClass = "bg-indigo-500 animate-pulse";
+    } else if (target.status === "queued") {
+      statusDotClass = "bg-amber-500 animate-pulse";
     } else if (target.status === "completed") {
       statusDotClass = "bg-emerald-500";
     } else if (target.status === "failed") {
@@ -494,14 +498,22 @@ function selectTerminalUser(username) {
   // Platform badge styling
   const platformBadge = document.getElementById("dashboard-platform-badge");
   platformBadge.textContent = target.platform.toUpperCase();
-  if (target.platform === "instagram") {
-    platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-pink-50 text-pink-700 border-pink-100";
-  } else {
-    platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-sky-50 text-sky-700 border-sky-100";
+  switch (target.platform) {
+    case "instagram":
+      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-pink-50 text-pink-700 border-pink-100";
+      break;
+    case "twitter":
+      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-sky-50 text-sky-700 border-sky-100";
+      break;
+    case "tiktok":
+      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-slate-100 text-slate-700 border-slate-300";
+      break;
+    default:
+      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-slate-100 text-slate-600 border-slate-200";
   }
 
   // Set action buttons dynamically
-  const isRunning = target.status === "running";
+  const isRunning = target.status === "running" || target.status === "queued";
   const syncBtn = document.getElementById("dashboard-btn-sync");
   syncBtn.onclick = () => startSync(target.username, true);
   
@@ -601,6 +613,8 @@ function updateDashboardDetails() {
   statusBadge.textContent = target.status ? target.status.toUpperCase() : "IDLE";
   if (target.status === "running") {
     statusBadge.className = "text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border uppercase bg-indigo-50 text-indigo-700 border-indigo-100 animate-pulse";
+  } else if (target.status === "queued") {
+    statusBadge.className = "text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border uppercase bg-amber-50 text-amber-700 border-amber-100";
   } else if (target.status === "completed") {
     statusBadge.className = "text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border uppercase bg-emerald-50 text-emerald-700 border-emerald-100";
   } else if (target.status === "failed") {
@@ -609,7 +623,7 @@ function updateDashboardDetails() {
     statusBadge.className = "text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border uppercase bg-slate-100 text-slate-600 border-slate-200";
   }
 
-  const isRunning = target.status === "running";
+  const isRunning = target.status === "running" || target.status === "queued";
   const syncBtn = document.getElementById("dashboard-btn-sync");
   const cancelBtn = document.getElementById("dashboard-btn-cancel");
   syncBtn.disabled = isRunning;
@@ -944,12 +958,15 @@ window.toggleActionsMenu = toggleActionsMenu;
 function toggleTwitterOptions() {
   const sel = document.getElementById("platform");
   const c = document.getElementById("save-text-container");
-  if (sel && c) {
-    c.classList.remove("hidden");
-    const isTwitter = sel.value === "twitter";
-    document.querySelectorAll("#save-text-container .twitter-only-option").forEach(el => {
-      el.style.display = isTwitter ? "" : "none";
-    });
+  if (!(sel && c)) return;
+  c.classList.remove("hidden");
+  const isTwitter = sel.value === "twitter";
+  document.querySelectorAll("#save-text-container .twitter-only-option").forEach(el => {
+    el.style.display = isTwitter ? "" : "none";
+  });
+  // yt-dlp platforms don't use the text-post options panel at all
+  if (sel.value === "tiktok") {
+    c.classList.add("hidden");
   }
 }
 window.toggleTwitterOptions = toggleTwitterOptions;
@@ -1012,7 +1029,8 @@ window.addEventListener("open-edit-modal", (e) => {
   document.getElementById("edit-download-videos").checked = e.detail.download_videos;
   const ot = document.getElementById("edit-options-container");
   if (ot) {
-    ot.style.display = "flex";
+    const isYtdlp = e.detail.platform === "tiktok";
+    ot.style.display = isYtdlp ? "none" : "flex";
     const isTwitter = e.detail.platform === "twitter";
     document.querySelectorAll("#edit-options-container .edit-twitter-only-option").forEach(el => {
       el.style.display = isTwitter ? "" : "none";
@@ -1560,6 +1578,9 @@ function renderOverviewDashboard() {
     if (target.status === "running") {
       statusText = "RUNNING";
       statusBadgeClass = "bg-indigo-50 text-indigo-700 border-indigo-100 animate-pulse";
+    } else if (target.status === "queued") {
+      statusText = "QUEUED";
+      statusBadgeClass = "bg-amber-50 text-amber-700 border-amber-100";
     } else if (target.status === "completed") {
       statusText = "DONE";
       statusBadgeClass = "bg-emerald-50 text-emerald-700 border-emerald-100";
@@ -1574,13 +1595,15 @@ function renderOverviewDashboard() {
     let platformBadgeClass = "bg-pink-50 text-pink-700 border-pink-100";
     if (target.platform === "twitter") {
       platformBadgeClass = "bg-sky-50 text-sky-700 border-sky-100";
+    } else if (target.platform === "tiktok") {
+      platformBadgeClass = "bg-slate-100 text-slate-700 border-slate-300";
     }
 
     const lastSyncStr = target.updated_at && target.updated_at !== "0001-01-01T00:00:00Z" 
       ? new Date(target.updated_at).toLocaleString() 
       : "Never";
 
-    const isRunning = target.status === "running";
+    const isRunning = target.status === "running" || target.status === "queued";
     const syncActionBtn = isRunning
       ? `<button disabled class="bg-slate-50 text-slate-400 border border-slate-100 text-[10px] font-bold px-2 py-1 rounded-md flex items-center gap-1.5 cursor-not-allowed">
            ${refreshSvgSpin} Syncing
@@ -1819,31 +1842,7 @@ function updateHashtagFilterButtonLabel() {
 
 window.getFileHashtags = getFileHashtags;
 
-function getYoutubeId(url) {
-  if (!url) return null;
-  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=|shorts\/)([^#\&\?]*).*/;
-  const match = url.match(regExp);
-  return (match && match[2].length === 11) ? match[2] : null;
-}
 
-function embedYoutubeInline(el, videoId) {
-  el.outerHTML = `<div class="w-full max-w-md aspect-video rounded-xl overflow-hidden border border-slate-200 shadow-sm mt-2">
-    <iframe class="w-full h-full" src="https://www.youtube.com/embed/${videoId}?autoplay=1" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
-  </div>`;
-}
-
-window.getYoutubeId = getYoutubeId;
-window.embedYoutubeInline = embedYoutubeInline;
-
-// ==================== Delegated handlers for server-rendered HTML ====================
-
-document.addEventListener("click", (e) => {
-  const yt = e.target.closest(".youtube-preview");
-  if (yt && yt.dataset.youtubeId) {
-    e.preventDefault();
-    embedYoutubeInline(yt, yt.dataset.youtubeId);
-  }
-});
 
 document.addEventListener("error", (e) => {
   if (e.target && e.target.tagName === "IMG" && e.target.dataset.fallbackSrc) {

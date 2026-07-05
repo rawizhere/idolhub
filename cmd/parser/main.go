@@ -865,6 +865,7 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 			TweetIDSuffix: tweetIDSuffix,
 			DateLabel:     dateLabel,
 			CleanText:     cleanText,
+			Platform:      gp.Platform,
 			LocalFiles:    localFiles,
 			YoutubeURLs:   youtubeURLs,
 		})

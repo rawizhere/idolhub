@@ -81,6 +81,7 @@
           <button data-platform="all" onclick="setPlatformFilter('all')" class="chip text-[10px] font-bold uppercase px-2 py-1 rounded-md border transition-all cursor-pointer bg-indigo-600 text-white border-indigo-200">All</button>
           <button data-platform="instagram" onclick="setPlatformFilter('instagram')" class="chip text-[10px] font-bold uppercase px-2 py-1 rounded-md border transition-all cursor-pointer bg-slate-100 text-slate-600 border-slate-200">IG</button>
           <button data-platform="twitter" onclick="setPlatformFilter('twitter')" class="chip text-[10px] font-bold uppercase px-2 py-1 rounded-md border transition-all cursor-pointer bg-slate-100 text-slate-600 border-slate-200">X</button>
+          <button data-platform="tiktok" onclick="setPlatformFilter('tiktok')" class="chip text-[10px] font-bold uppercase px-2 py-1 rounded-md border transition-all cursor-pointer bg-slate-100 text-slate-600 border-slate-200">TT</button>
         </div>
       </div>
 
@@ -121,6 +122,7 @@
               >
                 <option value="instagram">Instagram</option>
                 <option value="twitter">Twitter / X</option>
+                <option value="tiktok">TikTok</option>
               </select>
             </div>
 
@@ -486,10 +488,6 @@
 
       <form id="settings-form" onsubmit="return false" class="flex flex-col gap-4">
         <div class="flex flex-col gap-1">
-          <label for="concurrency" class="text-[10px] font-bold text-slate-500 uppercase">Concurrency</label>
-          <input type="number" id="concurrency" min="1" max="10" required class="w-full bg-white border border-slate-200 rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-indigo-500">
-        </div>
-        <div class="flex flex-col gap-1">
           <label for="twitter-auth-token" class="text-[10px] font-bold text-slate-500 uppercase">Twitter Auth Token</label>
           <input type="text" id="twitter-auth-token" placeholder="Paste auth_token cookie" class="w-full bg-white border border-slate-200 rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-indigo-500">
         </div>
@@ -497,6 +495,11 @@
           <label for="instagram-session-id" class="text-[10px] font-bold text-slate-500 uppercase">Instagram Session ID</label>
           <input type="text" id="instagram-session-id" placeholder="Paste sessionid cookie" class="w-full bg-white border border-slate-200 rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-indigo-500">
           <p class="text-[10px] text-slate-400 leading-relaxed">Log in to instagram.com in your browser, open DevTools &rarr; Application &rarr; Cookies &rarr; copy the <code class="font-mono text-slate-600">sessionid</code> value. Pulls full-resolution media.</p>
+        </div>
+        <div class="flex flex-col gap-1.5 border-t border-slate-200 pt-2.5">
+          <label for="tiktok-cookies" class="text-[10px] font-bold text-slate-500 uppercase">TikTok Cookies (optional)</label>
+          <textarea id="tiktok-cookies" rows="3" placeholder="Cookie-Editor → Export → Netscape → paste here" class="w-full bg-white border border-slate-200 rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-indigo-500 font-mono resize-y"></textarea>
+          <p class="text-[10px] text-slate-400 leading-relaxed">Optional. TikTok works without cookies; provide them to access gated content. Use a Cookie-Editor browser extension, export as <strong>Netscape HTTP Cookie File</strong> and paste the full content here.</p>
         </div>
         <div class="flex flex-col gap-1">
           <label for="auto-sync-interval" class="text-[10px] font-bold text-slate-500 uppercase">Auto-Sync Interval (hours, 0 to disable)</label>
@@ -530,9 +533,10 @@
 
         <div class="flex flex-col gap-1">
           <label for="edit-platform" class="text-[10px] font-bold text-slate-500 uppercase">Platform</label>
-          <select id="edit-platform" onchange="const isTwitter = this.value === 'twitter'; document.querySelectorAll('#edit-options-container .edit-twitter-only-option').forEach(el => el.style.display = isTwitter ? '' : 'none')" class="w-full bg-white border border-slate-200 rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-indigo-500 transition-all">
+          <select id="edit-platform" onchange="const isYtdlp = this.value === 'tiktok'; document.querySelectorAll('#edit-options-container .edit-twitter-only-option').forEach(el => el.style.display = this.value === 'twitter' && !isYtdlp ? '' : 'none'); document.getElementById('edit-options-container').style.display = isYtdlp ? 'none' : ''" class="w-full bg-white border border-slate-200 rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-indigo-500 transition-all">
             <option value="instagram">Instagram</option>
             <option value="twitter">Twitter / X</option>
+            <option value="tiktok">TikTok</option>
           </select>
         </div>
 

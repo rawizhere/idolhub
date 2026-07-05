@@ -33,6 +33,7 @@ FROM alpine:3.20
 RUN apk add --no-cache \
     chromium \
     ffmpeg \
+    deno \
     ca-certificates \
     tzdata \
     curl \

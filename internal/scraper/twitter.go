@@ -1,7 +1,6 @@
 package scraper
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -76,7 +75,7 @@ func ScrapeTwitterUser(ctx context.Context, username string, saveText bool, skip
 		return err
 	}
 
-	numWorkers := cmp.Or(c.Concurrency, 5)
+	numWorkers := 5
 
 	outputDir := filepath.Join("downloads", "twitter", username)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -155,8 +154,7 @@ func ScrapeTwitterUser(ctx context.Context, username string, saveText bool, skip
 			slog.Debug("Tweet not found in seenTweets", "tweet_id", tweetID)
 			return
 		}
-		// Only download media from the target user's own tweets
-		// Recursively search for screen_name in tweet object
+		// Only download media from the target user's own tweets; search recursively for screen_name.
 		var author string
 		var searchScreenName func(interface{}) string
 		searchScreenName = func(node interface{}) string {
@@ -576,8 +574,6 @@ func findTweets(node interface{}, callback func(tweet map[string]interface{})) {
 		}
 	}
 }
-
-// ponytail: Twitter/X API changed - may need to update parsing or use different endpoint
 
 func downloadTwitterImage(ctx context.Context, item TwitterDownloadItem, outputDir string, client *http.Client, username string) bool {
 	parsedURL, err := url.Parse(item.URL)

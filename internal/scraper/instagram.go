@@ -94,7 +94,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		return fmt.Errorf("instagram session ID is not set")
 	}
 
-	numWorkers := cmp.Or(c.Concurrency, 5)
+	numWorkers := 5
 
 	slog.Info("Scraping Instagram target user via direct API", "user", username, "platform", "instagram", "last_sync", lastSync)
 
@@ -378,12 +378,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 
 	if saveText && len(postsJSON) > 0 {
 		postsPath := filepath.Join("downloads", "instagram", username, "posts.json")
-		data, err := json.MarshalIndent(postsJSON, "", "  ")
-		if err == nil {
-			if err := os.WriteFile(postsPath, data, 0644); err != nil {
-				slog.Warn("Failed to write Instagram posts.json", "user", username, "error", err)
-			}
-		}
+		mergePostsJSON(postsPath, postsJSON)
 	}
 
 	slog.Info("Instagram direct sync progress summary", "user", username, "platform", "instagram", "downloaded", downloadedCount, "skipped_existing", skippedCount)

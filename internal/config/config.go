@@ -35,9 +35,9 @@ func (a Account) ShouldDownloadVideos() bool {
 
 type Config struct {
 	Accounts           []Account `json:"accounts"`
-	Concurrency        int       `json:"concurrency"`
 	TwitterAuthToken   string    `json:"twitter_auth_token"`
 	InstagramSessionID string    `json:"instagram_session_id"`
+	TikTokCookies      string    `json:"tiktok_cookies"`
 	AutoSyncInterval   int       `json:"auto_sync_interval"` // In hours
 }
 
@@ -60,8 +60,7 @@ func LoadConfig() error {
 	defer configMu.Unlock()
 
 	globalConfig = Config{
-		Accounts:    []Account{},
-		Concurrency: 5,
+		Accounts: []Account{},
 	}
 
 	data, err := os.ReadFile(configPath)
@@ -85,6 +84,9 @@ func LoadConfig() error {
 	}
 	if globalConfig.InstagramSessionID == "" {
 		globalConfig.InstagramSessionID = os.Getenv("INSTAGRAM_SESSION_ID")
+	}
+	if globalConfig.TikTokCookies == "" {
+		globalConfig.TikTokCookies = os.Getenv("TIKTOK_COOKIES")
 	}
 
 	return nil
