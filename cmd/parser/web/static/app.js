@@ -59,16 +59,16 @@ function toast(message, type = "info", timeout = 3800) {
     info: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
   };
   const tones = {
-    success: { bg: "bg-emerald-50", text: "text-emerald-800", border: "border-emerald-200", iconColor: "text-emerald-500" },
-    error: { bg: "bg-rose-50", text: "text-rose-800", border: "border-rose-200", iconColor: "text-rose-500" },
-    info: { bg: "bg-white", text: "text-slate-700", border: "border-slate-200", iconColor: "text-indigo-500" },
+    success: { bg: "bg-emerald-900/30", text: "text-emerald-300", border: "border-emerald-800", iconColor: "text-emerald-500" },
+    error: { bg: "bg-rose-900/30", text: "text-rose-300", border: "border-rose-800", iconColor: "text-rose-500" },
+    info: { bg: "bg-white dark:bg-zinc-900", text: "text-slate-300", border: "border-slate-200 dark:border-zinc-800", iconColor: "text-indigo-500" },
   };
   const t = tones[type] || tones.info;
   const iconPath = svgPaths[type] || svgPaths.info;
   const closeSvg = '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>';
   const el = document.createElement("div");
   el.className = `pointer-events-auto flex items-start gap-2.5 ${t.bg} ${t.text} border ${t.border} shadow-lg rounded-xl pl-3 pr-3.5 py-2.5 max-w-sm text-xs font-medium translate-x-4 opacity-0 transition-all duration-200`;
-  el.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 ${t.iconColor} mt-px flex-shrink-0">${iconPath}</svg><span class="flex-1 leading-relaxed">${escapeHtml(message)}</span><button class="text-slate-400 hover:text-slate-700 cursor-pointer flex-shrink-0 -mt-0.5" aria-label="Dismiss"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5">${closeSvg}</svg></button>`;
+  el.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 ${t.iconColor} mt-px flex-shrink-0">${iconPath}</svg><span class="flex-1 leading-relaxed">${escapeHtml(message)}</span><button class="text-slate-500 dark:text-zinc-400 hover:text-slate-300 cursor-pointer flex-shrink-0 -mt-0.5" aria-label="Dismiss"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5">${closeSvg}</svg></button>`;
   container.appendChild(el);
   requestAnimationFrame(() => {
     el.classList.remove("translate-x-4", "opacity-0");
@@ -86,26 +86,26 @@ function confirmDialog({ title = "Confirm", message = "", confirmText = "Confirm
     const mount = document.getElementById("confirm-mount");
     if (!mount) { resolve(window.confirm(message)); return; }
     const toneClass = tone === "danger"
-      ? "bg-rose-600 hover:bg-rose-700 text-white"
-      : "bg-indigo-600 hover:bg-indigo-700 text-white";
+      ? "bg-rose-700 hover:bg-rose-600 text-white"
+      : "bg-slate-100 dark:bg-zinc-8000 hover:bg-slate-100 dark:bg-zinc-8000 text-white";
     const headerIcon = tone === "danger"
       ? '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>'
       : '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>';
     const overlay = document.createElement("div");
     overlay.className = "fixed inset-0 z-[150] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 opacity-0 transition-opacity duration-150";
     overlay.innerHTML = `
-      <div class="bg-white border border-slate-200 rounded-2xl p-6 w-full max-w-sm shadow-xl flex flex-col gap-4 scale-95 transition-transform duration-150">
+      <div class="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-sm shadow-xl flex flex-col gap-4 scale-95 transition-transform duration-150">
         <div class="flex items-start gap-3">
-          <div class="p-2 ${tone === "danger" ? "bg-rose-50 text-rose-600" : "bg-indigo-50 text-indigo-600"} rounded-lg flex-shrink-0">
+          <div class="p-2 ${tone === "danger" ? "bg-rose-900/30 text-rose-400" : "bg-slate-100 dark:bg-zinc-800 text-indigo-400"} rounded-lg flex-shrink-0">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4">${headerIcon}</svg>
           </div>
           <div class="flex-1 min-w-0">
-            <h3 class="text-sm font-bold text-slate-800">${escapeHtml(title)}</h3>
-            <p class="text-xs text-slate-500 mt-1 leading-relaxed">${escapeHtml(message)}</p>
+            <h3 class="text-sm font-bold text-slate-900 dark:text-zinc-100">${escapeHtml(title)}</h3>
+            <p class="text-xs text-slate-500 dark:text-zinc-400 mt-1 leading-relaxed">${escapeHtml(message)}</p>
           </div>
         </div>
         <div class="flex items-center justify-end gap-2">
-          <button data-act="cancel" class="text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 border border-slate-200 px-3.5 py-2 rounded-lg transition-all cursor-pointer">${escapeHtml(cancelText)}</button>
+          <button data-act="cancel" class="text-xs font-semibold text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:text-zinc-100 bg-slate-50 dark:bg-zinc-950 hover:bg-slate-800 border border-slate-200 dark:border-zinc-800 px-3.5 py-2 rounded-lg transition-all cursor-pointer">${escapeHtml(cancelText)}</button>
           <button data-act="confirm" class="text-xs font-semibold px-3.5 py-2 rounded-lg transition-all cursor-pointer ${toneClass}">${escapeHtml(confirmText)}</button>
         </div>
       </div>`;
@@ -258,6 +258,11 @@ document.addEventListener("DOMContentLoaded", () => {
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       let closedAny = false;
+      const cmdPalette = document.getElementById("cmd-palette-modal");
+      if (cmdPalette && cmdPalette.style.display === "flex") {
+        cmdPalette.style.display = "none";
+        closedAny = true;
+      }
       if (pswpGrid && pswpGrid.pswp) { pswpGrid.pswp.close(); closedAny = true; }
       if (pswpPosts && pswpPosts.pswp) { pswpPosts.pswp.close(); closedAny = true; }
       if (closedAny) {
@@ -267,8 +272,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
     if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
-      const t = document.getElementById("target-search-input");
-      if (t) { e.preventDefault(); t.focus(); openSidebar(); }
+      e.preventDefault();
+      toggleCmdPalette();
       return;
     }
     const tag = (e.target.tagName || "").toLowerCase();
@@ -376,13 +381,14 @@ function updateSidebarVisibility() {
 function goToOverview() {
   activeTerminalUser = null;
   document.getElementById("dashboard-target-header").style.display = "none";
+  const aw = document.getElementById("activity-progress-widget"); if(aw) aw.style.display = "none"; const ac = document.getElementById("dashboard-console"); if(ac) ac.style.display = "none";
   document.getElementById("dashboard-gallery-card").style.display = "none";
   document.getElementById("dashboard-empty").style.display = "flex";
   renderDashboardSidebar();
   renderOverviewDashboard();
   updateSidebarVisibility();
   const terminal = document.getElementById("terminal-body");
-  if (terminal) terminal.innerHTML = `<div class="text-slate-500">[SYSTEM] Select a target to view live logs.</div>`;
+  if (terminal) terminal.innerHTML = `<div class="text-slate-500 dark:text-zinc-400">[SYSTEM] Select a target to view live logs.</div>`;
 }
 window.goToOverview = goToOverview;
 
@@ -400,12 +406,12 @@ function setPlatformFilter(platform) {
   targetPlatformFilter = platform;
   document.querySelectorAll("#target-platform-chips [data-platform]").forEach(function (c) {
     const on = c.dataset.platform === platform;
-    c.classList.toggle("bg-indigo-600", on);
+    c.classList.toggle("bg-slate-100 dark:bg-zinc-8000", on);
     c.classList.toggle("text-white", on);
-    c.classList.toggle("border-indigo-200", on);
-    c.classList.toggle("bg-slate-100", !on);
-    c.classList.toggle("text-slate-600", !on);
-    c.classList.toggle("border-slate-200", !on);
+    c.classList.toggle("border-indigo-500/30", on);
+    c.classList.toggle("bg-slate-100 dark:bg-zinc-800", !on);
+    c.classList.toggle("text-slate-500 dark:text-zinc-400", !on);
+    c.classList.toggle("border-slate-200 dark:border-zinc-800", !on);
   });
   renderDashboardSidebar();
 }
@@ -420,7 +426,7 @@ function renderDashboardSidebar() {
     return true;
   });
   if (filtered.length === 0) {
-    container.innerHTML = `<p class="text-xs text-slate-400 py-3 text-center">${cachedProgress.length === 0 ? "No targets configured" : "No targets match"}</p>`;
+    container.innerHTML = `<p class="text-xs text-slate-500 dark:text-zinc-400 py-3 text-center">${cachedProgress.length === 0 ? "No targets configured" : "No targets match"}</p>`;
     return;
   }
   
@@ -430,25 +436,25 @@ function renderDashboardSidebar() {
     const mediaCount = target.media_count || 0;
     
     const cardBorderClass = isActive 
-      ? "border-indigo-400 bg-indigo-50/40 text-indigo-900" 
-      : "border-slate-200 bg-white hover:bg-slate-50 text-slate-700";
+      ? "border-indigo-400 bg-indigo-900/20 text-indigo-400" 
+      : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:bg-slate-100 dark:bg-zinc-800 text-slate-300";
 
-    let platformBadgeClass = "bg-pink-50 text-pink-700 border-pink-100";
+    let platformBadgeClass = "bg-pink-50 dark:bg-pink-900/30 text-pink-700 dark:text-pink-400 border-pink-200 dark:border-pink-800";
     if (target.platform === "twitter") {
-      platformBadgeClass = "bg-sky-50 text-sky-700 border-sky-100";
+      platformBadgeClass = "bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800";
     } else if (target.platform === "tiktok") {
-      platformBadgeClass = "bg-slate-100 text-slate-700 border-slate-300";
+      platformBadgeClass = "bg-slate-100 dark:bg-zinc-800 text-slate-300 border-slate-300";
     }
 
     let statusDotClass = "bg-slate-350";
     if (target.status === "running") {
-      statusDotClass = "bg-indigo-500 animate-pulse";
+      statusDotClass = "bg-slate-100 dark:bg-zinc-8000 animate-pulse";
     } else if (target.status === "queued") {
       statusDotClass = "bg-amber-500 animate-pulse";
     } else if (target.status === "completed") {
       statusDotClass = "bg-emerald-500";
     } else if (target.status === "failed") {
-      statusDotClass = "bg-rose-500";
+      statusDotClass = "bg-rose-900/300";
     }
 
     const authErrorDot = target.auth_error
@@ -468,9 +474,9 @@ function renderDashboardSidebar() {
             <span class="text-xs font-bold tracking-tight truncate">@${target.username}</span>
             ${authErrorDot}
           </div>
-          ${lastSync ? `<span class="text-[10px] text-slate-400">synced ${lastSync}</span>` : ""}
+          ${lastSync ? `<span class="text-[10px] text-slate-500 dark:text-zinc-400">synced ${lastSync}</span>` : ""}
         </div>
-        <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full border border-slate-200 font-semibold flex-shrink-0 whitespace-nowrap">${mediaCount} files</span>
+        <span class="text-[10px] bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 px-2 py-0.5 rounded-full border border-slate-200 dark:border-zinc-800 font-semibold flex-shrink-0 whitespace-nowrap">${mediaCount} files</span>
       </div>
     `;
   });
@@ -490,6 +496,7 @@ function selectTerminalUser(username) {
   // Show details panels
   document.getElementById("dashboard-empty").style.display = "none";
   document.getElementById("dashboard-target-header").style.display = "flex";
+  const aw = document.getElementById("activity-progress-widget"); if(aw) aw.style.display = "flex";
   document.getElementById("dashboard-gallery-card").style.display = "flex";
 
   // Username and stats
@@ -500,16 +507,16 @@ function selectTerminalUser(username) {
   platformBadge.textContent = target.platform.toUpperCase();
   switch (target.platform) {
     case "instagram":
-      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-pink-50 text-pink-700 border-pink-100";
+      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-pink-50 dark:bg-pink-900/30 text-pink-700 dark:text-pink-400 border-pink-200 dark:border-pink-800";
       break;
     case "twitter":
-      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-sky-50 text-sky-700 border-sky-100";
+      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800";
       break;
     case "tiktok":
-      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-slate-100 text-slate-700 border-slate-300";
+      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-slate-100 dark:bg-zinc-800 text-slate-300 border-slate-300";
       break;
     default:
-      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-slate-100 text-slate-600 border-slate-200";
+      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 border-slate-200 dark:border-zinc-800";
   }
 
   // Set action buttons dynamically
@@ -549,6 +556,7 @@ function selectTerminalUser(username) {
     deleteAccount(target.username);
     activeTerminalUser = null;
     document.getElementById("dashboard-target-header").style.display = "none";
+  const aw = document.getElementById("activity-progress-widget"); if(aw) aw.style.display = "none"; const ac = document.getElementById("dashboard-console"); if(ac) ac.style.display = "none";
     document.getElementById("dashboard-gallery-card").style.display = "none";
     document.getElementById("dashboard-empty").style.display = "flex";
     renderDashboardSidebar();
@@ -587,6 +595,7 @@ window.selectTerminalUser = selectTerminalUser;
 function updateDashboardDetails() {
   if (!activeTerminalUser) {
     document.getElementById("dashboard-target-header").style.display = "none";
+  const aw = document.getElementById("activity-progress-widget"); if(aw) aw.style.display = "none"; const ac = document.getElementById("dashboard-console"); if(ac) ac.style.display = "none";
     document.getElementById("dashboard-gallery-card").style.display = "none";
     document.getElementById("dashboard-empty").style.display = "flex";
     updateSidebarVisibility();
@@ -597,6 +606,7 @@ function updateDashboardDetails() {
   if (!target) {
     activeTerminalUser = null;
     document.getElementById("dashboard-target-header").style.display = "none";
+  const aw = document.getElementById("activity-progress-widget"); if(aw) aw.style.display = "none"; const ac = document.getElementById("dashboard-console"); if(ac) ac.style.display = "none";
     document.getElementById("dashboard-gallery-card").style.display = "none";
     document.getElementById("dashboard-empty").style.display = "flex";
     updateSidebarVisibility();
@@ -604,7 +614,7 @@ function updateDashboardDetails() {
     return;
   }
 
-  document.getElementById("dashboard-file-count").innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 text-slate-500 inline-block align-text-bottom"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5" rx="1"/><line x1="10" y1="13" x2="14" y2="13"/></svg> ${target.media_count || 0} files`;
+  document.getElementById("dashboard-file-count").innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 text-slate-500 dark:text-zinc-400 inline-block align-text-bottom"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5" rx="1"/><line x1="10" y1="13" x2="14" y2="13"/></svg> ${target.media_count || 0} files`;
   
   const percent = target.progress || 0;
   document.getElementById("dashboard-progress-bar").style.width = `${percent}%`;
@@ -612,15 +622,15 @@ function updateDashboardDetails() {
   const statusBadge = document.getElementById("dashboard-status-badge");
   statusBadge.textContent = target.status ? target.status.toUpperCase() : "IDLE";
   if (target.status === "running") {
-    statusBadge.className = "text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border uppercase bg-indigo-50 text-indigo-700 border-indigo-100 animate-pulse";
+    statusBadge.className = "text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border uppercase bg-slate-100 dark:bg-zinc-800 text-indigo-700 border-indigo-500/30 animate-pulse";
   } else if (target.status === "queued") {
-    statusBadge.className = "text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border uppercase bg-amber-50 text-amber-700 border-amber-100";
+    statusBadge.className = "text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border uppercase bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800";
   } else if (target.status === "completed") {
-    statusBadge.className = "text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border uppercase bg-emerald-50 text-emerald-700 border-emerald-100";
+    statusBadge.className = "text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border uppercase bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800";
   } else if (target.status === "failed") {
-    statusBadge.className = "text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border uppercase bg-rose-50 text-rose-700 border-rose-100";
+    statusBadge.className = "text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border uppercase bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-800";
   } else {
-    statusBadge.className = "text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border uppercase bg-slate-100 text-slate-600 border-slate-200";
+    statusBadge.className = "text-[10px] font-bold tracking-wider px-2 py-0.5 rounded border uppercase bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 border-slate-200 dark:border-zinc-800";
   }
 
   const isRunning = target.status === "running" || target.status === "queued";
@@ -700,11 +710,11 @@ function setTerminalLevel(level) {
   terminalLevel = level;
   document.querySelectorAll(".terminal-filter-btn").forEach(btn => {
     if (btn.dataset.level === level) {
-      btn.classList.add("bg-white", "text-indigo-600", "shadow-xs");
-      btn.classList.remove("text-slate-500", "hover:text-slate-800");
+      btn.classList.add("bg-white dark:bg-zinc-900", "text-indigo-400", "shadow-xs");
+      btn.classList.remove("text-slate-500 dark:text-zinc-400", "hover:text-slate-900 dark:text-zinc-100");
     } else {
-      btn.classList.remove("bg-white", "text-indigo-600", "shadow-xs");
-      btn.classList.add("text-slate-500", "hover:text-slate-800");
+      btn.classList.remove("bg-white dark:bg-zinc-900", "text-indigo-400", "shadow-xs");
+      btn.classList.add("text-slate-500 dark:text-zinc-400", "hover:text-slate-900 dark:text-zinc-100");
     }
   });
   updateTerminal();
@@ -726,7 +736,7 @@ window.copyTerminalLogs = copyTerminalLogs;
 function clearTerminalLogs() {
   const terminal = document.getElementById("terminal-body");
   if (!terminal) return;
-  terminal.innerHTML = `<div class="text-slate-500">[SYSTEM] Console cleared.</div>`;
+  terminal.innerHTML = `<div class="text-slate-500 dark:text-zinc-400">[SYSTEM] Console cleared.</div>`;
   terminal.dataset.count = "0";
   const c = document.getElementById("dashboard-console");
   if (c) c.style.display = "block";
@@ -776,7 +786,7 @@ async function addAccount() {
       newFilters = [];
       renderNewFilters();
       toast(`Added @${username} (${platform}).`, "success");
-      toggleAddTarget();
+      toggleCmdPalette();
       loadProgress();
     } catch (err) {
       console.error(err);
@@ -924,14 +934,14 @@ window.syncAll = syncAll;
 
 // ==================== Add Target / Settings / New Filters ====================
 
-function toggleAddTarget() {
-  const p = document.getElementById("add-target-panel");
+function toggleCmdPalette() {
+  const p = document.getElementById("cmd-palette-modal");
   if (p) {
-    p.classList.toggle("hidden");
+    p.style.display = (p.style.display === "none" || !p.style.display) ? "flex" : "none";
     toggleTwitterOptions();
   }
 }
-window.toggleAddTarget = toggleAddTarget;
+window.toggleCmdPalette = toggleCmdPalette;
 
 function openSidebar() {
   const sb = document.getElementById("sidebar-container");
@@ -1002,7 +1012,7 @@ function renderNewFilters() {
   if (noLabel) noLabel.style.display = "none";
   newFilters.forEach((tag, idx) => {
     const chip = document.createElement("span");
-    chip.className = "filter-chip inline-flex items-center gap-1 bg-indigo-50 border border-indigo-100 text-indigo-700 text-[10px] font-semibold px-2 py-0.5 rounded-full";
+    chip.className = "filter-chip inline-flex items-center gap-1 bg-slate-100 dark:bg-zinc-800 border border-indigo-500/30 text-indigo-700 text-[10px] font-semibold px-2 py-0.5 rounded-full";
     chip.setAttribute("data-filter", tag);
     chip.innerHTML = `<span>${escapeHtml(tag)}</span><button type="button" class="hover:text-indigo-950 font-bold cursor-pointer" onclick="removeNewFilter(${idx})">&times;</button>`;
     list.appendChild(chip);
@@ -1084,7 +1094,7 @@ function renderEditFilters() {
   if (noLabel) noLabel.style.display = "none";
   editConfig.filters.forEach((tag, idx) => {
     const chip = document.createElement("span");
-    chip.className = "edit-filter-chip inline-flex items-center gap-1 bg-indigo-50 border border-indigo-100 text-indigo-700 text-[10px] font-semibold px-2 py-0.5 rounded-full";
+    chip.className = "edit-filter-chip inline-flex items-center gap-1 bg-slate-100 dark:bg-zinc-800 border border-indigo-500/30 text-indigo-700 text-[10px] font-semibold px-2 py-0.5 rounded-full";
     chip.setAttribute("data-filter", tag);
     chip.innerHTML = `<span>${escapeHtml(tag)}</span><button type="button" class="hover:text-indigo-950 font-bold cursor-pointer" onclick="removeEditFilter(${idx})">&times;</button>`;
     list.appendChild(chip);
@@ -1127,7 +1137,7 @@ let gridSearchQuery = "";
 let postsSearchQuery = "";
 let postsSortAsc = false;
 
-let galleryEmptySvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-10 h-10 opacity-30 text-slate-400"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3"/><path d="m3.13 3.13 17.74 17.74"/><path d="M10.5 5.5 12 3l2 3h4a2 2 0 0 1 2 2v9.34"/></svg>';
+let galleryEmptySvg = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-10 h-10 opacity-30 text-slate-500 dark:text-zinc-400"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3"/><path d="m3.13 3.13 17.74 17.74"/><path d="M10.5 5.5 12 3l2 3h4a2 2 0 0 1 2 2v9.34"/></svg>';
 
 // --- PhotoSwipe shared helpers ---
 
@@ -1344,7 +1354,7 @@ async function selectGalleryTarget(platform, username) {
     showGalleryState("empty");
     document.getElementById("gallery-empty").innerHTML = `
       ${galleryEmptySvg}
-      <p class="text-xs text-slate-400 font-medium">No media files found in downloads</p>
+      <p class="text-xs text-slate-500 dark:text-zinc-400 font-medium">No media files found in downloads</p>
     `;
     return;
   }
@@ -1389,7 +1399,7 @@ async function renderGalleryGrid() {
     initPhotoSwipeGrid();
   } catch (err) {
     console.error("Grid render error:", err);
-    container.innerHTML = `<div class="col-span-full text-center text-xs font-semibold text-slate-400 py-12">Failed to load gallery</div>`;
+    container.innerHTML = `<div class="col-span-full text-center text-xs font-semibold text-slate-500 dark:text-zinc-400 py-12">Failed to load gallery</div>`;
   }
 }
 
@@ -1409,7 +1419,7 @@ async function renderGalleryPosts() {
     initPhotoSwipePosts();
   } catch (err) {
     console.error("Posts render error:", err);
-    container.innerHTML = `<div class="text-center text-xs font-semibold text-slate-400 py-12">Failed to load posts</div>`;
+    container.innerHTML = `<div class="text-center text-xs font-semibold text-slate-500 dark:text-zinc-400 py-12">Failed to load posts</div>`;
   }
 }
 
@@ -1455,10 +1465,10 @@ function setActiveBtn(selector, attr, value) {
   document.querySelectorAll(selector).forEach(el => {
     const match = el.getAttribute(attr) === value;
     el.classList.toggle("active", match);
-    el.classList.toggle("bg-white", match);
-    el.classList.toggle("text-indigo-600", match);
+    el.classList.toggle("bg-white dark:bg-zinc-900", match);
+    el.classList.toggle("text-indigo-400", match);
     el.classList.toggle("shadow-xs", match);
-    el.classList.toggle("text-slate-500", !match);
+    el.classList.toggle("text-slate-500 dark:text-zinc-400", !match);
   });
 }
 
@@ -1520,12 +1530,12 @@ function updateAutoUpdateStatus() {
   if (!badge || !dot || !text) return;
 
   if (autoSyncInterval > 0) {
-    badge.className = "flex items-center gap-2 bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-full border border-emerald-100 transition-all duration-300";
+    badge.className = "flex items-center gap-2 bg-emerald-900/30 text-emerald-400 px-3 py-1.5 rounded-full border border-emerald-800 transition-all duration-300";
     dot.className = "w-2 h-2 bg-emerald-500 rounded-full animate-pulse";
     const cd = computeCountdown();
     text.textContent = cd === null ? `every ${autoSyncInterval}h` : (cd.due ? "syncing…" : `next in ${cd.hours > 0 ? cd.hours + "h " : ""}${cd.minutes}m`);
   } else {
-    badge.className = "flex items-center gap-2 bg-slate-100 text-slate-500 px-3 py-1.5 rounded-full border border-slate-200 transition-all duration-300";
+    badge.className = "flex items-center gap-2 bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 px-3 py-1.5 rounded-full border border-slate-200 dark:border-zinc-800 transition-all duration-300";
     dot.className = "w-2 h-2 bg-slate-400 rounded-full";
     text.textContent = "Autoupdate: Off";
   }
@@ -1542,7 +1552,7 @@ function renderOverviewDashboard() {
 
   if (cachedProgress.length === 0) {
     container.innerHTML = `
-      <div class="flex-grow flex flex-col items-center justify-center gap-3 text-slate-400 text-xs font-medium">
+      <div class="flex-grow flex flex-col items-center justify-center gap-3 text-slate-500 dark:text-zinc-400 text-xs font-medium">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-10 h-10 opacity-30"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <p>No target accounts configured. Add one from the sidebar to begin syncing.</p>
       </div>
@@ -1577,66 +1587,61 @@ function renderOverviewDashboard() {
     let statusBadgeClass = "";
     if (target.status === "running") {
       statusText = "RUNNING";
-      statusBadgeClass = "bg-indigo-50 text-indigo-700 border-indigo-100 animate-pulse";
+      statusBadgeClass = "bg-slate-100 dark:bg-zinc-800 text-indigo-700 border-indigo-500/30 animate-pulse";
     } else if (target.status === "queued") {
       statusText = "QUEUED";
-      statusBadgeClass = "bg-amber-50 text-amber-700 border-amber-100";
+      statusBadgeClass = "bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800";
     } else if (target.status === "completed") {
       statusText = "DONE";
-      statusBadgeClass = "bg-emerald-50 text-emerald-700 border-emerald-100";
+      statusBadgeClass = "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800";
     } else if (target.status === "failed") {
       statusText = "FAILED";
-      statusBadgeClass = "bg-rose-50 text-rose-700 border-rose-100";
+      statusBadgeClass = "bg-rose-50 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 border-rose-200 dark:border-rose-800";
     } else {
       statusText = "IDLE";
-      statusBadgeClass = "bg-slate-100 text-slate-600 border-slate-200";
+      statusBadgeClass = "bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 border-slate-200 dark:border-zinc-800";
     }
 
-    let platformBadgeClass = "bg-pink-50 text-pink-700 border-pink-100";
+    let platformBadgeClass = "bg-pink-50 dark:bg-pink-900/30 text-pink-700 dark:text-pink-400 border-pink-200 dark:border-pink-800";
     if (target.platform === "twitter") {
-      platformBadgeClass = "bg-sky-50 text-sky-700 border-sky-100";
+      platformBadgeClass = "bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800";
     } else if (target.platform === "tiktok") {
-      platformBadgeClass = "bg-slate-100 text-slate-700 border-slate-300";
+      platformBadgeClass = "bg-slate-100 dark:bg-zinc-800 text-slate-300 border-slate-300";
     }
 
     const lastSyncStr = target.updated_at && target.updated_at !== "0001-01-01T00:00:00Z" 
       ? new Date(target.updated_at).toLocaleString() 
       : "Never";
 
-    const isRunning = target.status === "running" || target.status === "queued";
-    const syncActionBtn = isRunning
-      ? `<button disabled class="bg-slate-50 text-slate-400 border border-slate-100 text-[10px] font-bold px-2 py-1 rounded-md flex items-center gap-1.5 cursor-not-allowed">
-           ${refreshSvgSpin} Syncing
-         </button>`
-      : `<button onclick="event.stopPropagation(); startSync('${target.username}', false)" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-2.5 py-1 rounded-md flex items-center gap-1 cursor-pointer transition-all duration-150">
+    startSync('${target.username}', false)" class="bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/30 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 text-[10px] font-bold px-2.5 py-1 rounded-md flex items-center gap-1 cursor-pointer transition-all duration-150">
            ${refreshSvgGreen} Sync
          </button>`;
 
     const isInstagram = target.platform === 'instagram';
     const platformIcon = isInstagram
-      ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 text-slate-600"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>`
-      : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 text-slate-600"><path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2 C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z"></path></svg>`;
+      ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 text-slate-500 dark:text-zinc-400"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line></svg>`
+      : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5 text-slate-500 dark:text-zinc-400"><path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2 C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z"></path></svg>`;
 
     const newCount = target.new_count || 0;
     const newCountBadge = newCount > 0
-      ? `<span class="ml-1.5 text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full whitespace-nowrap">+${newCount}</span>`
+      ? `<span class="ml-1.5 text-[9px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800 px-1.5 py-0.5 rounded-full whitespace-nowrap">+${newCount}</span>`
       : "";
 
     const authErrorBadge = target.auth_error
-      ? `<div class="mt-1 flex items-center gap-1 text-[9px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded">
+      ? `<div class="mt-1 flex items-center gap-1 text-[9px] font-bold text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/30 border border-rose-200 dark:border-rose-800 px-2 py-0.5 rounded">
            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="w-3 h-3 flex-shrink-0"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 11"/></svg>
            Cookie expired — update in Settings
          </div>`
       : "";
 
     tableRows += `
-      <tr class="hover:bg-slate-50/50 transition-colors border-b border-slate-100 cursor-pointer" onclick="selectTerminalUser('${target.username}')">
+      <tr class="hover:bg-slate-100/50 dark:bg-zinc-800/50 transition-colors border-b border-slate-200 dark:border-zinc-800/50 cursor-pointer" onclick="selectTerminalUser('${target.username}')">
         <td class="px-6 py-4 whitespace-nowrap">
           <div class="flex items-center gap-2.5">
-            <div class="p-1.5 bg-slate-50 text-slate-500 rounded-md border border-slate-200 flex items-center justify-center">
+            <div class="p-1.5 bg-slate-50 dark:bg-zinc-950 text-slate-500 dark:text-zinc-400 rounded-md border border-slate-200 dark:border-zinc-800 flex items-center justify-center">
               ${platformIcon}
             </div>
-            <span class="text-sm font-semibold text-slate-700 select-all">
+            <span class="text-sm font-semibold text-slate-300 select-all">
               @${target.username}
             </span>
           </div>
@@ -1647,15 +1652,13 @@ function renderOverviewDashboard() {
           </span>
           ${authErrorBadge}
         </td>
-        <td class="px-6 py-4 whitespace-nowrap text-xs text-slate-500 font-medium">
+        <td class="px-6 py-4 whitespace-nowrap text-xs text-slate-500 dark:text-zinc-400 font-medium">
           ${lastSyncStr}
         </td>
-        <td class="px-6 py-4 whitespace-nowrap text-xs text-slate-500 font-mono">
+        <td class="px-6 py-4 whitespace-nowrap text-xs text-slate-500 dark:text-zinc-400 font-mono">
           ${target.media_count || 0} files${newCountBadge}
         </td>
-        <td class="px-6 py-4 whitespace-nowrap text-right text-xs font-medium">
-          ${syncActionBtn}
-        </td>
+        
       </tr>
     `;
   });
@@ -1664,31 +1667,31 @@ function renderOverviewDashboard() {
     <div class="flex flex-col gap-6">
       <!-- Top header stats -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-1">
-          <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Auto-update Sync Interval</span>
-          <span class="text-lg font-bold text-slate-800">${autoSyncInterval > 0 ? autoSyncInterval + ' hours' : 'Disabled'}</span>
+        <div class="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl p-5 shadow-sm flex flex-col gap-1">
+          <span class="text-[10px] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">Auto-update Sync Interval</span>
+          <span class="text-lg font-bold text-slate-900 dark:text-zinc-100">${autoSyncInterval > 0 ? autoSyncInterval + ' hours' : 'Disabled'}</span>
         </div>
-        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-1">
-          <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Last Sync Completed</span>
-          <span class="text-xs font-semibold text-slate-700 mt-1">${lastSyncFormatted}</span>
+        <div class="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl p-5 shadow-sm flex flex-col gap-1">
+          <span class="text-[10px] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">Last Sync Completed</span>
+          <span class="text-xs font-semibold text-slate-300 mt-1">${lastSyncFormatted}</span>
         </div>
-        <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-1">
-          <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Time Until Next Sync</span>
-          <span class="text-lg font-bold text-indigo-600">${countdownText}</span>
+        <div class="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl p-5 shadow-sm flex flex-col gap-1">
+          <span class="text-[10px] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">Time Until Next Sync</span>
+          <span class="text-lg font-bold text-indigo-400">${countdownText}</span>
         </div>
       </div>
 
       <!-- Targets table -->
-      <div class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
-        <div class="px-6 py-4 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center flex-wrap gap-3">
-          <h3 class="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+      <div class="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-sm overflow-hidden flex flex-col">
+        <div class="px-6 py-4 border-b border-slate-200 dark:border-zinc-800 bg-slate-200/50 dark:bg-zinc-950/50 flex justify-between items-center flex-wrap gap-3">
+          <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
             ${activitySvg} Target Status Overview
           </h3>
           <div class="flex items-center gap-3">
-            <span class="text-[10px] bg-slate-100 text-slate-500 border border-slate-200 px-2 py-0.5 rounded-full font-bold whitespace-nowrap">
+            <span class="text-[10px] bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 border border-slate-200 dark:border-zinc-800 px-2 py-0.5 rounded-full font-bold whitespace-nowrap">
               ${cachedProgress.length} target${cachedProgress.length !== 1 ? 's' : ''}
             </span>
-            <button onclick="syncAll()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-sm hover:shadow">
+            <button onclick="syncAll()" class="bg-slate-100 dark:bg-zinc-8000 hover:bg-slate-100 dark:bg-zinc-8000 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-sm hover:shadow">
               ${refreshSvg} Sync All Targets
             </button>
           </div>
@@ -1696,16 +1699,15 @@ function renderOverviewDashboard() {
         
         <div class="overflow-x-auto">
           <table class="min-w-full divide-y divide-slate-200">
-            <thead class="bg-slate-50">
+            <thead class="bg-slate-50 dark:bg-zinc-950">
               <tr>
-                <th scope="col" class="px-6 py-3 text-left text-[9px] font-bold text-slate-400 uppercase tracking-wider">Target</th>
-                <th scope="col" class="px-6 py-3 text-left text-[9px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
-                <th scope="col" class="px-6 py-3 text-left text-[9px] font-bold text-slate-400 uppercase tracking-wider">Last Updated</th>
-                <th scope="col" class="px-6 py-3 text-left text-[9px] font-bold text-slate-400 uppercase tracking-wider">Files Synced</th>
-                <th scope="col" class="px-6 py-3 text-right text-[9px] font-bold text-slate-400 uppercase tracking-wider">Action</th>
-              </tr>
+                <th scope="col" class="px-6 py-3 text-left text-[9px] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">Target</th>
+                <th scope="col" class="px-6 py-3 text-left text-[9px] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">Status</th>
+                <th scope="col" class="px-6 py-3 text-left text-[9px] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">Last Updated</th>
+                <th scope="col" class="px-6 py-3 text-left text-[9px] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">Files Synced</th>
+                              </tr>
             </thead>
-            <tbody class="bg-white divide-y divide-slate-100">
+            <tbody class="bg-white dark:bg-zinc-900 divide-y divide-slate-100">
               ${tableRows}
             </tbody>
           </table>
@@ -1795,10 +1797,10 @@ function populateHashtagDropdown() {
     const isChecked = selectedHashtags.has(tag);
     const count = hashtagsMap.get(tag);
     html += `
-      <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded-lg cursor-pointer text-xs font-semibold text-slate-700 select-none">
+      <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-100 dark:bg-zinc-800 rounded-lg cursor-pointer text-xs font-semibold text-slate-300 select-none">
         <input type="checkbox" value="${tag}" ${isChecked ? "checked" : ""} class="accent-indigo-600 rounded w-3.5 h-3.5" onchange="toggleHashtagFilter(this)">
         <span class="truncate">${tag}</span>
-        <span class="text-[9px] bg-slate-100 text-slate-500 border border-slate-200 px-1.5 py-0.5 rounded-full ml-auto flex-shrink-0 whitespace-nowrap">${count}</span>
+        <span class="text-[9px] bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 border border-slate-200 dark:border-zinc-800 px-1.5 py-0.5 rounded-full ml-auto flex-shrink-0 whitespace-nowrap">${count}</span>
       </label>
     `;
   });
@@ -1831,12 +1833,12 @@ function updateHashtagFilterButtonLabel() {
 
   if (selectedHashtags.size > 0) {
     label.textContent = `Hashtags (${selectedHashtags.size})`;
-    btn.classList.add("bg-indigo-50/70", "border-indigo-200", "text-indigo-700");
-    btn.classList.remove("bg-slate-100", "border-slate-200", "text-slate-500");
+    btn.classList.add("bg-slate-100/70 dark:bg-zinc-800/70", "border-indigo-500/30", "text-indigo-700");
+    btn.classList.remove("bg-slate-100 dark:bg-zinc-800", "border-slate-200 dark:border-zinc-800", "text-slate-500 dark:text-zinc-400");
   } else {
     label.textContent = "Hashtags";
-    btn.classList.add("bg-slate-100", "border-slate-200", "text-slate-500");
-    btn.classList.remove("bg-indigo-50/70", "border-indigo-200", "text-indigo-700");
+    btn.classList.add("bg-slate-100 dark:bg-zinc-800", "border-slate-200 dark:border-zinc-800", "text-slate-500 dark:text-zinc-400");
+    btn.classList.remove("bg-slate-100/70 dark:bg-zinc-800/70", "border-indigo-500/30", "text-indigo-700");
   }
 }
 
@@ -1893,13 +1895,13 @@ function updateFilterButtonLabel(type) {
   const btn = document.getElementById(`btn-${prefix}-filter`);
   if (sel.size === 0) {
     labelEl.textContent = prefix.charAt(0).toUpperCase() + prefix.slice(1) + "s";
-    btn.classList.remove("bg-indigo-100", "text-indigo-700", "border-indigo-200");
+    btn.classList.remove("bg-indigo-100", "text-indigo-700", "border-indigo-500/30");
   } else if (sel.size === 1) {
     labelEl.textContent = [...sel][0];
-    btn.classList.add("bg-indigo-100", "text-indigo-700", "border-indigo-200");
+    btn.classList.add("bg-indigo-100", "text-indigo-700", "border-indigo-500/30");
   } else {
     labelEl.textContent = `${sel.size} selected`;
-    btn.classList.add("bg-indigo-100", "text-indigo-700", "border-indigo-200");
+    btn.classList.add("bg-indigo-100", "text-indigo-700", "border-indigo-500/30");
   }
 }
 
@@ -1944,7 +1946,7 @@ function populateYearDropdown() {
   sortedYears.forEach(yr => {
     const isChecked = selectedYears.has(yr);
     html += `
-      <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded-lg cursor-pointer text-xs font-semibold text-slate-700 select-none">
+      <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-100 dark:bg-zinc-800 rounded-lg cursor-pointer text-xs font-semibold text-slate-300 select-none">
         <input type="checkbox" value="${yr}" ${isChecked ? "checked" : ""} class="accent-indigo-600 rounded w-3.5 h-3.5 animate-none" onchange="toggleYearFilter(this)">
         <span>${yr}</span>
       </label>
@@ -1955,3 +1957,41 @@ function populateYearDropdown() {
   updateFilterButtonLabel("year");
 }
 window.populateYearDropdown = populateYearDropdown;
+function toggleActivityConsole() {
+  const c = document.getElementById("dashboard-console");
+  if (c) {
+    c.style.display = (c.style.display === "none" || !c.style.display) ? "flex" : "none";
+  }
+}
+window.toggleActivityConsole = toggleActivityConsole;
+
+
+// ==================== Theme ====================
+function initTheme() {
+  if (localStorage.getItem('color-theme') === 'dark' || (!('color-theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+    document.documentElement.classList.add('dark');
+    document.getElementById('theme-toggle-light-icon').classList.remove('hidden');
+  } else {
+    document.documentElement.classList.remove('dark');
+    document.getElementById('theme-toggle-dark-icon').classList.remove('hidden');
+  }
+}
+
+function toggleTheme() {
+  const isDark = document.documentElement.classList.contains('dark');
+  if (isDark) {
+    document.documentElement.classList.remove('dark');
+    localStorage.setItem('color-theme', 'light');
+    document.getElementById('theme-toggle-dark-icon').classList.remove('hidden');
+    document.getElementById('theme-toggle-light-icon').classList.add('hidden');
+  } else {
+    document.documentElement.classList.add('dark');
+    localStorage.setItem('color-theme', 'dark');
+    document.getElementById('theme-toggle-light-icon').classList.remove('hidden');
+    document.getElementById('theme-toggle-dark-icon').classList.add('hidden');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  initTheme();
+});

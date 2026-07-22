@@ -2,10 +2,13 @@
 
 /* Custom scrollbar styles */
 @layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 dark:bg-zinc-950 dark:text-zinc-100 transition-colors duration-200;
+  }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
-  ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+  ::-webkit-scrollbar-thumb { @apply bg-slate-300 dark:bg-zinc-700; border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-slate-400 dark:bg-zinc-600; }
 }
 
 /* PhotoSwipe video aspect ratio */
