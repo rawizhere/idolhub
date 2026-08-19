@@ -98,6 +98,10 @@ func (idx *Index) Get(platform, username string) []MediaEntry {
 	}
 
 	idx.mu.Lock()
+	if files, ok := idx.files[key]; ok {
+		idx.mu.Unlock()
+		return files
+	}
 	idx.files[key] = files
 	idx.mu.Unlock()
 

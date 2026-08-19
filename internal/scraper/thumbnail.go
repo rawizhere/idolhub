@@ -15,7 +15,6 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
-// GenerateThumbnail creates a 320px JPEG thumbnail
 func GenerateThumbnail(srcPath, dstPath string) error {
 	dir := filepath.Dir(dstPath)
 	if err := os.MkdirAll(dir, 0755); err != nil {
@@ -30,8 +29,7 @@ func GenerateThumbnail(srcPath, dstPath string) error {
 			return nil
 		}
 
-		// Run ffmpeg to extract a frame at 0.1s
-		cmd := exec.Command("ffmpeg", "-y", "-ss", "00:00:00.100", "-i", srcPath, "-frames:v", "1", "-vf", "scale=320:-1", "-q:v", "5", "-update", "1", dstPath)
+		cmd := exec.Command("ffmpeg", "-y", "-ss", "00:00:00.100", "-i", srcPath, "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "3", "-update", "1", dstPath)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			slog.Warn("ffmpeg failed to extract video thumbnail", "src", srcPath, "error", err, "output", string(out))
 			return err
@@ -68,20 +66,20 @@ func GenerateThumbnail(srcPath, dstPath string) error {
 	width := bounds.Dx()
 	height := bounds.Dy()
 
-	// Target width is 320px
-	targetWidth := 320
+	targetWidth := 480
 	if width < targetWidth {
 		targetWidth = width
 	}
 	targetHeight := int((float64(height) / float64(width)) * float64(targetWidth))
+	if targetHeight < 1 {
+		targetHeight = 1
+	}
 
 	rect := image.Rect(0, 0, targetWidth, targetHeight)
 	dstImg := image.NewRGBA(rect)
 
-	// Downscale using bilinear filter
 	draw.BiLinear.Scale(dstImg, rect, img, bounds, draw.Over, nil)
 
-	// Save to dstPath as JPEG (quality 80)
 	outF, err := os.Create(dstPath)
 	if err != nil {
 		return fmt.Errorf("failed to create destination thumbnail: %w", err)
@@ -96,12 +94,21 @@ func GenerateThumbnail(srcPath, dstPath string) error {
 	return nil
 }
 
-// MigrateThumbnails scans downloads and generates missing thumbnails
+const thumbVersionMarker = "downloads/.thumb_v480p"
+
 func MigrateThumbnails() {
 	go func() {
-		slog.Info("Starting background thumbnail migration for existing media...")
 		downloadsDir := "downloads"
-		if err := filepath.WalkDir(downloadsDir, func(path string, d os.DirEntry, err error) error {
+		if _, err := os.Stat(downloadsDir); os.IsNotExist(err) {
+			return
+		}
+
+		upgradeAll := false
+		if _, err := os.Stat(thumbVersionMarker); os.IsNotExist(err) {
+			upgradeAll = true
+		}
+
+		_ = filepath.WalkDir(downloadsDir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return nil
 			}
@@ -112,22 +119,26 @@ func MigrateThumbnails() {
 				return nil
 			}
 			name := d.Name()
-			if name == "posts.json" || name == ".DS_Store" {
+			if name == "posts.json" || name == ".DS_Store" || strings.HasPrefix(name, ".") {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(name))
+			if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" && ext != ".mp4" && ext != ".mov" && ext != ".m4v" {
 				return nil
 			}
 			thumbFilename := strings.TrimSuffix(name, filepath.Ext(name)) + ".jpg"
 			thumbPath := filepath.Join(filepath.Dir(path), "thumbnails", thumbFilename)
 			info, err := os.Stat(thumbPath)
-			if os.IsNotExist(err) || (err == nil && info.Size() == 0) {
-				slog.Info("Generating missing thumbnail", "file", path)
+			if upgradeAll || os.IsNotExist(err) || (err == nil && info.Size() == 0) {
 				if err := GenerateThumbnail(path, thumbPath); err != nil {
 					slog.Error("Failed to generate thumbnail during migration", "file", path, "error", err)
 				}
 			}
 			return nil
-		}); err != nil {
-			slog.Error("Walk error during thumbnail migration", "error", err)
+		})
+
+		if upgradeAll {
+			_ = os.WriteFile(thumbVersionMarker, []byte("480p\n"), 0644)
 		}
-		slog.Info("Background thumbnail migration completed.")
 	}()
 }

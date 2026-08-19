@@ -37,7 +37,7 @@ func EnsureYTDLP(ctx context.Context) {
 	ytResolvedReady = true
 }
 
-// StartYTDLPUpdateLoop self-updates yt-dlp at startup and then once per day via `-U`.
+// StartYTDLPUpdateLoop self-updates yt-dlp at startup and then once per day via `--update-to nightly`.
 func StartYTDLPUpdateLoop(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
@@ -60,7 +60,7 @@ func updateYTDLP(parent context.Context) {
 	}
 	ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, ytExecutable, "-U")
+	cmd := exec.CommandContext(ctx, ytExecutable, "--update-to", "nightly")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		slog.Warn("yt-dlp self-update failed", "error", err, "output", strings.TrimSpace(string(out)))

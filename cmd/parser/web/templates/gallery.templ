@@ -5,30 +5,33 @@ import (
 )
 
 templ GalleryGridItem(filename, mediaType, date, mediaURL, thumbURL string) {
-	<a class="gallery-item pswp-item group relative block w-full break-inside-avoid mb-4 bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-800 rounded-xl overflow-hidden cursor-pointer hover:shadow-md hover:border-indigo-500 hover:scale-[1.02] transition-all duration-200"
+	<a class="gallery-item pswp-item group relative block w-full aspect-square overflow-hidden rounded-xl border border-slate-200 dark:border-zinc-800/80 bg-slate-100 dark:bg-zinc-900 shadow-xs hover:border-[#ff9900]/50 transition-all duration-200 cursor-pointer"
 	   href={ mediaURL }
 	   title={ filename }
 	   if mediaType == "video" {
 		   data-pswp-type="video"
 	   }>
-		<div class="w-full  relative overflow-hidden">
-			<img src={ thumbURL } alt={ filename } width="240" height="240" loading="lazy"
+		<div class="w-full h-full relative overflow-hidden video-preview-tile"
+		     if mediaType == "video" {
+			     data-video-src={ mediaURL }
+		     }>
+			<img src={ thumbURL } alt={ filename } loading="lazy" decoding="async"
 			     data-fallback-src={ mediaURL }
-			     class="w-full h-auto object-cover group-hover:scale-105 transition-transform duration-300"/>
+			     class="w-full h-full object-cover group-hover:scale-103 transition-transform duration-200 block"/>
+			if date != "" {
+				<span class="absolute top-2 right-2 text-[9px] font-mono font-bold bg-black/75 text-white px-1.5 py-0.5 rounded backdrop-blur-xs z-20">
+					{ date }
+				</span>
+			}
 			if mediaType == "video" {
-				<div class="absolute inset-0 flex items-center justify-center bg-black/10 group-hover:bg-black/25 transition-all duration-200">
-					<div class="bg-white dark:bg-zinc-900/95 text-slate-900 dark:text-zinc-100 p-2.5 rounded-full shadow-md scale-95 group-hover:scale-110 transition-all duration-200 flex items-center justify-center">
+				<div class="absolute inset-0 flex items-center justify-center bg-black/15 group-hover:bg-black/25 transition-all duration-200 pointer-events-none">
+					<div class="bg-black/75 backdrop-blur-xs text-white p-2.5 rounded-full shadow-md scale-95 group-hover:scale-105 transition-all duration-200 flex items-center justify-center">
 						<svg viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4"><path d="M8 5v14l11-7z"/></svg>
 					</div>
 				</div>
-				<span class="absolute bottom-2.5 right-2.5 text-[9px] font-bold tracking-wide uppercase px-2 py-0.5 bg-black/60 text-white rounded backdrop-blur-sm flex items-center gap-1">
-					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-2.5 h-2.5"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
-					Video
+				<span class="absolute bottom-2 right-2 text-[9px] font-mono font-bold bg-black/80 text-white px-1.5 py-0.5 rounded backdrop-blur-xs">
+					VIDEO
 				</span>
-			} else {
-				<div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/70 to-transparent p-3 pt-8 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-					<span class="text-[10px] font-mono text-slate-900 dark:text-zinc-100">{ date }</span>
-				</div>
 			}
 		</div>
 	</a>
@@ -43,13 +46,13 @@ templ GalleryGridPage(files []GalleryFileData, platform, username, filter, searc
 		    hx-trigger="intersect once"
 		    hx-swap="outerHTML"
 		    class="col-span-full flex justify-center py-6">
-			<div class="animate-spin rounded-full h-5 w-5 border-2 border-slate-200 dark:border-zinc-800 border-t-indigo-600"></div>
+			<div class="animate-spin rounded-full h-5 w-5 border-2 border-slate-200 dark:border-zinc-800 border-t-[#ff9900]"></div>
 		</div>
 	}
 }
 
 templ GalleryPostCard(post GalleryPostData, username string) {
-	<div class="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl p-5 shadow-xs hover:shadow-sm transition-all flex flex-col gap-3.5">
+	<div class="flex flex-col gap-3.5 border-b border-slate-200 dark:border-zinc-900 pb-5 mb-5">
 		<div class="flex items-center justify-between border-b border-slate-200 dark:border-zinc-800/50 pb-2.5">
 			<span class="text-xs font-semibold text-slate-500 dark:text-zinc-400 font-mono flex items-center gap-1.5">
 				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
@@ -86,7 +89,7 @@ templ GalleryPostCard(post GalleryPostData, username string) {
 					if file.IsVideo {
 						<a href={ file.URL } class="pswp-item group relative w-24 h-24 rounded-lg overflow-hidden border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 hover:border-indigo-500 hover:scale-105 transition-all duration-150 flex-shrink-0 flex items-center justify-center cursor-pointer"
 						   data-pswp-type="video">
-							<img src={ file.ThumbnailURL } class="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"/>
+							<img src={ file.ThumbnailURL } loading="lazy" decoding="async" class="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"/>
 							<div class="absolute inset-0 flex items-center justify-center bg-black/10">
 								<div class="bg-white dark:bg-zinc-900/95 text-slate-900 dark:text-zinc-100 p-1.5 rounded-full shadow-xs">
 									<svg viewBox="0 0 24 24" fill="currentColor" class="w-3 h-3"><path d="M8 5v14l11-7z"/></svg>
@@ -95,7 +98,7 @@ templ GalleryPostCard(post GalleryPostData, username string) {
 						</a>
 					} else {
 						<a href={ file.URL } class="pswp-item group relative w-24 h-24 rounded-lg overflow-hidden border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 hover:border-indigo-500 hover:scale-105 transition-all duration-150 flex-shrink-0">
-							<img src={ file.ThumbnailURL } alt={ file.Filename } loading="lazy" class="w-full h-full object-cover"/>
+							<img src={ file.ThumbnailURL } alt={ file.Filename } loading="lazy" decoding="async" class="w-full h-full object-cover"/>
 						</a>
 					}
 				}

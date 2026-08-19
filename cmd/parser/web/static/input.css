@@ -1,14 +1,66 @@
 @import "tailwindcss";
 
-/* Custom scrollbar styles */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @layer base {
   body {
-    @apply bg-slate-50 text-slate-900 dark:bg-zinc-950 dark:text-zinc-100 transition-colors duration-200;
+    @apply bg-slate-50 text-slate-900 dark:bg-zinc-950 dark:text-zinc-100 transition-colors duration-150 antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { @apply bg-slate-300 dark:bg-zinc-700; border-radius: 9999px; }
-  ::-webkit-scrollbar-thumb:hover { @apply bg-slate-400 dark:bg-zinc-600; }
+  ::-webkit-scrollbar-thumb { @apply bg-slate-300/80 dark:bg-zinc-800; border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-slate-400 dark:bg-zinc-700; }
+}
+
+/* Gallery Grid Density modes */
+.density-relaxed {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (min-width: 640px) {
+  .density-relaxed { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .density-relaxed { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 1440px) {
+  .density-relaxed { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+@media (min-width: 1920px) {
+  .density-relaxed { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+
+.density-compact {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (min-width: 640px) {
+  .density-compact { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 1024px) {
+  .density-compact { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
+@media (min-width: 1440px) {
+  .density-compact { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+}
+@media (min-width: 1920px) {
+  .density-compact { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+}
+
+/* Gallery Grid Item */
+.gallery-item {
+  width: 100%;
+}
+
+/* Video Hover Preview */
+.video-preview-tile video {
+  transition: opacity 0.2s ease;
+}
+
+/* Bottom Console Drawer Transitions */
+#bottom-dock-console {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), height 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* PhotoSwipe video aspect ratio */
@@ -19,13 +71,8 @@
   height: auto;
 }
 
-/* Performance: skip rendering off-screen gallery items */
-.gallery-item {
-  content-visibility: auto;
-  contain-intrinsic-size: 240px 240px;
-}
-
 /* PhotoSwipe root */
 .pswp {
-  --pswp-bg: #000;
+  --pswp-bg: rgba(0, 0, 0, 0.94);
 }
+

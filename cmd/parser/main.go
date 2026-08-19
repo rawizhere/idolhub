@@ -66,6 +66,7 @@ func main() {
 	mux.HandleFunc("POST /api/scrape/cancel", app.handleScrapeCancel)
 	mux.HandleFunc("POST /api/scrape/clear", app.handleScrapeClear)
 	mux.HandleFunc("GET /api/gallery", app.handleGallery)
+	mux.HandleFunc("GET /api/search", app.handleGlobalSearchAPI)
 	mux.HandleFunc("GET /api/events", app.handleSSE)
 	mux.HandleFunc("GET /gallery/", app.handleGalleryPage)
 	mux.HandleFunc("GET /media/", app.handleMedia)
@@ -265,7 +266,6 @@ func (a *App) handleGallery(w http.ResponseWriter, r *http.Request) {
 	entries := a.mediaIndex.Get(platform, username)
 
 	var files []GalleryFile
-	thumbDir := filepath.Join(dir, "thumbnails")
 
 	for _, e := range entries {
 		name := e.Filename
@@ -277,13 +277,6 @@ func (a *App) handleGallery(w http.ResponseWriter, r *http.Request) {
 		ext := filepath.Ext(name)
 		thumbFilename := strings.TrimSuffix(name, ext) + ".jpg"
 		thumbnailURL := "/media/" + platform + "/" + username + "/thumbnails/" + thumbFilename
-
-		thumbPath := filepath.Join(thumbDir, thumbFilename)
-		go func(src, dst string) {
-			if info, err := os.Stat(dst); err != nil || (err == nil && info.Size() == 0) {
-				_ = scraper.GenerateThumbnail(src, dst)
-			}
-		}(filepath.Join(dir, name), thumbPath)
 
 		files = append(files, GalleryFile{
 			Filename:     name,
@@ -604,7 +597,6 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	entries := a.mediaIndex.Get(platform, username)
-	thumbDir := filepath.Join(dir, "thumbnails")
 
 	var galleryFiles []GalleryFile
 	var allFiles []templates.GalleryFileData
@@ -618,13 +610,6 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 		thumbFilename := strings.TrimSuffix(name, ext) + ".jpg"
 		thumbURL := "/media/" + platform + "/" + username + "/thumbnails/" + thumbFilename
 		mediaURL := "/media/" + platform + "/" + username + "/" + name
-
-		thumbPath := filepath.Join(thumbDir, thumbFilename)
-		go func(src, dst string) {
-			if info, err := os.Stat(dst); err != nil || (err == nil && info.Size() == 0) {
-				_ = scraper.GenerateThumbnail(src, dst)
-			}
-		}(filepath.Join(dir, name), thumbPath)
 
 		galleryFiles = append(galleryFiles, GalleryFile{
 			Filename:     name,
@@ -644,6 +629,40 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	// Index post text and captions for media files to allow searching by captions/hashtags
+	filePostText := make(map[string]string)
+	postsPath := filepath.Join(dir, "posts.json")
+	if postsData, err := os.ReadFile(postsPath); err == nil {
+		var rawPosts []GalleryPost
+		if json.Unmarshal(postsData, &rawPosts) == nil {
+			for _, rp := range rawPosts {
+				txt := rp.Text
+				for _, mu := range rp.MediaURLs {
+					if gf := findLocalFile(mu, galleryFiles); gf != nil {
+						if existing, ok := filePostText[gf.Filename]; ok {
+							filePostText[gf.Filename] = existing + " " + txt
+						} else {
+							filePostText[gf.Filename] = txt
+						}
+					}
+				}
+				if rp.TweetID != "" {
+					videoName := rp.TweetID + "_video.mp4"
+					for _, gf := range galleryFiles {
+						if gf.Filename == videoName {
+							if existing, ok := filePostText[gf.Filename]; ok {
+								filePostText[gf.Filename] = existing + " " + txt
+							} else {
+								filePostText[gf.Filename] = txt
+							}
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
 	if filter != "all" {
 		filtered := allFiles[:0]
 		for _, f := range allFiles {
@@ -655,10 +674,14 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if search != "" {
-		search = strings.ToLower(search)
+		search = strings.ToLower(strings.TrimSpace(search))
 		filtered := allFiles[:0]
 		for _, f := range allFiles {
-			if strings.Contains(strings.ToLower(f.Filename), search) || strings.Contains(f.Date, search) {
+			matchesFilename := strings.Contains(strings.ToLower(f.Filename), search)
+			matchesDate := strings.Contains(f.Date, search)
+			postText := strings.ToLower(filePostText[f.Filename])
+			matchesPost := strings.Contains(postText, search)
+			if matchesFilename || matchesDate || matchesPost {
 				filtered = append(filtered, f)
 			}
 		}
@@ -965,4 +988,127 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 	pagePosts := allPosts[offset:end]
 
 	templ.Handler(templates.GalleryPostsPage(pagePosts, gp.Platform, gp.Username, gp.Sort, gp.Search, gp.Year, gp.Month, gp.Tags, gp.Page, totalPages)).ServeHTTP(w, r)
+}
+
+type GlobalSearchResultFile struct {
+	Platform     string `json:"platform"`
+	Username     string `json:"username"`
+	Filename     string `json:"filename"`
+	Type         string `json:"type"`
+	Date         string `json:"date"`
+	Size         int64  `json:"size"`
+	URL          string `json:"url"`
+	ThumbnailURL string `json:"thumbnail_url"`
+	Caption      string `json:"caption,omitempty"`
+}
+
+type GlobalSearchResponse struct {
+	Query      string                   `json:"query"`
+	TotalFiles int                      `json:"total_files"`
+	Files      []GlobalSearchResultFile `json:"files"`
+}
+
+func (a *App) handleGlobalSearchAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Content-Type", "application/json")
+
+	query := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	cfg := config.GetConfig()
+
+	var matchingFiles []GlobalSearchResultFile
+
+	for _, acc := range cfg.Accounts {
+		platform := acc.Platform
+		username := acc.Username
+		entries := a.mediaIndex.Get(platform, username)
+		if len(entries) == 0 {
+			continue
+		}
+
+		var galleryFiles []GalleryFile
+		for _, e := range entries {
+			name := e.Filename
+			date := ""
+			if len(name) >= 10 {
+				date = name[:10]
+			}
+			ext := filepath.Ext(name)
+			thumbFilename := strings.TrimSuffix(name, ext) + ".jpg"
+			galleryFiles = append(galleryFiles, GalleryFile{
+				Filename:     name,
+				Type:         e.Type,
+				Date:         date,
+				Size:         e.Size,
+				URL:          "/media/" + platform + "/" + username + "/" + name,
+				ThumbnailURL: "/media/" + platform + "/" + username + "/thumbnails/" + thumbFilename,
+			})
+		}
+
+		filePostText := make(map[string]string)
+		postsPath := filepath.Join("downloads", platform, username, "posts.json")
+		if postsData, err := os.ReadFile(postsPath); err == nil {
+			var rawPosts []GalleryPost
+			if json.Unmarshal(postsData, &rawPosts) == nil {
+				for _, rp := range rawPosts {
+					txt := rp.Text
+					for _, mu := range rp.MediaURLs {
+						if gf := findLocalFile(mu, galleryFiles); gf != nil {
+							if existing, ok := filePostText[gf.Filename]; ok {
+								filePostText[gf.Filename] = existing + " " + txt
+							} else {
+								filePostText[gf.Filename] = txt
+							}
+						}
+					}
+					if rp.TweetID != "" {
+						videoName := rp.TweetID + "_video.mp4"
+						for _, gf := range galleryFiles {
+							if gf.Filename == videoName {
+								if existing, ok := filePostText[gf.Filename]; ok {
+									filePostText[gf.Filename] = existing + " " + txt
+								} else {
+									filePostText[gf.Filename] = txt
+								}
+								break
+							}
+						}
+					}
+				}
+			}
+		}
+
+		for _, gf := range galleryFiles {
+			caption := filePostText[gf.Filename]
+			matchesQuery := query == "" ||
+				strings.Contains(strings.ToLower(gf.Filename), query) ||
+				strings.Contains(gf.Date, query) ||
+				strings.Contains(strings.ToLower(caption), query) ||
+				strings.Contains(strings.ToLower(username), query)
+
+			if matchesQuery {
+				matchingFiles = append(matchingFiles, GlobalSearchResultFile{
+					Platform:     platform,
+					Username:     username,
+					Filename:     gf.Filename,
+					Type:         gf.Type,
+					Date:         gf.Date,
+					Size:         gf.Size,
+					URL:          gf.URL,
+					ThumbnailURL: gf.ThumbnailURL,
+					Caption:      caption,
+				})
+			}
+		}
+	}
+
+	slices.SortFunc(matchingFiles, func(a, b GlobalSearchResultFile) int {
+		return cmp.Compare(b.Date, a.Date)
+	})
+
+	_ = json.NewEncoder(w).Encode(GlobalSearchResponse{
+		Query:      query,
+		TotalFiles: len(matchingFiles),
+		Files:      matchingFiles,
+	})
 }

@@ -33,9 +33,6 @@ func ScrapeInstagramUser(ctx context.Context, username string, saveText bool, la
 	return scrapeInstagramDirect(ctx, username, saveText, lastSync)
 }
 
-// --- Direct Instagram backend ---
-
-// igDirectItem holds a media URL and metadata
 type igDirectItem struct {
 	URL     string
 	Date    time.Time
@@ -181,6 +178,8 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	}
 	slog.Info("Resolved Instagram user ID", "user", username, "user_id", userID)
 
+	fileIdx := newIgFileIndex(outputDir)
+
 	jobs := make(chan igDirectItem, 1000)
 	var wg sync.WaitGroup
 	var downloadedCount int32
@@ -199,7 +198,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 					return
 				default:
 				}
-				if downloadInstagramDirectMedia(item, outputDir, &postsMu, &postsJSON, username) {
+				if downloadInstagramDirectMedia(item, outputDir, &postsMu, &postsJSON, username, fileIdx) {
 					atomic.AddInt32(&downloadedCount, 1)
 				} else {
 					atomic.AddInt32(&skippedCount, 1)
@@ -285,14 +284,10 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		slog.Info("Instagram feed page parsed", "user", username, "page", page, "items", len(feed.Items), "more_available", feed.MoreAvailable)
 
 		reachedOldPosts := false
+		consecutiveExistingPosts := 0
+
 		for _, item := range feed.Items {
 			itemTime := time.Unix(item.TakenAt, 0).UTC()
-
-			if !lastSync.IsZero() && itemTime.Before(lastSync) {
-				reachedOldPosts = true
-				break
-			}
-
 			caption := ""
 			if item.Caption != nil {
 				caption = item.Caption.Text
@@ -328,6 +323,25 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 				})
 			}
 
+			// Check if all media files of this post already exist on disk
+			allExisting := len(postEntries) > 0
+			for _, pe := range postEntries {
+				if !fileIdx.exists(pe) {
+					allExisting = false
+					break
+				}
+			}
+
+			if allExisting {
+				consecutiveExistingPosts++
+				if consecutiveExistingPosts >= 15 {
+					reachedOldPosts = true
+					break
+				}
+			} else {
+				consecutiveExistingPosts = 0
+			}
+
 			for _, pe := range postEntries {
 				mediaURLs = append(mediaURLs, pe.URL)
 			}
@@ -353,7 +367,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		}
 
 		if reachedOldPosts {
-			slog.Info("Reached previously scraped Instagram posts, stopping pagination", "user", username)
+			slog.Info("Reached previously scraped Instagram posts (files exist on disk), stopping pagination", "user", username)
 			break
 		}
 
@@ -470,11 +484,76 @@ func resolveInstagramUserID(ctx context.Context, username string) (string, error
 		}
 	}
 
-	return "", fmt.Errorf("could not resolve Instagram user ID for @%s", username)
+	return "", fmt.Errorf("%w: could not resolve Instagram user ID for @%s (session may be expired or rate-limited)", ErrAuthExpired, username)
+}
+
+type igFileIndex struct {
+	mu    sync.RWMutex
+	files map[string]bool
+}
+
+func newIgFileIndex(outputDir string) *igFileIndex {
+	idx := &igFileIndex{files: make(map[string]bool)}
+	if entries, err := os.ReadDir(outputDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				idx.files[e.Name()] = true
+			}
+		}
+	}
+	return idx
+}
+
+func (idx *igFileIndex) exists(item igDirectItem) bool {
+	ext := ".jpg"
+	if item.IsVideo {
+		ext = ".mp4"
+	}
+	parsed, err := url.Parse(item.URL)
+	if err != nil {
+		return false
+	}
+	pathParts := strings.Split(parsed.Path, "/")
+	baseName := pathParts[len(pathParts)-1]
+	if baseName == "" {
+		baseName = item.MediaID
+	}
+	if qIdx := strings.Index(baseName, "?"); qIdx >= 0 {
+		baseName = baseName[:qIdx]
+	}
+	if filepath.Ext(baseName) == "" {
+		baseName += ext
+	}
+	datePrefix := item.Date.Format("2006-01-02_15-04-05")
+	filename := fmt.Sprintf("%s_%s", datePrefix, baseName)
+
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+
+	if idx.files[filename] {
+		return true
+	}
+
+	for existingName := range idx.files {
+		if strings.Contains(existingName, baseName) || (item.MediaID != "" && strings.Contains(existingName, item.MediaID)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (idx *igFileIndex) add(filename string) {
+	idx.mu.Lock()
+	idx.files[filename] = true
+	idx.mu.Unlock()
 }
 
 // downloadInstagramDirectMedia downloads a media item from CDN
-func downloadInstagramDirectMedia(item igDirectItem, outputDir string, postsMu *sync.Mutex, postsJSON *[]map[string]interface{}, username string) bool {
+func downloadInstagramDirectMedia(item igDirectItem, outputDir string, postsMu *sync.Mutex, postsJSON *[]map[string]interface{}, username string, fileIdx *igFileIndex) bool {
+	if fileIdx != nil && fileIdx.exists(item) {
+		return false
+	}
+
 	ext := ".jpg"
 	if item.IsVideo {
 		ext = ".mp4"
@@ -503,6 +582,9 @@ func downloadInstagramDirectMedia(item igDirectItem, outputDir string, postsMu *
 	filePath := filepath.Join(outputDir, filename)
 
 	if _, err := os.Stat(filePath); err == nil {
+		if fileIdx != nil {
+			fileIdx.add(filename)
+		}
 		return false
 	}
 

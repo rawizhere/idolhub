@@ -461,18 +461,22 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 // CancelAll cancels all running and queued scrape tasks.
 func (o *Orchestrator) CancelAll() {
 	o.mu.Lock()
+	defer o.mu.Unlock()
 	for username, cancel := range o.cancels {
 		delete(o.cancels, username)
 		cancel()
 	}
-	for i := 0; i < len(o.jobCh); i++ {
-		job := <-o.jobCh
-		if p, ok := o.progress[job.username]; ok && p.Status == "queued" {
-			p.Status = "idle"
-			p.Progress = 0
+	for {
+		select {
+		case job := <-o.jobCh:
+			if p, ok := o.progress[job.username]; ok && p.Status == "queued" {
+				p.Status = "idle"
+				p.Progress = 0
+			}
+		default:
+			return
 		}
 	}
-	o.mu.Unlock()
 }
 
 // CancelScrape cancels a single scrape task by username, running or queued.
