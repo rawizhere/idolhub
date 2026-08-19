@@ -6,7 +6,8 @@ require (
 	github.com/a-h/templ v0.3.1020
 	github.com/chromedp/cdproto v0.0.0-20260321001828-e3e3800016bc
 	github.com/chromedp/chromedp v0.15.1
-	golang.org/x/image v0.43.0
+	github.com/lrstanley/go-ytdlp v1.3.5
+	golang.org/x/image v0.45.0
 )
 
 require (
@@ -17,8 +18,7 @@ require (
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.4.0 // indirect
-	github.com/lrstanley/go-ytdlp v1.3.5 // indirect
 	github.com/ulikunitz/xz v0.5.15 // indirect
-	golang.org/x/crypto v0.48.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	golang.org/x/crypto v0.55.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
 )
