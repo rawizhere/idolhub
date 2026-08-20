@@ -248,7 +248,8 @@ func (a *App) handleProgress(w http.ResponseWriter, r *http.Request) {
 }
 
 type scrapeRequest struct {
-	Username string `json:"username"`
+	Username  string `json:"username"`
+	ForceFull bool   `json:"force_full,omitempty"`
 }
 
 type GalleryFile struct {
@@ -451,9 +452,13 @@ func (a *App) handleScrapeStart(w http.ResponseWriter, r *http.Request) {
 	c := config.GetConfig()
 
 	if req.Username == "all" {
-		slog.Info("Triggered sync for all configured targets")
+		if req.ForceFull {
+			slog.Info("Triggered force full resync for all configured targets")
+		} else {
+			slog.Info("Triggered sync for all configured targets")
+		}
 		for _, acc := range c.Accounts {
-			a.orch.StartScrape(acc.Username, acc.Platform, acc.SaveText)
+			a.orch.StartScrape(acc.Username, acc.Platform, acc.SaveText, req.ForceFull)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "started", "target": "all"})
@@ -473,8 +478,12 @@ func (a *App) handleScrapeStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("Triggered sync for target", "user", targetAccount.Username, "platform", targetAccount.Platform)
-	a.orch.StartScrape(targetAccount.Username, targetAccount.Platform, targetAccount.SaveText)
+	if req.ForceFull {
+		slog.Info("Triggered force full resync for target", "user", targetAccount.Username, "platform", targetAccount.Platform)
+	} else {
+		slog.Info("Triggered sync for target", "user", targetAccount.Username, "platform", targetAccount.Platform)
+	}
+	a.orch.StartScrape(targetAccount.Username, targetAccount.Platform, targetAccount.SaveText, req.ForceFull)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "started", "target": targetAccount.Username})

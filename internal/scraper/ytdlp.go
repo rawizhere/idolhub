@@ -122,7 +122,7 @@ func ScrapeYTDLP(ctx context.Context, platform, username string, saveText bool, 
 		})
 
 	if !lastSync.IsZero() {
-		cmd = cmd.DateAfter(lastSync.Format("20060102")).BreakOnExisting()
+		cmd = cmd.DateAfter(lastSync.Format("20060102")).BreakOnExisting().PlaylistItems(":50")
 	}
 
 	if pc.cookie != "" {
@@ -138,12 +138,16 @@ func ScrapeYTDLP(ctx context.Context, platform, username string, saveText bool, 
 
 	result, err := cmd.Run(ctx, targetURL)
 	if err != nil {
-		if result != nil {
-			slog.Error("yt-dlp run failed", "platform", platform, "user", username, "code", result.ExitCode, "stderr", result.Stderr, "error", err)
+		if result != nil && result.ExitCode == 101 {
+			slog.Info("yt-dlp reached previously downloaded or older videos, stopped early", "platform", platform, "user", username)
 		} else {
-			slog.Error("yt-dlp run failed", "platform", platform, "user", username, "error", err)
+			if result != nil {
+				slog.Error("yt-dlp run failed", "platform", platform, "user", username, "code", result.ExitCode, "stderr", result.Stderr, "error", err)
+			} else {
+				slog.Error("yt-dlp run failed", "platform", platform, "user", username, "error", err)
+			}
+			return fmt.Errorf("yt-dlp run failed: %w", err)
 		}
-		return fmt.Errorf("yt-dlp run failed: %w", err)
 	}
 
 	if saveText {

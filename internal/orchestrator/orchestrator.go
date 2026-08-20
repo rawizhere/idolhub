@@ -331,7 +331,7 @@ func (o *Orchestrator) GetGlobalLogs() []TaskLog {
 	return copied
 }
 
-func (o *Orchestrator) StartScrape(username string, platform string, saveText bool) {
+func (o *Orchestrator) StartScrape(username string, platform string, saveText bool, forceFull bool) {
 	o.mu.Lock()
 	p, exists := o.progress[username]
 	if !exists {
@@ -357,17 +357,17 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 	}
 
 	lastSync := p.UpdatedAt
-	forceFullSync := false
-	if saveText || platform == "tiktok" {
+	forceFullSync := forceFull
+	if forceFull {
+		lastSync = time.Time{}
+	} else if saveText || platform == "tiktok" {
 		postsPath := filepath.Join("downloads", platform, username, "posts.json")
 		if _, err := os.Stat(postsPath); os.IsNotExist(err) {
 			forceFullSync = true
 			lastSync = time.Time{}
-		} else if !forceFullSync {
-			forceFullSync = isPostsCorrupted(postsPath)
-			if forceFullSync {
-				lastSync = time.Time{}
-			}
+		} else if isPostsCorrupted(postsPath) {
+			forceFullSync = true
+			lastSync = time.Time{}
 		}
 	}
 
@@ -666,7 +666,7 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 						slog.Debug("Skipping auto-sync, task already running or queued", "user", acc.Username)
 						continue
 					}
-					o.StartScrape(acc.Username, acc.Platform, acc.SaveText)
+					o.StartScrape(acc.Username, acc.Platform, acc.SaveText, false)
 					time.Sleep(10 * time.Second)
 				}
 				o.mu.Lock()

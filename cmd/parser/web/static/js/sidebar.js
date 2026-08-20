@@ -247,6 +247,25 @@ export async function startSync(username, shouldSelect = false) {
   }
 }
 
+export async function fullResyncAll() {
+  const ok = await confirmDialog({
+    title: "Force Full Resync All Targets",
+    message: "This will fully rescan all configured targets from the beginning of their feeds. Existing files will be preserved. Proceed?",
+    confirmText: "Start Full Resync",
+    tone: "primary",
+  });
+  if (!ok) return;
+
+  try {
+    const modal = document.getElementById("settings-modal");
+    if (modal) modal.style.display = "none";
+    await startSyncApi("all", true);
+    toast("Full resync started for all targets.", "success", 2500);
+  } catch (err) {
+    toast(`Failed to start full resync: ${err.message}`, "error");
+  }
+}
+
 export async function cancelSync(username) {
   const ok = await confirmDialog({
     title: "Cancel Active Sync",
