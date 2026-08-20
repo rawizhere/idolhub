@@ -26,6 +26,23 @@ function pswpUpdateVideoSize(content, video) {
   }
 }
 
+let pswpLightboxModule = null;
+let pswpModule = null;
+
+export async function preloadPhotoSwipe() {
+  if (pswpLightboxModule && pswpModule) return;
+  try {
+    const [lbMod, psMod] = await Promise.all([
+      import("/static/vendor/photoswipe-lightbox.esm.min.js"),
+      import("/static/vendor/photoswipe.esm.min.js")
+    ]);
+    pswpLightboxModule = lbMod;
+    pswpModule = psMod;
+  } catch (err) {
+    console.error("Failed to preload PhotoSwipe modules:", err);
+  }
+}
+
 function pswpAddItemDataFilter(lb) {
   lb.addFilter("domItemData", (itemData, element, linkEl) => {
     const img = linkEl ? linkEl.querySelector("img") : null;
@@ -48,8 +65,17 @@ function pswpAddItemDataFilter(lb) {
       itemData.w = PSWP_VIDEO_W;
       itemData.h = PSWP_VIDEO_H;
       itemData.html = `
-        <div class="pswp-video-container" style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;padding:20px;box-sizing:border-box;pointer-events:auto;">
-          <video src="${itemData.src}" controls playsinline preload="metadata" style="max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;border-radius:12px;box-shadow:0 25px 60px rgba(0,0,0,0.6);"></video>
+        <div class="pswp-video-container" style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;padding:20px;box-sizing:border-box;pointer-events:auto;">
+          <video src="${itemData.src}" controls playsinline preload="metadata" style="max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;border-radius:12px;box-shadow:0 25px 60px rgba(0,0,0,0.6);" onerror="if(!this.dataset.errored){this.dataset.errored='1';const fb=this.nextElementSibling;if(fb){fb.classList.remove('hidden');fb.classList.add('flex');}this.style.display='none';}"></video>
+          <div class="video-codec-fallback hidden flex-col items-center justify-center p-6 bg-zinc-900/95 text-white rounded-xl border border-zinc-800 text-center max-w-md gap-3 shadow-2xl">
+            <svg class="w-10 h-10 text-amber-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+            <p class="text-xs font-semibold text-zinc-200">Video format or codec (e.g. HEVC/H.265) not supported by browser.</p>
+            <p class="text-[11px] text-zinc-400">Install HEVC Video Extensions on Windows or open the file in an external player like VLC.</p>
+            <a href="${itemData.src}" target="_blank" rel="noopener noreferrer" class="mt-2 bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold text-xs px-4 py-2 rounded-lg transition-all shadow-xs inline-flex items-center gap-1.5 cursor-pointer">
+              <span>Open Raw Video File</span>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+            </a>
+          </div>
         </div>`;
     }
     return itemData;
@@ -96,17 +122,20 @@ function pswpAddVideoControls(lb) {
 }
 
 export async function initPhotoSwipeGrid() {
-  if (state.pswpGrid) return;
   try {
-    const mod = await import("/static/vendor/photoswipe-lightbox.esm.min.js");
-    state.pswpGrid = new mod.default({
+    if (state.pswpGrid) {
+      try { state.pswpGrid.destroy(); } catch (_) {}
+      state.pswpGrid = null;
+    }
+    const Lightbox = pswpLightboxModule?.default || (await import("/static/vendor/photoswipe-lightbox.esm.min.js")).default;
+    state.pswpGrid = new Lightbox({
       gallery: "#lg-container, #global-search-grid",
       children: "a.pswp-item",
       showHideAnimationType: "none",
       showAnimationDuration: 0,
       hideAnimationDuration: 0,
       bgOpacity: 0.92,
-      pswpModule: () => import("/static/vendor/photoswipe.esm.min.js"),
+      pswpModule: () => pswpModule ? Promise.resolve(pswpModule) : import("/static/vendor/photoswipe.esm.min.js"),
     });
     pswpAddItemDataFilter(state.pswpGrid);
     pswpAddVideoControls(state.pswpGrid);
@@ -117,17 +146,20 @@ export async function initPhotoSwipeGrid() {
 }
 
 export async function initPhotoSwipePosts() {
-  if (state.pswpPosts) return;
   try {
-    const mod = await import("/static/vendor/photoswipe-lightbox.esm.min.js");
-    state.pswpPosts = new mod.default({
+    if (state.pswpPosts) {
+      try { state.pswpPosts.destroy(); } catch (_) {}
+      state.pswpPosts = null;
+    }
+    const Lightbox = pswpLightboxModule?.default || (await import("/static/vendor/photoswipe-lightbox.esm.min.js")).default;
+    state.pswpPosts = new Lightbox({
       gallery: "#gallery-posts-list",
       children: "a.pswp-item",
       showHideAnimationType: "none",
       showAnimationDuration: 0,
       hideAnimationDuration: 0,
       bgOpacity: 0.92,
-      pswpModule: () => import("/static/vendor/photoswipe.esm.min.js"),
+      pswpModule: () => pswpModule ? Promise.resolve(pswpModule) : import("/static/vendor/photoswipe.esm.min.js"),
     });
     pswpAddItemDataFilter(state.pswpPosts);
     pswpAddVideoControls(state.pswpPosts);
@@ -136,6 +168,43 @@ export async function initPhotoSwipePosts() {
     console.error("PhotoSwipe posts init error:", err);
   }
 }
+
+// Global click protection to prevent direct file navigation on any platform
+document.addEventListener("click", (e) => {
+  const item = e.target.closest("a.pswp-item");
+  if (!item) return;
+
+  // Let middle clicks or ctrl/cmd-clicks open in new tab if user wants to
+  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.button === 1) return;
+
+  e.preventDefault();
+
+  const galleryEl = item.closest("#lg-container, #global-search-grid, #gallery-posts-list");
+  if (!galleryEl) return;
+
+  const isPosts = galleryEl.id === "gallery-posts-list";
+  const lb = isPosts ? state.pswpPosts : state.pswpGrid;
+
+  if (lb && lb.shouldOpen !== undefined) {
+    const items = Array.from(galleryEl.querySelectorAll("a.pswp-item"));
+    const idx = items.indexOf(item);
+    if (idx >= 0) {
+      lb.loadAndOpen(idx, { gallery: galleryEl });
+    }
+  } else {
+    const initFn = isPosts ? initPhotoSwipePosts : initPhotoSwipeGrid;
+    initFn().then(() => {
+      const currentLb = isPosts ? state.pswpPosts : state.pswpGrid;
+      if (currentLb) {
+        const items = Array.from(galleryEl.querySelectorAll("a.pswp-item"));
+        const idx = items.indexOf(item);
+        if (idx >= 0) {
+          currentLb.loadAndOpen(idx, { gallery: galleryEl });
+        }
+      }
+    });
+  }
+}, false);
 
 export function initVideoHoverPreviews() {
   document.querySelectorAll(".video-preview-tile[data-video-src]").forEach(tile => {

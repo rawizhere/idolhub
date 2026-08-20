@@ -107,7 +107,7 @@ func ScrapeYTDLP(ctx context.Context, platform, username string, saveText bool, 
 	targetURL := fmt.Sprintf(pc.url, username)
 
 	cmd := ytdlp.New().
-		Format("best").
+		Format("bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc]+bestaudio/best[vcodec^=avc]/bestvideo+bestaudio/best").
 		IgnoreErrors().
 		PrintJSON().
 		SocketTimeout(15).

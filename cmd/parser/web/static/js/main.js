@@ -31,6 +31,7 @@ import {
   toggleHashtagFilter,
   toggleDensity,
   initDensity,
+  preloadPhotoSwipe,
   renderGalleryGrid,
   renderGalleryPosts
 } from "./gallery.js";
@@ -218,6 +219,7 @@ window.addEventListener("open-edit-modal", (e) => {
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
   initDensity();
+  preloadPhotoSwipe();
   loadConfig();
   pollProgress();
   initSSE();

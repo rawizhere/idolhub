@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -51,6 +52,7 @@ func main() {
 	orchestrator.GlobalOrchestrator.SyncTargets(config.GetConfig().Accounts)
 
 	scraper.MigrateThumbnails()
+	scraper.MigrateVideoCodecs()
 
 	app := &App{
 		orch:       orchestrator.GlobalOrchestrator,
@@ -106,6 +108,22 @@ func main() {
 	slog.Info("Server exited gracefully")
 }
 
+func init() {
+	_ = mime.AddExtensionType(".mp4", "video/mp4")
+	_ = mime.AddExtensionType(".m4v", "video/mp4")
+	_ = mime.AddExtensionType(".webm", "video/webm")
+	_ = mime.AddExtensionType(".mov", "video/quicktime")
+	_ = mime.AddExtensionType(".jpg", "image/jpeg")
+	_ = mime.AddExtensionType(".jpeg", "image/jpeg")
+	_ = mime.AddExtensionType(".png", "image/png")
+	_ = mime.AddExtensionType(".webp", "image/webp")
+	_ = mime.AddExtensionType(".gif", "image/gif")
+	_ = mime.AddExtensionType(".svg", "image/svg+xml")
+	_ = mime.AddExtensionType(".js", "application/javascript")
+	_ = mime.AddExtensionType(".css", "text/css")
+	_ = mime.AddExtensionType(".json", "application/json")
+}
+
 func (a *App) serveStatic(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
@@ -128,10 +146,20 @@ func (a *App) serveStatic(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if strings.HasSuffix(filePath, ".css") {
-			w.Header().Set("Content-Type", "text/css")
-		} else if strings.HasSuffix(filePath, ".js") {
-			w.Header().Set("Content-Type", "application/javascript")
+		ext := strings.ToLower(filepath.Ext(filePath))
+		switch ext {
+		case ".css":
+			w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		case ".js":
+			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		case ".svg":
+			w.Header().Set("Content-Type", "image/svg+xml")
+		case ".json":
+			w.Header().Set("Content-Type", "application/json")
+		default:
+			if ct := mime.TypeByExtension(ext); ct != "" {
+				w.Header().Set("Content-Type", ct)
+			}
 		}
 		_, _ = w.Write(data)
 		return
@@ -342,6 +370,30 @@ func (a *App) handleMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filePath := filepath.Join("downloads", filepath.FromSlash(cleaned))
+
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".mp4", ".m4v":
+		w.Header().Set("Content-Type", "video/mp4")
+	case ".webm":
+		w.Header().Set("Content-Type", "video/webm")
+	case ".mov":
+		w.Header().Set("Content-Type", "video/quicktime")
+	case ".jpg", ".jpeg":
+		w.Header().Set("Content-Type", "image/jpeg")
+	case ".png":
+		w.Header().Set("Content-Type", "image/png")
+	case ".webp":
+		w.Header().Set("Content-Type", "image/webp")
+	case ".gif":
+		w.Header().Set("Content-Type", "image/gif")
+	default:
+		if ct := mime.TypeByExtension(ext); ct != "" {
+			w.Header().Set("Content-Type", ct)
+		}
+	}
+	w.Header().Set("Accept-Ranges", "bytes")
+
 	http.ServeFile(w, r, filePath)
 }
 
