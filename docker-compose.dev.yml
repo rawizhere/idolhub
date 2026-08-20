@@ -13,15 +13,7 @@ services:
     environment:
       - TZ=${TZ:-Europe/Moscow}
       - PORT=${PORT:-8080}
-    shm_size: "2gb"
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 4G
-        reservations:
-          cpus: "1"
-          memory: 2G
+    shm_size: "512m"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8080}/api/config"]
       interval: 30s
