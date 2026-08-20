@@ -73,11 +73,11 @@ func TranscodeToH264(ctx context.Context, srcPath string) error {
 func MigrateVideoCodecs() {
 	go func() {
 		if _, err := exec.LookPath("ffmpeg"); err != nil {
-			slog.Debug("ffmpeg not found in PATH, skipping video codec migration")
+			slog.Warn("ffmpeg not found in PATH, skipping video codec migration")
 			return
 		}
 		if _, err := exec.LookPath("ffprobe"); err != nil {
-			slog.Debug("ffprobe not found in PATH, skipping video codec migration")
+			slog.Warn("ffprobe not found in PATH, skipping video codec migration")
 			return
 		}
 
@@ -86,7 +86,10 @@ func MigrateVideoCodecs() {
 			return
 		}
 
+		slog.Info("Starting video codec scan for browser compatibility...")
+
 		var filesToTranscode []string
+		totalChecked := 0
 
 		_ = filepath.WalkDir(downloadsDir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
@@ -107,8 +110,10 @@ func MigrateVideoCodecs() {
 				return nil
 			}
 
+			totalChecked++
 			codec, err := probeVideoCodec(context.Background(), path)
 			if err != nil {
+				slog.Warn("Failed to probe video codec", "file", path, "error", err)
 				return nil
 			}
 
@@ -120,10 +125,11 @@ func MigrateVideoCodecs() {
 		})
 
 		if len(filesToTranscode) == 0 {
+			slog.Info("Video codec scan completed: all videos are compatible with browsers", "checked", totalChecked)
 			return
 		}
 
-		slog.Info("Starting legacy video codec migration to H.264", "count", len(filesToTranscode))
+		slog.Info("Found legacy videos requiring H.264 transcoding", "count", len(filesToTranscode), "total_videos", totalChecked)
 
 		for i, filePath := range filesToTranscode {
 			slog.Info("Transcoding video to H.264 for cross-browser playback",

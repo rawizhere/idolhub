@@ -209,6 +209,8 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 
 	var nextMaxID string
 	page := 0
+	reachedOldPosts := false
+	consecutiveExistingPosts := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -283,9 +285,6 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 
 		slog.Info("Instagram feed page parsed", "user", username, "page", page, "items", len(feed.Items), "more_available", feed.MoreAvailable)
 
-		reachedOldPosts := false
-		consecutiveExistingPosts := 0
-
 		for _, item := range feed.Items {
 			itemTime := time.Unix(item.TakenAt, 0).UTC()
 			caption := ""
@@ -323,7 +322,9 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 				})
 			}
 
-			// Check if all media files of this post already exist on disk
+			// Check if this post is older than lastSync or already exists on disk
+			isOlderThanLastSync := !lastSync.IsZero() && itemTime.Before(lastSync)
+
 			allExisting := len(postEntries) > 0
 			for _, pe := range postEntries {
 				if !fileIdx.exists(pe) {
@@ -332,9 +333,10 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 				}
 			}
 
-			if allExisting {
+			if isOlderThanLastSync || allExisting {
 				consecutiveExistingPosts++
-				if consecutiveExistingPosts >= 15 {
+				// Require 3 consecutive existing/older posts to safely bypass pinned posts
+				if consecutiveExistingPosts >= 3 {
 					reachedOldPosts = true
 					break
 				}
@@ -367,7 +369,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		}
 
 		if reachedOldPosts {
-			slog.Info("Reached previously scraped Instagram posts (files exist on disk), stopping pagination", "user", username)
+			slog.Info("Reached previously scraped Instagram posts (older than last sync date or existing on disk), stopping pagination", "user", username)
 			break
 		}
 

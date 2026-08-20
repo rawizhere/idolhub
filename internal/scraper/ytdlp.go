@@ -26,8 +26,10 @@ func EnsureYTDLP(ctx context.Context) {
 	if path, err := exec.LookPath("yt-dlp"); err == nil {
 		ytExecutable = path
 		ytResolvedReady = true
+		slog.Info("yt-dlp binary resolved from PATH", "path", ytExecutable)
 		return
 	}
+	slog.Info("yt-dlp not found in PATH, attempting auto-install...")
 	resolved, err := ytdlp.Install(ctx, &ytdlp.InstallOptions{AllowVersionMismatch: true})
 	if err != nil {
 		slog.Warn("yt-dlp not found and auto-install failed; video sources will fail until yt-dlp is installed", "error", err)
@@ -35,6 +37,7 @@ func EnsureYTDLP(ctx context.Context) {
 	}
 	ytExecutable = resolved.Executable
 	ytResolvedReady = true
+	slog.Info("yt-dlp binary auto-installed successfully", "path", ytExecutable)
 }
 
 // StartYTDLPUpdateLoop self-updates yt-dlp at startup and then once per day via `--update-to nightly`.
@@ -114,12 +117,12 @@ func ScrapeYTDLP(ctx context.Context, platform, username string, saveText bool, 
 		ExtractorRetries("1").
 		Paths(outputDir).
 		Output("%(id)s.%(ext)s").
-		ProgressFunc(5*time.Second, func(u ytdlp.ProgressUpdate) {
-			slog.Info("yt-dlp progress", "platform", platform, "user", username, "status", u.Status, "filename", u.Filename, "percent", u.PercentString())
+		ProgressFunc(3*time.Second, func(u ytdlp.ProgressUpdate) {
+			slog.Info("Downloading video stream", "platform", platform, "user", username, "filename", filepath.Base(u.Filename), "percent", u.PercentString(), "status", u.Status)
 		})
 
 	if !lastSync.IsZero() {
-		cmd = cmd.DateAfter(lastSync.Format("20060102"))
+		cmd = cmd.DateAfter(lastSync.Format("20060102")).BreakOnExisting()
 	}
 
 	if pc.cookie != "" {
@@ -149,10 +152,11 @@ func ScrapeYTDLP(ctx context.Context, platform, username string, saveText bool, 
 			slog.Warn("failed to parse yt-dlp JSON output", "platform", platform, "user", username, "error", perr)
 		} else if posts := collectYTDLPPosts(infos); len(posts) > 0 {
 			mergePostsJSON(filepath.Join(outputDir, "posts.json"), posts)
+			slog.Info("Saved video posts metadata", "user", username, "count", len(posts))
 		}
 	}
 
-	slog.Info("yt-dlp scrape completed", "platform", platform, "user", username)
+	slog.Info("yt-dlp video scraping completed successfully", "platform", platform, "user", username)
 	return nil
 }
 

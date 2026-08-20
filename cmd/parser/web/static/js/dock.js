@@ -33,8 +33,9 @@ export function updateTerminal() {
   const terminal = document.getElementById("terminal-body");
   if (!terminal) return;
 
-  const target = state.activeTerminalUser ? state.cachedProgress.find(t => t.username === state.activeTerminalUser) : null;
-  const lines = target && target.logs ? target.logs : [];
+  const isTargetView = Boolean(state.activeTerminalUser);
+  const target = isTargetView ? state.cachedProgress.find(t => t.username === state.activeTerminalUser) : null;
+  const lines = isTargetView ? (target?.logs || []) : (state.globalLogs || []);
 
   let filtered = lines;
   if (state.terminalLevel !== "all") {
@@ -43,7 +44,9 @@ export function updateTerminal() {
 
   terminal.innerHTML = "";
   if (filtered.length === 0) {
-    terminal.innerHTML = `<div class="text-zinc-500">[SYSTEM] No log entries for active target.</div>`;
+    terminal.innerHTML = isTargetView
+      ? `<div class="text-zinc-500">[SYSTEM] No log entries for active target @${state.activeTerminalUser}.</div>`
+      : `<div class="text-zinc-500">[SYSTEM] Live logger initialized. Select a target or run sync.</div>`;
     return;
   }
 
@@ -54,7 +57,7 @@ export function updateTerminal() {
     const level = log.level.toLowerCase();
     if (level === "error") colorClass = "text-rose-400 font-semibold";
     else if (level === "info") colorClass = "text-emerald-400";
-    else if (level === "warn") colorClass = "text-amber-400";
+    else if (level === "warn") colorClass = "text-amber-400 font-medium";
 
     const div = document.createElement("div");
     div.className = `whitespace-pre-wrap break-all ${colorClass}`;
@@ -66,12 +69,14 @@ export function updateTerminal() {
 }
 
 export function copyTerminalLogs() {
-  const target = state.activeTerminalUser ? state.cachedProgress.find(t => t.username === state.activeTerminalUser) : null;
-  if (!target || !target.logs || target.logs.length === 0) {
+  const isTargetView = Boolean(state.activeTerminalUser);
+  const target = isTargetView ? state.cachedProgress.find(t => t.username === state.activeTerminalUser) : null;
+  const lines = isTargetView ? (target?.logs || []) : (state.globalLogs || []);
+  if (!lines || lines.length === 0) {
     toast("No logs available to copy.", "info");
     return;
   }
-  const text = target.logs.map(l => `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.level}] ${l.message}`).join("\n");
+  const text = lines.map(l => `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.level}] ${l.message}`).join("\n");
   navigator.clipboard.writeText(text).then(
     () => toast("Logs copied to clipboard.", "success", 2000),
     () => toast("Failed to copy logs.", "error")

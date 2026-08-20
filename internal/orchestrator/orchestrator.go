@@ -64,6 +64,7 @@ type SSEEvent struct {
 type Orchestrator struct {
 	mu             sync.RWMutex
 	progress       map[string]*TaskProgress
+	globalLogs     []TaskLog
 	cancels        map[string]context.CancelFunc
 	LastSync       time.Time
 	sseMu          sync.RWMutex
@@ -80,6 +81,7 @@ func InitOrchestrator(mediaIndex *gallery.Index) {
 	autoSyncCtx, autoSyncCancel := context.WithCancel(context.Background())
 	orch := &Orchestrator{
 		progress:       make(map[string]*TaskProgress),
+		globalLogs:     make([]TaskLog, 0, 100),
 		cancels:        make(map[string]context.CancelFunc),
 		sseClients:     make(map[chan SSEEvent]struct{}),
 		LastSync:       time.Now(),
@@ -112,18 +114,58 @@ type taskLogHandler struct {
 }
 
 func (h *taskLogHandler) Handle(ctx context.Context, r slog.Record) error {
-	var username string
+	var targetUser string
+	var attrs []string
+
 	r.Attrs(func(a slog.Attr) bool {
-		if a.Key == "user" {
-			username = a.Value.String()
-			return false
+		k := a.Key
+		if k == "user" || k == "username" || k == "target" {
+			targetUser = a.Value.String()
+			return true
+		}
+		val := a.Value.Any()
+		if val != nil && val != "" {
+			attrs = append(attrs, fmt.Sprintf("%s=%v", k, val))
 		}
 		return true
 	})
-	if username != "" {
-		h.orch.AppendTaskLog(username, time.Now(), r.Level.String(), r.Message)
+
+	formattedMsg := r.Message
+	if len(attrs) > 0 {
+		formattedMsg = fmt.Sprintf("%s (%s)", formattedMsg, strings.Join(attrs, ", "))
 	}
+
+	if targetUser != "" {
+		h.orch.AppendTaskLog(targetUser, time.Now(), r.Level.String(), formattedMsg)
+	} else {
+		h.orch.AppendGlobalLog(time.Now(), r.Level.String(), formattedMsg)
+	}
+
 	return h.Handler.Handle(ctx, r)
+}
+
+func (o *Orchestrator) AppendGlobalLog(t time.Time, level, msg string) {
+	o.mu.Lock()
+	displayMsg := msg
+	if !strings.HasPrefix(displayMsg, "[SYSTEM]") && !strings.HasPrefix(displayMsg, "[@") {
+		displayMsg = "[SYSTEM] " + displayMsg
+	}
+	o.globalLogs = append(o.globalLogs, TaskLog{
+		Timestamp: t,
+		Level:     level,
+		Message:   displayMsg,
+	})
+	if len(o.globalLogs) > maxTaskLogs {
+		o.globalLogs = o.globalLogs[len(o.globalLogs)-maxTaskLogs:]
+	}
+	o.mu.Unlock()
+
+	o.broadcast(SSEEvent{
+		Type:     "log",
+		Username: "system",
+		Level:    level,
+		Message:  msg,
+	})
 }
 
 // Subscribe registers a new SSE client channel and returns an unsubscribe function
@@ -219,26 +261,33 @@ func (o *Orchestrator) SyncTargets(accounts []config.Account) {
 func (o *Orchestrator) AppendTaskLog(username string, t time.Time, level, msg string) {
 	o.mu.Lock()
 	p, exists := o.progress[username]
-	if !exists {
-		o.mu.Unlock()
-		return
+	if exists {
+		p.Logs = append(p.Logs, TaskLog{
+			Timestamp: t,
+			Level:     level,
+			Message:   msg,
+		})
+		if len(p.Logs) > maxTaskLogs {
+			p.Logs = p.Logs[len(p.Logs)-maxTaskLogs:]
+		}
+		p.UpdatedAt = time.Now()
 	}
 
-	p.Logs = append(p.Logs, TaskLog{
+	o.globalLogs = append(o.globalLogs, TaskLog{
 		Timestamp: t,
 		Level:     level,
-		Message:   msg,
+		Message:   fmt.Sprintf("[@%s] %s", username, msg),
 	})
-
-	// Trim to max size to prevent unbounded memory growth
-	if len(p.Logs) > maxTaskLogs {
-		p.Logs = p.Logs[len(p.Logs)-maxTaskLogs:]
+	if len(o.globalLogs) > maxTaskLogs {
+		o.globalLogs = o.globalLogs[len(o.globalLogs)-maxTaskLogs:]
 	}
 
-	p.UpdatedAt = time.Now()
-
-	status := p.Status
-	currentProgress := p.Progress
+	status := ""
+	currentProgress := 0
+	if exists {
+		status = p.Status
+		currentProgress = p.Progress
+	}
 	o.mu.Unlock()
 
 	o.broadcast(SSEEvent{
@@ -249,7 +298,7 @@ func (o *Orchestrator) AppendTaskLog(username string, t time.Time, level, msg st
 	})
 
 	// Estimate progress based on log message content
-	if status == "running" || status == "queued" {
+	if exists && (status == "running" || status == "queued") {
 		progress := currentProgress
 		if progress < 10 {
 			progress = 10
@@ -257,11 +306,11 @@ func (o *Orchestrator) AppendTaskLog(username string, t time.Time, level, msg st
 		ml := strings.ToLower(msg)
 		if strings.Contains(ml, "navigating") || strings.Contains(ml, "testing twitter mirror") || strings.Contains(ml, "session is valid") || strings.Contains(ml, "yt-dlp using cookies") {
 			progress = 20
-		} else if strings.Contains(ml, "timeline page parsed") || strings.Contains(ml, "instagram post count") || strings.Contains(ml, "instagram feed page parsed") || strings.Contains(ml, "resolved instagram user id") || strings.Contains(ml, "yt-dlp progress") {
+		} else if strings.Contains(ml, "timeline page parsed") || strings.Contains(ml, "instagram post count") || strings.Contains(ml, "instagram feed page parsed") || strings.Contains(ml, "resolved instagram user id") || strings.Contains(ml, "downloading video stream") || strings.Contains(ml, "yt-dlp progress") {
 			progress = 50
 		} else if strings.Contains(ml, "concurrent download workers") {
 			progress = 70
-		} else if strings.Contains(ml, "file downloaded") || strings.Contains(ml, "instagram file downloaded") || strings.Contains(ml, "yt-dlp scrape completed") {
+		} else if strings.Contains(ml, "file downloaded") || strings.Contains(ml, "instagram file downloaded") || strings.Contains(ml, "twitter image downloaded") || strings.Contains(ml, "twitter video downloaded") || strings.Contains(ml, "video scraping completed") {
 			progress = 90
 		}
 		if progress != currentProgress {
@@ -272,6 +321,14 @@ func (o *Orchestrator) AppendTaskLog(username string, t time.Time, level, msg st
 			o.mu.Unlock()
 		}
 	}
+}
+
+func (o *Orchestrator) GetGlobalLogs() []TaskLog {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	copied := make([]TaskLog, len(o.globalLogs))
+	copy(copied, o.globalLogs)
+	return copied
 }
 
 func (o *Orchestrator) StartScrape(username string, platform string, saveText bool) {
@@ -366,6 +423,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	persistUpdated := p.UpdatedAt
 	o.mu.Unlock()
 
+	slog.Info("Starting media scrape worker", "user", username, "platform", platform)
 	o.broadcast(SSEEvent{Type: "status", Username: username, Status: "running", Progress: 5})
 	SavePersistedSyncInfo(persistUser, persistStatus, persistUpdated)
 
@@ -428,8 +486,8 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 		p.Status = "completed"
 		p.Progress = 100
 		p.AuthError = false
+		p.UpdatedAt = time.Now()
 	}
-	p.UpdatedAt = time.Now()
 	p.mediaCountCachedAt = time.Time{}
 	if o.mediaIndex != nil {
 		o.mediaIndex.Invalidate(platform, username)
@@ -449,12 +507,12 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 
 	if err != nil {
 		if ctx.Err() != nil {
-			o.AppendTaskLog(username, time.Now(), "ERROR", "Scraping task cancelled by user.")
+			slog.Info("Scraping task cancelled by user", "user", username, "platform", platform)
 		} else {
-			o.AppendTaskLog(username, time.Now(), "ERROR", fmt.Sprintf("Scraping task aborted with error: %v", err))
+			slog.Error("Scraping task aborted with error", "user", username, "platform", platform, "error", err)
 		}
 	} else {
-		o.AppendTaskLog(username, time.Now(), "INFO", "Scraping completed successfully.")
+		slog.Info("Scraping completed successfully", "user", username, "platform", platform, "new_files", newCount, "total_files", afterCount)
 	}
 }
 

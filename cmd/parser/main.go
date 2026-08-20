@@ -49,7 +49,9 @@ func main() {
 
 	gallery.Init()
 	orchestrator.InitOrchestrator(gallery.GlobalIndex)
-	orchestrator.GlobalOrchestrator.SyncTargets(config.GetConfig().Accounts)
+	cfg := config.GetConfig()
+	slog.Info("Configuration loaded successfully", "targets_count", len(cfg.Accounts), "auto_sync_interval_hours", cfg.AutoSyncInterval)
+	orchestrator.GlobalOrchestrator.SyncTargets(cfg.Accounts)
 
 	scraper.MigrateThumbnails()
 	scraper.MigrateVideoCodecs()
@@ -221,6 +223,7 @@ func (a *App) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 
 type ProgressResponse struct {
 	Targets          []orchestrator.TaskProgress `json:"targets"`
+	GlobalLogs       []orchestrator.TaskLog      `json:"global_logs"`
 	LastSync         string                      `json:"last_sync"`
 	AutoSyncInterval int                         `json:"auto_sync_interval"`
 }
@@ -232,9 +235,11 @@ func (a *App) handleProgress(w http.ResponseWriter, r *http.Request) {
 
 	c := config.GetConfig()
 	targets := a.orch.GetAllProgress(c.Accounts)
+	globalLogs := a.orch.GetGlobalLogs()
 
 	resp := ProgressResponse{
 		Targets:          targets,
+		GlobalLogs:       globalLogs,
 		LastSync:         a.orch.LastSyncTime().Format(time.RFC3339),
 		AutoSyncInterval: c.AutoSyncInterval,
 	}
@@ -446,6 +451,7 @@ func (a *App) handleScrapeStart(w http.ResponseWriter, r *http.Request) {
 	c := config.GetConfig()
 
 	if req.Username == "all" {
+		slog.Info("Triggered sync for all configured targets")
 		for _, acc := range c.Accounts {
 			a.orch.StartScrape(acc.Username, acc.Platform, acc.SaveText)
 		}
@@ -467,6 +473,7 @@ func (a *App) handleScrapeStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.Info("Triggered sync for target", "user", targetAccount.Username, "platform", targetAccount.Platform)
 	a.orch.StartScrape(targetAccount.Username, targetAccount.Platform, targetAccount.SaveText)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -492,6 +499,7 @@ func (a *App) handleScrapeCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.Info("Cancelling active sync", "user", req.Username)
 	ok := a.orch.CancelScrape(req.Username)
 	w.Header().Set("Content-Type", "application/json")
 	if ok {
@@ -516,8 +524,10 @@ func (a *App) handleScrapeClear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	slog.Info("Clearing downloaded files for target", "user", req.Username, "platform", req.Platform)
 	dir := filepath.Join("downloads", req.Platform, req.Username)
 	if err := os.RemoveAll(dir); err != nil {
+		slog.Warn("Failed to delete target directory", "user", req.Username, "dir", dir, "error", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -528,7 +538,9 @@ func (a *App) handleScrapeClear(w http.ResponseWriter, r *http.Request) {
 	}
 
 	orchestrator.SavePersistedSyncInfo(req.Username, "idle", time.Time{})
-	a.mediaIndex.Invalidate(req.Platform, req.Username)
+	if a.mediaIndex != nil {
+		a.mediaIndex.Invalidate(req.Platform, req.Username)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "cleared", "target": req.Username})

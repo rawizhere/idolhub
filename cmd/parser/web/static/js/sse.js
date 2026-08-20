@@ -55,6 +55,14 @@ export function initSSE() {
 
 export function handleSSEEvent(evt) {
   if (evt.type === "log") {
+    const globalMsg = evt.username && evt.username !== "system" ? `[@${evt.username}] ${evt.message}` : evt.message;
+    state.globalLogs.push({
+      timestamp: new Date().toISOString(),
+      level: (evt.level || "info").toLowerCase(),
+      message: globalMsg
+    });
+    if (state.globalLogs.length > 1000) state.globalLogs = state.globalLogs.slice(-1000);
+
     const target = state.cachedProgress.find(t => t.username === evt.username);
     if (target) {
       if (!target.logs) target.logs = [];
@@ -67,9 +75,9 @@ export function handleSSEEvent(evt) {
     }
     const dockLog = document.getElementById("dock-latest-log");
     if (dockLog && evt.message) {
-      dockLog.textContent = `[@${evt.username}] ${evt.message}`;
+      dockLog.textContent = globalMsg;
     }
-    if (state.activeTerminalUser === evt.username) {
+    if (!state.activeTerminalUser || state.activeTerminalUser === evt.username) {
       updateTerminal();
     }
   } else if (evt.type === "status") {
@@ -93,6 +101,9 @@ export async function loadProgress() {
   try {
     const data = await fetchProgress();
     state.cachedProgress = data.targets || [];
+    if (data.global_logs && data.global_logs.length > 0) {
+      state.globalLogs = data.global_logs;
+    }
     state.lastSyncTime = data.last_sync || "";
     state.autoSyncInterval = data.auto_sync_interval || 0;
 
@@ -104,8 +115,8 @@ export async function loadProgress() {
       renderOverviewDashboard();
     } else {
       updateDashboardDetails();
-      updateTerminal();
     }
+    updateTerminal();
   } catch (err) {
     console.error("Progress fetch error:", err);
   }

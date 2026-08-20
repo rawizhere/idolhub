@@ -10,6 +10,7 @@ export const state = {
   sseConnected: false,
 
   terminalLevel: "all",
+  globalLogs: [],
   dockConsoleOpen: false,
   gridDensity: localStorage.getItem("idolhub-density") || "relaxed",
 
