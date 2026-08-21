@@ -34,11 +34,13 @@ RUN apk add --no-cache \
     chromium \
     ffmpeg \
     python3 \
+    py3-pip \
     deno \
     ca-certificates \
     tzdata \
     curl \
     su-exec \
+    && pip install --no-cache-dir --break-system-packages curl_cffi \
     && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp \
     && rm -rf /var/cache/apk/*

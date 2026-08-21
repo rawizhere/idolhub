@@ -377,6 +377,23 @@ func (a *App) handleMedia(w http.ResponseWriter, r *http.Request) {
 	}
 	filePath := filepath.Join("downloads", filepath.FromSlash(cleaned))
 
+	if strings.Contains(cleaned, "thumbnails"+string(filepath.Separator)) {
+		if _, err := os.Stat(filePath); os.IsNotExist(err) {
+			dir := filepath.Dir(filePath)
+			parentDir := filepath.Dir(dir)
+			base := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+			candidates := []string{".mp4", ".mov", ".webm", ".jpg", ".jpeg", ".png", ".webp"}
+			for _, cExt := range candidates {
+				srcFile := filepath.Join(parentDir, base+cExt)
+				if _, serr := os.Stat(srcFile); serr == nil {
+					_ = os.MkdirAll(dir, 0755)
+					_ = scraper.GenerateThumbnail(srcFile, filePath)
+					break
+				}
+			}
+		}
+	}
+
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
 	case ".mp4", ".m4v":

@@ -160,6 +160,29 @@ func ScrapeYTDLP(ctx context.Context, platform, username string, saveText bool, 
 		}
 	}
 
+	thumbDir := filepath.Join(outputDir, "thumbnails")
+	if err := os.MkdirAll(thumbDir, 0755); err == nil {
+		if entries, err := os.ReadDir(outputDir); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				name := entry.Name()
+				ext := strings.ToLower(filepath.Ext(name))
+				if ext == ".mp4" || ext == ".webm" || ext == ".mov" {
+					thumbName := strings.TrimSuffix(name, ext) + ".jpg"
+					thumbPath := filepath.Join(thumbDir, thumbName)
+					if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
+						_ = GenerateThumbnail(filepath.Join(outputDir, name), thumbPath)
+					}
+				}
+			}
+		}
+	}
+
+	// Ensure video codecs are browser-compatible (H.264)
+	EnsureDirectoryVideoCodecs(ctx, outputDir)
+
 	slog.Info("yt-dlp video scraping completed successfully", "platform", platform, "user", username)
 	return nil
 }

@@ -69,6 +69,32 @@ func TranscodeToH264(ctx context.Context, srcPath string) error {
 	return nil
 }
 
+// EnsureDirectoryVideoCodecs checks all videos in a target directory and transcodes any HEVC/ByteVC1 videos to H.264.
+func EnsureDirectoryVideoCodecs(ctx context.Context, dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") || strings.Contains(name, ".transcoding.") || strings.HasSuffix(name, ".tmp.mp4") {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext == ".mp4" || ext == ".mov" || ext == ".m4v" {
+			filePath := filepath.Join(dir, name)
+			codec, err := probeVideoCodec(ctx, filePath)
+			if err == nil && (codec == "hevc" || codec == "h265" || codec == "bytevc1") {
+				slog.Info("Transcoding video to H.264 for cross-browser playback", "file", filePath)
+				_ = TranscodeToH264(ctx, filePath)
+			}
+		}
+	}
+}
+
 // MigrateVideoCodecs scans downloads directory in background and transcodes incompatible codecs (HEVC/H.265/ByteVC1) to universal H.264.
 func MigrateVideoCodecs() {
 	go func() {
