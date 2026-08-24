@@ -640,6 +640,11 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.Contains(r.URL.Path, "/posts") {
+		a.handleGalleryPostsPage(w, r, p)
+		return
+	}
+
 	platform := p.Platform
 	username := p.Username
 	page := p.Page
@@ -802,12 +807,6 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 				allFiles = filtered
 			}
 		}
-	}
-
-	isPosts := strings.Contains(r.URL.Path, "/posts")
-	if isPosts {
-		a.handleGalleryPostsPage(w, r, p)
-		return
 	}
 
 	total := len(allFiles)
