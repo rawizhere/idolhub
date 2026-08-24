@@ -5,7 +5,6 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -421,39 +420,7 @@ func (a *App) handleMedia(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleSSE(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Connection", "keep-alive")
-
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-
-	ch, unsubscribe := a.orch.Subscribe()
-	defer unsubscribe()
-
-	_, _ = fmt.Fprintf(w, "event: hello\ndata: {}\n\n")
-	flusher.Flush()
-
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case evt, ok := <-ch:
-			if !ok {
-				return
-			}
-			data, err := json.Marshal(evt)
-			if err != nil {
-				continue
-			}
-			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
-		}
-	}
+	a.orch.SSEHandler().ServeHTTP(w, r)
 }
 
 func (a *App) handleScrapeStart(w http.ResponseWriter, r *http.Request) {

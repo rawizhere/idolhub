@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tmaxmax/go-sse"
 
 	"idolhub/internal/config"
 	"idolhub/internal/gallery"
@@ -67,8 +70,7 @@ type Orchestrator struct {
 	globalLogs     []TaskLog
 	cancels        map[string]context.CancelFunc
 	LastSync       time.Time
-	sseMu          sync.RWMutex
-	sseClients     map[chan SSEEvent]struct{}
+	sseServer      *sse.Server
 	autoSyncCtx    context.Context
 	autoSyncCancel context.CancelFunc
 	mediaIndex     *gallery.Index
@@ -79,11 +81,20 @@ var GlobalOrchestrator *Orchestrator
 
 func InitOrchestrator(mediaIndex *gallery.Index) {
 	autoSyncCtx, autoSyncCancel := context.WithCancel(context.Background())
+	sseServer := &sse.Server{
+		OnSession: func(w http.ResponseWriter, r *http.Request) ([]string, bool) {
+			_, _ = fmt.Fprintf(w, "event: hello\ndata: {}\n\n")
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+			return nil, true
+		},
+	}
 	orch := &Orchestrator{
 		progress:       make(map[string]*TaskProgress),
 		globalLogs:     make([]TaskLog, 0, 100),
 		cancels:        make(map[string]context.CancelFunc),
-		sseClients:     make(map[chan SSEEvent]struct{}),
+		sseServer:      sseServer,
 		LastSync:       time.Now(),
 		autoSyncCtx:    autoSyncCtx,
 		autoSyncCancel: autoSyncCancel,
@@ -168,30 +179,22 @@ func (o *Orchestrator) AppendGlobalLog(t time.Time, level, msg string) {
 	})
 }
 
-// Subscribe registers a new SSE client channel and returns an unsubscribe function
-func (o *Orchestrator) Subscribe() (chan SSEEvent, func()) {
-	ch := make(chan SSEEvent, 256)
-	o.sseMu.Lock()
-	o.sseClients[ch] = struct{}{}
-	o.sseMu.Unlock()
-	return ch, func() {
-		o.sseMu.Lock()
-		delete(o.sseClients, ch)
-		o.sseMu.Unlock()
-		close(ch)
-	}
+// Subscribe is unused; SSE is served directly via sseServer.
+func (o *Orchestrator) SSEHandler() http.Handler {
+	return o.sseServer
 }
 
 func (o *Orchestrator) broadcast(evt SSEEvent) {
-	o.sseMu.RLock()
-	for ch := range o.sseClients {
-		select {
-		case ch <- evt:
-		default:
-			// Drop event if client buffer is full (slow consumer)
-		}
+	if o.sseServer == nil {
+		return
 	}
-	o.sseMu.RUnlock()
+	data, err := json.Marshal(evt)
+	if err != nil {
+		return
+	}
+	msg := &sse.Message{}
+	msg.AppendData(string(data))
+	_ = o.sseServer.Publish(msg)
 }
 
 func loadPersistedSyncInfo(username string) (string, time.Time) {
