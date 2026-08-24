@@ -23,6 +23,7 @@ require (
 )
 
 require (
+	github.com/AlexEidt/Vidio v1.5.1 // indirect
 	github.com/ProtonMail/go-crypto v1.3.0 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
@@ -30,6 +31,7 @@ require (
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.4.0 // indirect
+	github.com/imperatrona/twitter-scraper v0.0.18 // indirect
 	github.com/juju/go4 v0.0.0-20160222163258-40d72ab9641a // indirect
 	github.com/ulikunitz/xz v0.5.15 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
