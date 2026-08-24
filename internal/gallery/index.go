@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/fsnotify/fsnotify"
 	lru "github.com/hashicorp/golang-lru/v2"
 )
 
@@ -29,6 +30,46 @@ func Init() {
 		panic(err)
 	}
 	GlobalIndex = &Index{files: cache}
+	GlobalIndex.watch()
+}
+
+func (idx *Index) watch() {
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return
+	}
+	if err := w.Add("downloads"); err != nil {
+		_ = w.Close()
+		return
+	}
+	go func() {
+		for {
+			select {
+			case ev, ok := <-w.Events:
+				if !ok {
+					return
+				}
+				idx.invalidateFromPath(ev.Name)
+				if ev.Op.Has(fsnotify.Create) {
+					if fi, err := os.Stat(ev.Name); err == nil && fi.IsDir() {
+						_ = w.Add(ev.Name)
+					}
+				}
+			case <-w.Errors:
+			}
+		}
+	}()
+}
+
+func (idx *Index) invalidateFromPath(path string) {
+	rel, err := filepath.Rel("downloads", path)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return
+	}
+	parts := strings.Split(rel, string(os.PathSeparator))
+	if len(parts) >= 2 {
+		idx.Invalidate(parts[0], parts[1])
+	}
 }
 
 func keyOf(platform, username string) string {
