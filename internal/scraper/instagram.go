@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -174,7 +176,12 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	slog.Info("Instagram session is valid", "user", username)
 	report(30, "session valid")
 
-	userID, err := resolveInstagramUserID(dpCtx, username)
+	apiClient, err := igAPIClient(dpCtx)
+	if err != nil {
+		return fmt.Errorf("failed to export browser cookies: %w", err)
+	}
+
+	userID, err := resolveInstagramUserID(dpCtx, username, apiClient)
 	if err != nil {
 		return fmt.Errorf("failed to resolve Instagram user ID: %w", err)
 	}
@@ -208,7 +215,6 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		}
 		page++
 
-		var feedJSON string
 		apiURL := fmt.Sprintf("https://www.instagram.com/api/v1/feed/user/%s/?count=50", userID)
 		if nextMaxID != "" {
 			apiURL += "&max_id=" + nextMaxID
@@ -216,27 +222,14 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 
 		slog.Info("Fetching Instagram media feed page", "user", username, "page", page, "url", apiURL)
 
-		if err := chromedp.Run(dpCtx,
-			chromedp.Evaluate(fmt.Sprintf(`
-				fetch(%q, {
-					credentials: "include",
-					headers: {
-						"accept": "*/*",
-						"x-ig-app-id": "936619743392459",
-						"x-requested-with": "XMLHttpRequest",
-						"referer": "https://www.instagram.com/%s/"
-					}
-				}).then(r => r.text()).then(t => window.__igFeed = t).catch(e => window.__igFeed = "ERROR:" + e.message)
-			`, apiURL, url.PathEscape(username)), nil),
-			igJitterAction(),
-			chromedp.Evaluate(`window.__igFeed || ""`, &feedJSON),
-		); err != nil {
-			slog.Error("Failed to fetch Instagram feed page", "user", username, "page", page, "error", err)
-			break
+		if err := igLimiter.Wait(ctx); err != nil {
+			close(jobs)
+			pool.Wait()
+			return ctx.Err()
 		}
-
-		if strings.HasPrefix(feedJSON, "ERROR:") {
-			slog.Error("Instagram feed fetch returned error", "user", username, "error", feedJSON)
+		feedJSON, ferr := igAPIGet(ctx, apiClient, apiURL)
+		if ferr != nil {
+			slog.Error("Failed to fetch Instagram feed page", "user", username, "page", page, "error", ferr)
 			break
 		}
 		if feedJSON == "" {
@@ -398,34 +391,70 @@ func igJitterAction() chromedp.Action {
 	})
 }
 
+// igAPIClient exports browser cookies into a plain HTTP client for API calls.
+func igAPIClient(dpCtx context.Context) (*http.Client, error) {
+	var rawCookies []*network.Cookie
+	if err := chromedp.Run(dpCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		cookies, err := network.GetCookies().Do(ctx)
+		rawCookies = cookies
+		return err
+	})); err != nil {
+		return nil, err
+	}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range rawCookies {
+		u := &url.URL{Scheme: "https", Host: strings.TrimPrefix(c.Domain, "."), Path: c.Path}
+		jar.SetCookies(u, []*http.Cookie{{
+			Name:     c.Name,
+			Value:    c.Value,
+			Domain:   c.Domain,
+			Path:     c.Path,
+			Secure:   c.Secure,
+			HttpOnly: c.HTTPOnly,
+		}})
+	}
+	return &http.Client{Timeout: 30 * time.Second, Jar: jar}, nil
+}
+
+func igAPIGet(ctx context.Context, client *http.Client, apiURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", desktopUA)
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("X-IG-App-ID", "936619743392459")
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", download.StatusError(resp.StatusCode)
+	}
+	return string(body), nil
+}
+
 // resolveInstagramUserID resolves numeric user ID from username
-func resolveInstagramUserID(ctx context.Context, username string) (string, error) {
+func resolveInstagramUserID(ctx context.Context, username string, client *http.Client) (string, error) {
 	if err := igLimiter.Wait(ctx); err != nil {
 		return "", err
 	}
 
 	profileAPI := fmt.Sprintf("https://www.instagram.com/api/v1/users/web_profile_info/?username=%s", url.PathEscape(username))
-	var profileJSON string
-	if err := chromedp.Run(ctx,
-		chromedp.Evaluate(fmt.Sprintf(`
-			fetch(%q, {
-				credentials: "include",
-				headers: {
-					"accept": "*/*",
-					"x-ig-app-id": "936619743392459",
-					"x-requested-with": "XMLHttpRequest",
-					"referer": "https://www.instagram.com/%s/"
-				}
-			}).then(r => r.text()).then(t => window.__igProfile = t).catch(e => window.__igProfile = "ERROR:" + e.message)
-		`, profileAPI, url.PathEscape(username)), nil),
-		igJitterAction(),
-		chromedp.Evaluate(`window.__igProfile || ""`, &profileJSON),
-	); err != nil {
-		return "", fmt.Errorf("failed to query Instagram web_profile_info: %w", err)
-	}
-
-	if strings.HasPrefix(profileJSON, "ERROR:") {
-		slog.Warn("Instagram web_profile_info returned error, falling back to search", "username", username, "error", profileJSON)
+	profileJSON, err := igAPIGet(ctx, client, profileAPI)
+	if err != nil {
+		slog.Warn("Instagram web_profile_info returned error, falling back to search", "username", username, "error", err)
 	} else if profileJSON != "" {
 		var profile struct {
 			Data struct {
@@ -435,10 +464,8 @@ func resolveInstagramUserID(ctx context.Context, username string) (string, error
 				} `json:"user"`
 			} `json:"data"`
 		}
-		if err := json.Unmarshal([]byte(profileJSON), &profile); err == nil {
-			if profile.Data.User.ID != "" {
-				return profile.Data.User.ID, nil
-			}
+		if err := json.Unmarshal([]byte(profileJSON), &profile); err == nil && profile.Data.User.ID != "" {
+			return profile.Data.User.ID, nil
 		}
 	}
 
@@ -446,38 +473,24 @@ func resolveInstagramUserID(ctx context.Context, username string) (string, error
 	if err := igLimiter.Wait(ctx); err != nil {
 		return "", err
 	}
-	var searchJSON string
-	if err := chromedp.Run(ctx,
-		chromedp.Evaluate(fmt.Sprintf(`
-			fetch("https://www.instagram.com/api/v1/web/search/topsearch/?query=%s", {
-				credentials: "include",
-				headers: {
-					"accept": "*/*",
-					"x-ig-app-id": "936619743392459",
-					"x-requested-with": "XMLHttpRequest"
-				}
-			}).then(r => r.text()).then(t => window.__igSearch = t).catch(e => window.__igSearch = "")
-		`, url.PathEscape(username)), nil),
-		igJitterAction(),
-		chromedp.Evaluate(`window.__igSearch || ""`, &searchJSON),
-	); err != nil {
+	searchAPI := fmt.Sprintf("https://www.instagram.com/api/v1/web/search/topsearch/?query=%s", url.PathEscape(username))
+	searchJSON, err := igAPIGet(ctx, client, searchAPI)
+	if err != nil {
 		return "", fmt.Errorf("failed to query Instagram search API: %w", err)
 	}
 
-	if searchJSON != "" {
-		var search struct {
-			Users []struct {
-				User struct {
-					ID       string `json:"pk"`
-					Username string `json:"username"`
-				} `json:"user"`
-			} `json:"users"`
-		}
-		if err := json.Unmarshal([]byte(searchJSON), &search); err == nil {
-			for _, u := range search.Users {
-				if strings.EqualFold(u.User.Username, username) {
-					return u.User.ID, nil
-				}
+	var search struct {
+		Users []struct {
+			User struct {
+				ID       string `json:"pk"`
+				Username string `json:"username"`
+			} `json:"user"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal([]byte(searchJSON), &search); err == nil {
+		for _, u := range search.Users {
+			if strings.EqualFold(u.User.Username, username) {
+				return u.User.ID, nil
 			}
 		}
 	}
