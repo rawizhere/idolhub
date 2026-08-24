@@ -53,3 +53,6 @@ opencode.json
 
 # --- Media ---
 downloads/
+
+# --- Baselines ---
+.golden/
