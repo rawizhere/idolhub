@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dustin/go-humanize"
+
 	"idolhub/cmd/parser/web/templates"
 	"idolhub/internal/config"
 	"idolhub/internal/download"
@@ -259,6 +261,7 @@ type GalleryFile struct {
 	Type         string `json:"type"` // "image" or "video"
 	Date         string `json:"date"`
 	Size         int64  `json:"size"`
+	SizeHuman    string `json:"size_human"`
 	URL          string `json:"url"`
 	ThumbnailURL string `json:"thumbnail_url"`
 }
@@ -319,6 +322,7 @@ func (a *App) handleGallery(w http.ResponseWriter, r *http.Request) {
 			Type:         e.Type,
 			Date:         date,
 			Size:         e.Size,
+			SizeHuman:    humanize.Bytes(uint64(e.Size)),
 			URL:          "/media/" + platform + "/" + username + "/" + name,
 			ThumbnailURL: thumbnailURL,
 		})
@@ -650,6 +654,7 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 			Type:         e.Type,
 			Date:         date,
 			Size:         e.Size,
+			SizeHuman:    humanize.Bytes(uint64(e.Size)),
 			URL:          mediaURL,
 			ThumbnailURL: thumbURL,
 		})
@@ -999,6 +1004,7 @@ type GlobalSearchResultFile struct {
 	Type         string `json:"type"`
 	Date         string `json:"date"`
 	Size         int64  `json:"size"`
+	SizeHuman    string `json:"size_human"`
 	URL          string `json:"url"`
 	ThumbnailURL string `json:"thumbnail_url"`
 	Caption      string `json:"caption,omitempty"`
@@ -1042,6 +1048,7 @@ func (a *App) handleGlobalSearchAPI(w http.ResponseWriter, r *http.Request) {
 				Type:         e.Type,
 				Date:         date,
 				Size:         e.Size,
+				SizeHuman:    humanize.Bytes(uint64(e.Size)),
 				URL:          "/media/" + platform + "/" + username + "/" + name,
 				ThumbnailURL: "/media/" + platform + "/" + username + "/thumbnails/" + thumbFilename,
 			})
