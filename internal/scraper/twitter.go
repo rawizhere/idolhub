@@ -25,6 +25,8 @@ import (
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"golang.org/x/time/rate"
+
+	pcookiejar "github.com/juju/persistent-cookiejar"
 )
 
 type TwitterDownloadItem struct {
@@ -119,7 +121,27 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	defer cancelTimeout()
 
 	jobs := make(chan TwitterDownloadItem, 10000)
-	client := &http.Client{Timeout: 45 * time.Second}
+	jar, err := pcookiejar.New(&pcookiejar.Options{
+		Filename: filepath.Join(outputDir, "cookies.json"),
+	})
+	if err != nil {
+		slog.Error("Failed to create cookie jar", "user", username, "error", err)
+		return err
+	}
+	defer func() { _ = jar.Save() }()
+
+	// Seed the session cookie so the HTTP client stays authed across runs.
+	jar.SetCookies(&url.URL{Scheme: "https", Host: "x.com"}, []*http.Cookie{{
+		Name:     "auth_token",
+		Value:    twitterAuthToken,
+		Domain:   ".x.com",
+		Path:     "/",
+		Secure:   true,
+		HttpOnly: true,
+		Expires:  time.Now().Add(180 * 24 * time.Hour),
+	}})
+
+	client := &http.Client{Timeout: 45 * time.Second, Jar: jar}
 	pool := download.Start(ctx, jobs, numWorkers, func(ctx context.Context, item TwitterDownloadItem) bool {
 		if item.IsVideo {
 			return downloadTwitterVideo(ctx, item, outputDir, client, username)
@@ -409,7 +431,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	slog.Info("Navigating to Twitter/X", "user", username, "url", targetURL)
 	report(20, "navigating")
 
-	err := chromedp.Run(dpCtx,
+	err = chromedp.Run(dpCtx,
 		network.Enable(),
 		navigateNoWait("https://x.com"),
 		chromedp.Sleep(1*time.Second),
