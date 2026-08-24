@@ -5,6 +5,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"io/fs"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -42,7 +43,6 @@ type App struct {
 
 func main() {
 	logging.Init()
-
 	if err := config.LoadConfig(); err != nil {
 		slog.Error("Failed to load configuration", "error", err)
 		os.Exit(1)
@@ -63,7 +63,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", app.serveStatic)
+	mux.Handle("GET /", app.serveStatic())
 	mux.HandleFunc("GET /api/config", app.handleConfigGet)
 	mux.HandleFunc("POST /api/config", app.handleConfigPost)
 	mux.HandleFunc("GET /api/progress", app.handleProgress)
@@ -115,63 +115,29 @@ func main() {
 }
 
 func init() {
-	_ = mime.AddExtensionType(".mp4", "video/mp4")
-	_ = mime.AddExtensionType(".m4v", "video/mp4")
-	_ = mime.AddExtensionType(".webm", "video/webm")
-	_ = mime.AddExtensionType(".mov", "video/quicktime")
-	_ = mime.AddExtensionType(".jpg", "image/jpeg")
-	_ = mime.AddExtensionType(".jpeg", "image/jpeg")
-	_ = mime.AddExtensionType(".png", "image/png")
-	_ = mime.AddExtensionType(".webp", "image/webp")
-	_ = mime.AddExtensionType(".gif", "image/gif")
-	_ = mime.AddExtensionType(".svg", "image/svg+xml")
-	_ = mime.AddExtensionType(".js", "application/javascript")
-	_ = mime.AddExtensionType(".css", "text/css")
-	_ = mime.AddExtensionType(".json", "application/json")
+	for ext, typ := range map[string]string{
+		".mp4":  "video/mp4",
+		".m4v":  "video/mp4",
+		".webm": "video/webm",
+		".mov":  "video/quicktime",
+	} {
+		_ = mime.AddExtensionType(ext, typ)
+	}
 }
 
-func (a *App) serveStatic(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
-	if r.URL.Path == "/" {
-		data, err := staticAssets.ReadFile("web/static/index.html")
-		if err != nil {
-			http.Error(w, "File not found", 404)
+func (a *App) serveStatic() http.Handler {
+	sub, _ := fs.Sub(staticAssets, "web/static")
+	fileServer := http.FileServerFS(sub)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Pragma", "no-cache")
+		if r.URL.Path != "/" && strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write(data)
-		return
-	}
-
-	if strings.HasPrefix(r.URL.Path, "/static/") {
-		filePath := "web" + r.URL.Path
-		data, err := staticAssets.ReadFile(filePath)
-		if err != nil {
-			http.Error(w, "File not found", 404)
-			return
-		}
-
-		ext := strings.ToLower(filepath.Ext(filePath))
-		switch ext {
-		case ".css":
-			w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		case ".js":
-			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-		case ".svg":
-			w.Header().Set("Content-Type", "image/svg+xml")
-		case ".json":
-			w.Header().Set("Content-Type", "application/json")
-		default:
-			if ct := mime.TypeByExtension(ext); ct != "" {
-				w.Header().Set("Content-Type", ct)
-			}
-		}
-		_, _ = w.Write(data)
-		return
-	}
-
-	http.NotFound(w, r)
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/static")
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 func (a *App) handleConfigGet(w http.ResponseWriter, r *http.Request) {
