@@ -41,6 +41,68 @@ type TweetPost struct {
 	YoutubeURLs []string `json:"youtube_urls,omitempty"`
 }
 
+type tweetMedia struct {
+	MediaURLHTTPS string `json:"media_url_https"`
+	VideoInfo     struct {
+		Variants []struct {
+			ContentType string `json:"content_type"`
+			Bitrate     int    `json:"bitrate"`
+			URL         string `json:"url"`
+		} `json:"variants"`
+	} `json:"video_info"`
+}
+
+type tweetLegacy struct {
+	FullText  string `json:"full_text"`
+	Text      string `json:"text"`
+	IDStr     string `json:"id_str"`
+	InReplyTo string `json:"in_reply_to_status_id_str"`
+	User      struct {
+		ScreenName string `json:"screen_name"`
+	} `json:"user"`
+	ExtendedEntities struct {
+		Media []tweetMedia `json:"media"`
+	} `json:"extended_entities"`
+	Entities struct {
+		URLs []struct {
+			ExpandedURL string `json:"expanded_url"`
+		} `json:"urls"`
+	} `json:"entities"`
+}
+
+func (l tweetLegacy) body() string {
+	if l.FullText != "" {
+		return l.FullText
+	}
+	return l.Text
+}
+
+type tweet struct {
+	Legacy tweetLegacy `json:"legacy"`
+	User   struct {
+		ScreenName string `json:"screen_name"`
+	} `json:"user"`
+}
+
+func (t *tweet) author() string {
+	if t.Legacy.User.ScreenName != "" {
+		return t.Legacy.User.ScreenName
+	}
+	return t.User.ScreenName
+}
+
+func decodeTweet(m map[string]interface{}) (*tweet, string, bool) {
+	b, err := json.Marshal(m)
+	if err != nil {
+		return nil, "", false
+	}
+	var tw tweet
+	if err := json.Unmarshal(b, &tw); err != nil || tw.Legacy.IDStr == "" {
+		return nil, "", false
+	}
+	return &tw, tw.Legacy.IDStr, true
+}
+
 func snowflakeToTime(tweetIDStr string) (time.Time, error) {
 	tweetID, err := strconv.ParseInt(tweetIDStr, 10, 64)
 	if err != nil {
@@ -156,40 +218,18 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	done := make(chan struct{})
 	var listenerWg sync.WaitGroup
 
-	seenTweets := make(map[string]map[string]interface{})
+	seenTweets := make(map[string]*tweet)
 	repliesIndex := make(map[string][]string)
 	matchedIDs := make(map[string]bool)
 
 	// Must be called with postsMu held
 	queueTweetLocked := func(tweetID string) {
-		tweet, ok := seenTweets[tweetID]
+		tw, ok := seenTweets[tweetID]
 		if !ok {
 			slog.Debug("Tweet not found in seenTweets", "tweet_id", tweetID)
 			return
 		}
-		// Only download media from the target user's own tweets; search recursively for screen_name.
-		var author string
-		var searchScreenName func(interface{}) string
-		searchScreenName = func(node interface{}) string {
-			if m, ok := node.(map[string]interface{}); ok {
-				if sn, ok := m["screen_name"].(string); ok && sn != "" {
-					return sn
-				}
-				for _, val := range m {
-					if sn := searchScreenName(val); sn != "" {
-						return sn
-					}
-				}
-			} else if arr, ok := node.([]interface{}); ok {
-				for _, val := range arr {
-					if sn := searchScreenName(val); sn != "" {
-						return sn
-					}
-				}
-			}
-			return ""
-		}
-		author = searchScreenName(tweet)
+		author := tw.author()
 		if author == "" {
 			slog.Debug("No author found for tweet", "tweet_id", tweetID)
 			return
@@ -198,102 +238,60 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 			slog.Debug("Skipping non-author tweet", "author", author, "target", username, "tweet_id", tweetID)
 			return
 		}
-		legacy, ok := tweet["legacy"].(map[string]interface{})
-		if !ok {
-			return
-		}
-		text, _ := legacy["full_text"].(string)
-		if text == "" {
-			text, _ = legacy["text"].(string)
-		}
+		text := tw.Legacy.body()
 		dateStr := parseTwitterSnowflakeDate(tweetID)
 
 		var tweetMediaURLs []string
-		if extEntities, ok := legacy["extended_entities"].(map[string]interface{}); ok {
-			if mediaList, ok := extEntities["media"].([]interface{}); ok {
-				for _, m := range mediaList {
-					itemMap, ok := m.(map[string]interface{})
-					if !ok {
-						continue
-					}
-					downloadURL, _ := itemMap["media_url_https"].(string)
-					isVideo := false
+		for _, m := range tw.Legacy.ExtendedEntities.Media {
+			downloadURL := m.MediaURLHTTPS
+			isVideo := false
 
-					// Check for video variants
-					if videoInfo, ok := itemMap["video_info"].(map[string]interface{}); ok {
-						if variants, ok := videoInfo["variants"].([]interface{}); ok {
-							bestVideoURL := ""
-							maxBitrate := -1
-							for _, v := range variants {
-								vMap, ok := v.(map[string]interface{})
-								if !ok {
-									continue
-								}
-								cType, _ := vMap["content_type"].(string)
-								if cType == "video/mp4" {
-									bitrateVal := vMap["bitrate"]
-									var bitrate int
-									if bFloat, ok := bitrateVal.(float64); ok {
-										bitrate = int(bFloat)
-									} else if bInt, ok := bitrateVal.(int); ok {
-										bitrate = bInt
-									}
-									if bitrate > maxBitrate {
-										maxBitrate = bitrate
-										bestVideoURL, _ = vMap["url"].(string)
-									}
-								}
-							}
-							if bestVideoURL != "" {
-								downloadURL = bestVideoURL
-								isVideo = true
-							}
-						}
-					}
-
-					if downloadURL != "" {
-						slog.Debug("Queued URL", "url", downloadURL, "video", isVideo)
-						if isVideo && !downloadVideos {
-							continue
-						}
-						if !isVideo && !downloadPhotos {
-							continue
-						}
-
-						if !queuedURLs[downloadURL] {
-							queuedURLs[downloadURL] = true
-							select {
-							case jobs <- TwitterDownloadItem{
-								URL:     downloadURL,
-								DateStr: dateStr,
-								TweetID: tweetID,
-								IsVideo: isVideo,
-							}:
-							case <-done:
-								return
-							}
-							slog.Debug("Added to download queue", "tweet_id", tweetID, "url", downloadURL, "video", isVideo)
-						}
-						tweetMediaURLs = append(tweetMediaURLs, downloadURL)
-					}
+			bestVideoURL := ""
+			maxBitrate := -1
+			for _, v := range m.VideoInfo.Variants {
+				if v.ContentType == "video/mp4" && v.Bitrate > maxBitrate {
+					maxBitrate = v.Bitrate
+					bestVideoURL = v.URL
 				}
 			}
-		}
-		var youtubeURLs []string
-		if entities, ok := legacy["entities"].(map[string]interface{}); ok {
-			if urlsList, ok := entities["urls"].([]interface{}); ok {
-				for _, u := range urlsList {
-					uMap, ok := u.(map[string]interface{})
-					if !ok {
-						continue
-					}
-					expanded, _ := uMap["expanded_url"].(string)
-					if expanded != "" {
-						if strings.Contains(expanded, "youtube.com") || strings.Contains(expanded, "youtu.be") {
-							youtubeURLs = append(youtubeURLs, expanded)
-						}
-					}
+			if bestVideoURL != "" {
+				downloadURL = bestVideoURL
+				isVideo = true
+			}
+
+			if downloadURL == "" {
+				continue
+			}
+			slog.Debug("Queued URL", "url", downloadURL, "video", isVideo)
+			if isVideo && !downloadVideos {
+				continue
+			}
+			if !isVideo && !downloadPhotos {
+				continue
+			}
+
+			if !queuedURLs[downloadURL] {
+				queuedURLs[downloadURL] = true
+				select {
+				case jobs <- TwitterDownloadItem{
+					URL:     downloadURL,
+					DateStr: dateStr,
+					TweetID: tweetID,
+					IsVideo: isVideo,
+				}:
+				case <-done:
+					return
 				}
+				slog.Debug("Added to download queue", "tweet_id", tweetID, "url", downloadURL, "video", isVideo)
+			}
+			tweetMediaURLs = append(tweetMediaURLs, downloadURL)
+		}
+
+		var youtubeURLs []string
+		for _, u := range tw.Legacy.Entities.URLs {
+			if expanded := u.ExpandedURL; expanded != "" &&
+				(strings.Contains(expanded, "youtube.com") || strings.Contains(expanded, "youtu.be")) {
+				youtubeURLs = append(youtubeURLs, expanded)
 			}
 		}
 
@@ -346,13 +344,9 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 				}
 
 				// Parse tweets from intercepted responses
-				findTweets(raw, func(tweet map[string]interface{}) {
-					legacy, ok := tweet["legacy"].(map[string]interface{})
+				findTweets(raw, func(candidate map[string]interface{}) {
+					tw, tweetID, ok := decodeTweet(candidate)
 					if !ok {
-						return
-					}
-					tweetID, _ := legacy["id_str"].(string)
-					if tweetID == "" {
 						return
 					}
 
@@ -369,10 +363,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 						}
 					}
 
-					text, _ := legacy["full_text"].(string)
-					if text == "" {
-						text, _ = legacy["text"].(string)
-					}
+					text := tw.Legacy.body()
 
 					// Skip retweets if configured
 					if skipRetweets && strings.HasPrefix(text, "RT @") {
@@ -387,26 +378,20 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 						return
 					}
 
-					seenTweets[tweetID] = tweet
+					seenTweets[tweetID] = tw
 					slog.Debug("Found tweet", "tweet_id", tweetID, "text", text)
-					inReplyToStatusID, _ := legacy["in_reply_to_status_id_str"].(string)
+					inReplyToStatusID := tw.Legacy.InReplyTo
 					if inReplyToStatusID != "" {
 						repliesIndex[inReplyToStatusID] = append(repliesIndex[inReplyToStatusID], tweetID)
 					}
 
-					// Check if this tweet is matched
-					isMatched := false
-					if len(filters) > 0 {
-						lowerText := strings.ToLower(text)
-						for _, filter := range filters {
-							if strings.Contains(lowerText, strings.ToLower(filter)) {
-								isMatched = true
-								break
-							}
+					isMatched := len(filters) == 0
+					lowerText := strings.ToLower(text)
+					for _, filter := range filters {
+						if strings.Contains(lowerText, strings.ToLower(filter)) {
+							isMatched = true
+							break
 						}
-					} else {
-						// No filters -> matches everything
-						isMatched = true
 					}
 
 					// If matched directly OR its parent is matched, trigger propagation
