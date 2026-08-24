@@ -1,22 +1,28 @@
 services:
   idolhub:
     build:
-      context: .
-      dockerfile: deploy/Dockerfile
+      context: ..
+      dockerfile: deployments/Dockerfile
     container_name: idolhub
-    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      - TZ=${TZ:-Europe/Moscow}
+      - PORT=${PORT:-8080}
+      - CHROME_BIN=/usr/bin/chromium-browser
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
     volumes:
       - ./configs:/app/configs
-      - ./downloads:/app/downloads
-    environment:
-      - TZ=${TZ:-Europe/Moscow}
-      - PORT=${PORT:-8080}
+      - app_data:/app/downloads
     shm_size: "512m"
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8080}/api/config"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 15s
+
+volumes:
+  app_data:

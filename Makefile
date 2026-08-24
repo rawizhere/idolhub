@@ -30,7 +30,7 @@ clean:
 	rm -f cmd/parser/web/static/app.css
 
 docker-build:
-	docker build -f deploy/Dockerfile -t idolhub .
+	docker build -f deployments/Dockerfile -t idolhub .
 
 docker-run:
-	docker compose -f docker-compose.dev.yml up -d
+	docker compose -f deployments/docker-compose.dev.yml up -d
