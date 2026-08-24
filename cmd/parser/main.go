@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/agnivade/levenshtein"
-	"github.com/dustin/go-humanize"
 
 	"idolhub/cmd/parser/web/templates"
 	"idolhub/internal/config"
@@ -257,16 +256,6 @@ type scrapeRequest struct {
 	ForceFull bool   `json:"force_full,omitempty"`
 }
 
-type GalleryFile struct {
-	Filename     string `json:"filename"`
-	Type         string `json:"type"` // "image" or "video"
-	Date         string `json:"date"`
-	Size         int64  `json:"size"`
-	SizeHuman    string `json:"size_human"`
-	URL          string `json:"url"`
-	ThumbnailURL string `json:"thumbnail_url"`
-}
-
 type PostMediaFile struct {
 	Filename     string `json:"filename"`
 	URL          string `json:"url"`
@@ -283,10 +272,10 @@ type GalleryPost struct {
 }
 
 type GalleryResponse struct {
-	Username string        `json:"username"`
-	Platform string        `json:"platform"`
-	Files    []GalleryFile `json:"files"`
-	Posts    []GalleryPost `json:"posts"`
+	Username string         `json:"username"`
+	Platform string         `json:"platform"`
+	Files    []gallery.File `json:"files"`
+	Posts    []GalleryPost  `json:"posts"`
 }
 
 func (a *App) handleGallery(w http.ResponseWriter, r *http.Request) {
@@ -303,31 +292,7 @@ func (a *App) handleGallery(w http.ResponseWriter, r *http.Request) {
 
 	dir := filepath.Join("downloads", platform, username)
 
-	entries := a.mediaIndex.Get(platform, username)
-
-	var files []GalleryFile
-
-	for _, e := range entries {
-		name := e.Filename
-		date := ""
-		if len(name) >= 10 {
-			date = name[:10]
-		}
-
-		ext := filepath.Ext(name)
-		thumbFilename := strings.TrimSuffix(name, ext) + ".jpg"
-		thumbnailURL := "/media/" + platform + "/" + username + "/thumbnails/" + thumbFilename
-
-		files = append(files, GalleryFile{
-			Filename:     name,
-			Type:         e.Type,
-			Date:         date,
-			Size:         e.Size,
-			SizeHuman:    humanize.Bytes(uint64(e.Size)),
-			URL:          "/media/" + platform + "/" + username + "/" + name,
-			ThumbnailURL: thumbnailURL,
-		})
-	}
+	files := a.mediaIndex.View(platform, username)
 
 	var posts []GalleryPost
 	postsPath := filepath.Join(dir, "posts.json")
@@ -337,7 +302,7 @@ func (a *App) handleGallery(w http.ResponseWriter, r *http.Request) {
 			for i, p := range rawPosts {
 				var localFiles []PostMediaFile
 				for _, mediaURL := range p.MediaURLs {
-					gf := findLocalFile(mediaURL, platform, username, files)
+					gf := a.findLocalFile(mediaURL, platform, username, files)
 					if gf == nil {
 						videoName := p.TweetID + "_video.mp4"
 						for j := range files {
@@ -553,8 +518,8 @@ func accountsEqual(a, b config.Account) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-func findLocalFile(mediaURL, platform, username string, files []GalleryFile) *GalleryFile {
-	name, ok := gallery.GlobalIndex.FindLocalFile(platform, username, mediaURL)
+func (a *App) findLocalFile(mediaURL, platform, username string, files []gallery.File) *gallery.File {
+	name, ok := a.mediaIndex.FindLocalFile(platform, username, mediaURL)
 	if !ok {
 		return nil
 	}
@@ -659,37 +624,16 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 		filter = "all"
 	}
 
-	entries := a.mediaIndex.Get(platform, username)
-
-	var galleryFiles []GalleryFile
-	var allFiles []templates.GalleryFileData
-	for _, e := range entries {
-		name := e.Filename
-		date := ""
-		if len(name) >= 10 {
-			date = name[:10]
-		}
-		ext := filepath.Ext(name)
-		thumbFilename := strings.TrimSuffix(name, ext) + ".jpg"
-		thumbURL := "/media/" + platform + "/" + username + "/thumbnails/" + thumbFilename
-		mediaURL := "/media/" + platform + "/" + username + "/" + name
-
-		galleryFiles = append(galleryFiles, GalleryFile{
-			Filename:     name,
-			Type:         e.Type,
-			Date:         date,
-			Size:         e.Size,
-			SizeHuman:    humanize.Bytes(uint64(e.Size)),
-			URL:          mediaURL,
-			ThumbnailURL: thumbURL,
-		})
+	galleryFiles := a.mediaIndex.View(platform, username)
+	allFiles := make([]templates.GalleryFileData, 0, len(galleryFiles))
+	for _, f := range galleryFiles {
 		allFiles = append(allFiles, templates.GalleryFileData{
-			Filename:     name,
-			Type:         e.Type,
-			Date:         date,
-			Size:         e.Size,
-			URL:          mediaURL,
-			ThumbnailURL: thumbURL,
+			Filename:     f.Filename,
+			Type:         f.Type,
+			Date:         f.Date,
+			Size:         f.Size,
+			URL:          f.URL,
+			ThumbnailURL: f.ThumbnailURL,
 		})
 	}
 
@@ -779,7 +723,7 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 						for _, pt := range postTags {
 							if strings.ToLower(pt) == st {
 								for _, mu := range rp.MediaURLs {
-									if gf := findLocalFile(mu, platform, username, galleryFiles); gf != nil {
+									if gf := a.findLocalFile(mu, platform, username, galleryFiles); gf != nil {
 										matchingFilenames[gf.Filename] = true
 									}
 								}
@@ -840,19 +784,7 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 		return
 	}
 
-	entries := a.mediaIndex.Get(gp.Platform, gp.Username)
-	var files []GalleryFile
-	for _, e := range entries {
-		name := e.Filename
-		ext := filepath.Ext(name)
-		thumbFilename := strings.TrimSuffix(name, ext) + ".jpg"
-		files = append(files, GalleryFile{
-			Filename:     name,
-			Type:         e.Type,
-			URL:          "/media/" + gp.Platform + "/" + gp.Username + "/" + name,
-			ThumbnailURL: "/media/" + gp.Platform + "/" + gp.Username + "/thumbnails/" + thumbFilename,
-		})
-	}
+	files := a.mediaIndex.View(gp.Platform, gp.Username)
 
 	var allPosts []templates.GalleryPostData
 	for _, p := range rawPosts {
@@ -877,7 +809,7 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 
 		var localFiles []templates.GalleryPostMediaFile
 		for _, mediaURL := range p.MediaURLs {
-			gf := findLocalFile(mediaURL, gp.Platform, gp.Username, files)
+			gf := a.findLocalFile(mediaURL, gp.Platform, gp.Username, files)
 			if gf == nil {
 				videoName := p.TweetID + "_video.mp4"
 				for j := range files {
@@ -1048,29 +980,9 @@ func (a *App) handleGlobalSearchAPI(w http.ResponseWriter, r *http.Request) {
 	for _, acc := range cfg.Accounts {
 		platform := acc.Platform
 		username := acc.Username
-		entries := a.mediaIndex.Get(platform, username)
-		if len(entries) == 0 {
+		galleryFiles := a.mediaIndex.View(platform, username)
+		if len(galleryFiles) == 0 {
 			continue
-		}
-
-		var galleryFiles []GalleryFile
-		for _, e := range entries {
-			name := e.Filename
-			date := ""
-			if len(name) >= 10 {
-				date = name[:10]
-			}
-			ext := filepath.Ext(name)
-			thumbFilename := strings.TrimSuffix(name, ext) + ".jpg"
-			galleryFiles = append(galleryFiles, GalleryFile{
-				Filename:     name,
-				Type:         e.Type,
-				Date:         date,
-				Size:         e.Size,
-				SizeHuman:    humanize.Bytes(uint64(e.Size)),
-				URL:          "/media/" + platform + "/" + username + "/" + name,
-				ThumbnailURL: "/media/" + platform + "/" + username + "/thumbnails/" + thumbFilename,
-			})
 		}
 
 		filePostText := gallery.GlobalIndex.FilePostText(platform, username)
