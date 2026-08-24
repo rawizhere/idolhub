@@ -527,32 +527,13 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 		slog.Info("Saving tweet texts to single JSON", "user", username)
 		postsFilePath := filepath.Join(outputDir, "posts.json")
 
-		// Load existing posts
-		var existingPosts []TweetPost
-		if data, err := os.ReadFile(postsFilePath); err == nil {
-			_ = json.Unmarshal(data, &existingPosts)
+		var maps []map[string]interface{}
+		if raw, err := json.Marshal(scrapedPosts); err == nil {
+			_ = json.Unmarshal(raw, &maps)
 		}
-
-		// Merge posts (avoiding duplicates by tweet_id)
-		postMap := make(map[string]TweetPost)
-		for _, p := range existingPosts {
-			postMap[p.TweetID] = p
-		}
-		for _, p := range scrapedPosts {
-			postMap[p.TweetID] = p
-		}
-
-		var mergedPosts []TweetPost
-		for _, p := range postMap {
-			mergedPosts = append(mergedPosts, p)
-		}
-
-		jsonData, err := json.MarshalIndent(mergedPosts, "", "  ")
-		if err == nil {
-			_ = os.WriteFile(postsFilePath, jsonData, 0644)
+		if len(maps) > 0 {
+			mergePostsJSON(postsFilePath, maps)
 			slog.Info("Tweet texts saved successfully", "user", username, "file", postsFilePath)
-		} else {
-			slog.Warn("Failed to marshal tweet posts JSON", "user", username, "error", err)
 		}
 	}
 
