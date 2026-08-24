@@ -12,6 +12,7 @@ require (
 
 require (
 	github.com/ProtonMail/go-crypto v1.3.0 // indirect
+	github.com/agnivade/levenshtein v1.2.1 // indirect
 	github.com/avast/retry-go/v4 v4.7.0 // indirect
 	github.com/caarlos0/env/v11 v11.4.1 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect

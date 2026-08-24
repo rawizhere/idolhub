@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/agnivade/levenshtein"
 	"github.com/dustin/go-humanize"
 
 	"idolhub/cmd/parser/web/templates"
@@ -563,6 +564,23 @@ func findLocalFile(mediaURL, platform, username string, files []GalleryFile) *Ga
 	return nil
 }
 
+func fuzzyContains(haystack, needle string) bool {
+	if needle == "" {
+		return true
+	}
+	h := strings.ToLower(haystack)
+	n := strings.ToLower(needle)
+	if strings.Contains(h, n) {
+		return true
+	}
+	for _, w := range strings.Fields(h) {
+		if levenshtein.ComputeDistance(w, n) <= 2 {
+			return true
+		}
+	}
+	return false
+}
+
 const galleryPageSize = 48
 
 var youtubeRe = regexp.MustCompile(`^.*(youtu\.be/|v/|u/\w/|embed/|watch\?v=|&v=|shorts/)([^#&?]*).*`)
@@ -687,7 +705,7 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 			matchesFilename := strings.Contains(strings.ToLower(f.Filename), search)
 			matchesDate := strings.Contains(f.Date, search)
 			postText := strings.ToLower(filePostText[f.Filename])
-			matchesPost := strings.Contains(postText, search)
+			matchesPost := fuzzyContains(postText, search)
 			if matchesFilename || matchesDate || matchesPost {
 				filtered = append(filtered, f)
 			}
@@ -1061,7 +1079,7 @@ func (a *App) handleGlobalSearchAPI(w http.ResponseWriter, r *http.Request) {
 			matchesQuery := query == "" ||
 				strings.Contains(strings.ToLower(gf.Filename), query) ||
 				strings.Contains(gf.Date, query) ||
-				strings.Contains(strings.ToLower(caption), query) ||
+				fuzzyContains(caption, query) ||
 				strings.Contains(strings.ToLower(username), query)
 
 			if matchesQuery {
