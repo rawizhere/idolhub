@@ -71,7 +71,10 @@ func main() {
 	mux.HandleFunc("GET /api/gallery", app.handleGallery)
 	mux.HandleFunc("GET /api/search", app.handleGlobalSearchAPI)
 	mux.HandleFunc("GET /api/events", app.handleSSE)
-	mux.HandleFunc("GET /gallery/", app.handleGalleryPage)
+	mux.HandleFunc("GET /gallery/{platform}/{username}", app.handleGalleryPage)
+	mux.HandleFunc("GET /gallery/{platform}/{username}/page/{page}", app.handleGalleryPage)
+	mux.HandleFunc("GET /gallery/{platform}/{username}/posts", app.handleGalleryPage)
+	mux.HandleFunc("GET /gallery/{platform}/{username}/posts/page/{page}", app.handleGalleryPage)
 	mux.HandleFunc("GET /media/", app.handleMedia)
 
 	port := os.Getenv("PORT")
@@ -581,34 +584,23 @@ type galleryPageParams struct {
 }
 
 func parseGalleryParams(r *http.Request) galleryPageParams {
-	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/gallery/"), "/")
 	p := galleryPageParams{
-		Platform: pathParts[0],
-		Username: pathParts[1],
+		Platform: r.PathValue("platform"),
+		Username: r.PathValue("username"),
 		Sort:     r.URL.Query().Get("sort"),
 		Search:   r.URL.Query().Get("q"),
 		Year:     r.URL.Query().Get("year"),
 		Month:    r.URL.Query().Get("month"),
 		Tags:     r.URL.Query().Get("tags"),
-		Dir:      filepath.Join("downloads", pathParts[0], pathParts[1]),
 	}
-
-	var pageStr string
-	if len(pathParts) >= 4 && pathParts[2] == "page" {
-		pageStr = pathParts[3]
-	} else if len(pathParts) >= 5 && pathParts[2] == "posts" && pathParts[3] == "page" {
-		pageStr = pathParts[4]
-	} else if len(pathParts) >= 4 && pathParts[2] == "posts" {
-		pageStr = "1"
-	} else if len(pathParts) == 2 {
-		pageStr = "1"
-	}
-
-	page, err := strconv.Atoi(pageStr)
-	if err != nil || page < 1 {
-		page = 1
+	page := 1
+	if pageStr := r.PathValue("page"); pageStr != "" {
+		if n, err := strconv.Atoi(pageStr); err == nil && n >= 1 {
+			page = n
+		}
 	}
 	p.Page = page
+	p.Dir = filepath.Join("downloads", p.Platform, p.Username)
 	return p
 }
 
@@ -618,13 +610,11 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
-	pathParts := strings.Split(strings.TrimPrefix(r.URL.Path, "/gallery/"), "/")
-	if len(pathParts) < 2 {
+	p := parseGalleryParams(r)
+	if p.Platform == "" || p.Username == "" {
 		http.Error(w, "Invalid gallery path", http.StatusBadRequest)
 		return
 	}
-
-	p := parseGalleryParams(r)
 
 	platform := p.Platform
 	username := p.Username
@@ -789,7 +779,7 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	isPosts := len(pathParts) >= 4 && pathParts[2] == "posts"
+	isPosts := strings.Contains(r.URL.Path, "/posts")
 	if isPosts {
 		a.handleGalleryPostsPage(w, r, p)
 		return
