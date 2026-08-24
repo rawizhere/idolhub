@@ -2,6 +2,8 @@ package gallery
 
 import (
 	"cmp"
+	"encoding/json"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -125,4 +127,76 @@ func (idx *Index) InvalidateAll() {
 	idx.mu.Lock()
 	clear(idx.files)
 	idx.mu.Unlock()
+}
+
+// FindLocalFile resolves a media URL to a cached local filename for a target.
+func (idx *Index) FindLocalFile(platform, username, mediaURL string) (string, bool) {
+	parsed, err := url.Parse(mediaURL)
+	if err != nil {
+		return "", false
+	}
+	parts := strings.Split(parsed.Path, "/")
+	if len(parts) == 0 {
+		return "", false
+	}
+	base := parts[len(parts)-1]
+	if i := strings.IndexByte(base, '?'); i >= 0 {
+		base = base[:i]
+	}
+	files := idx.Get(platform, username)
+	for _, f := range files {
+		if f.Filename == base {
+			return f.Filename, true
+		}
+	}
+	if base != "" {
+		for _, f := range files {
+			if strings.Contains(f.Filename, base) {
+				return f.Filename, true
+			}
+		}
+	}
+	return "", false
+}
+
+// FilePostText maps each local filename of a target to its concatenated post captions.
+func (idx *Index) FilePostText(platform, username string) map[string]string {
+	res := make(map[string]string)
+	postsPath := filepath.Join(dirOf(platform, username), "posts.json")
+	data, err := os.ReadFile(postsPath)
+	if err != nil {
+		return res
+	}
+	var posts []struct {
+		Text      string   `json:"text"`
+		TweetID   string   `json:"tweet_id"`
+		MediaURLs []string `json:"media_urls"`
+	}
+	if err := json.Unmarshal(data, &posts); err != nil {
+		return res
+	}
+	for _, p := range posts {
+		for _, mu := range p.MediaURLs {
+			if name, ok := idx.FindLocalFile(platform, username, mu); ok {
+				res[name] = appendWithSpace(res[name], p.Text)
+			}
+		}
+		if p.TweetID != "" {
+			videoName := p.TweetID + "_video.mp4"
+			for _, f := range idx.Get(platform, username) {
+				if f.Filename == videoName {
+					res[videoName] = appendWithSpace(res[videoName], p.Text)
+					break
+				}
+			}
+		}
+	}
+	return res
+}
+
+func appendWithSpace(existing, txt string) string {
+	if existing == "" {
+		return txt
+	}
+	return existing + " " + txt
 }

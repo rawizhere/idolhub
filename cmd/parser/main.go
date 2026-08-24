@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -330,7 +329,7 @@ func (a *App) handleGallery(w http.ResponseWriter, r *http.Request) {
 			for i, p := range rawPosts {
 				var localFiles []PostMediaFile
 				for _, mediaURL := range p.MediaURLs {
-					gf := findLocalFile(mediaURL, files)
+					gf := findLocalFile(mediaURL, platform, username, files)
 					if gf == nil {
 						videoName := p.TweetID + "_video.mp4"
 						for j := range files {
@@ -544,26 +543,13 @@ func accountsEqual(a, b config.Account) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-func findLocalFile(mediaURL string, files []GalleryFile) *GalleryFile {
-	parsed, err := url.Parse(mediaURL)
-	if err != nil {
+func findLocalFile(mediaURL, platform, username string, files []GalleryFile) *GalleryFile {
+	name, ok := gallery.GlobalIndex.FindLocalFile(platform, username, mediaURL)
+	if !ok {
 		return nil
 	}
-	parts := strings.Split(parsed.Path, "/")
-	if len(parts) == 0 {
-		return nil
-	}
-	baseName := parts[len(parts)-1]
-	if strings.Contains(baseName, "?") {
-		baseName = strings.Split(baseName, "?")[0]
-	}
-	for i, f := range files {
-		if f.Filename == baseName {
-			return &files[i]
-		}
-	}
-	for i, f := range files {
-		if baseName != "" && strings.Contains(f.Filename, baseName) {
+	for i := range files {
+		if files[i].Filename == name {
 			return &files[i]
 		}
 	}
@@ -687,39 +673,7 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Index post text and captions for media files to allow searching by captions/hashtags
-	filePostText := make(map[string]string)
-	postsPath := filepath.Join(dir, "posts.json")
-	if postsData, err := os.ReadFile(postsPath); err == nil {
-		var rawPosts []GalleryPost
-		if json.Unmarshal(postsData, &rawPosts) == nil {
-			for _, rp := range rawPosts {
-				txt := rp.Text
-				for _, mu := range rp.MediaURLs {
-					if gf := findLocalFile(mu, galleryFiles); gf != nil {
-						if existing, ok := filePostText[gf.Filename]; ok {
-							filePostText[gf.Filename] = existing + " " + txt
-						} else {
-							filePostText[gf.Filename] = txt
-						}
-					}
-				}
-				if rp.TweetID != "" {
-					videoName := rp.TweetID + "_video.mp4"
-					for _, gf := range galleryFiles {
-						if gf.Filename == videoName {
-							if existing, ok := filePostText[gf.Filename]; ok {
-								filePostText[gf.Filename] = existing + " " + txt
-							} else {
-								filePostText[gf.Filename] = txt
-							}
-							break
-						}
-					}
-				}
-			}
-		}
-	}
+	filePostText := gallery.GlobalIndex.FilePostText(platform, username)
 
 	if filter != "all" {
 		filtered := allFiles[:0]
@@ -805,7 +759,7 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 						for _, pt := range postTags {
 							if strings.ToLower(pt) == st {
 								for _, mu := range rp.MediaURLs {
-									if gf := findLocalFile(mu, galleryFiles); gf != nil {
+									if gf := findLocalFile(mu, platform, username, galleryFiles); gf != nil {
 										matchingFilenames[gf.Filename] = true
 									}
 								}
@@ -909,7 +863,7 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 
 		var localFiles []templates.GalleryPostMediaFile
 		for _, mediaURL := range p.MediaURLs {
-			gf := findLocalFile(mediaURL, files)
+			gf := findLocalFile(mediaURL, gp.Platform, gp.Username, files)
 			if gf == nil {
 				videoName := p.TweetID + "_video.mp4"
 				for j := range files {
@@ -1103,38 +1057,7 @@ func (a *App) handleGlobalSearchAPI(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 
-		filePostText := make(map[string]string)
-		postsPath := filepath.Join("downloads", platform, username, "posts.json")
-		if postsData, err := os.ReadFile(postsPath); err == nil {
-			var rawPosts []GalleryPost
-			if json.Unmarshal(postsData, &rawPosts) == nil {
-				for _, rp := range rawPosts {
-					txt := rp.Text
-					for _, mu := range rp.MediaURLs {
-						if gf := findLocalFile(mu, galleryFiles); gf != nil {
-							if existing, ok := filePostText[gf.Filename]; ok {
-								filePostText[gf.Filename] = existing + " " + txt
-							} else {
-								filePostText[gf.Filename] = txt
-							}
-						}
-					}
-					if rp.TweetID != "" {
-						videoName := rp.TweetID + "_video.mp4"
-						for _, gf := range galleryFiles {
-							if gf.Filename == videoName {
-								if existing, ok := filePostText[gf.Filename]; ok {
-									filePostText[gf.Filename] = existing + " " + txt
-								} else {
-									filePostText[gf.Filename] = txt
-								}
-								break
-							}
-						}
-					}
-				}
-			}
-		}
+		filePostText := gallery.GlobalIndex.FilePostText(platform, username)
 
 		for _, gf := range galleryFiles {
 			caption := filePostText[gf.Filename]
