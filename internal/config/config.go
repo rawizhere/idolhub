@@ -2,9 +2,13 @@ package config
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/caarlos0/env/v11"
+	"github.com/joho/godotenv"
 )
 
 type Account struct {
@@ -35,9 +39,9 @@ func (a Account) ShouldDownloadVideos() bool {
 
 type Config struct {
 	Accounts           []Account `json:"accounts"`
-	TwitterAuthToken   string    `json:"twitter_auth_token"`
-	InstagramSessionID string    `json:"instagram_session_id"`
-	TikTokCookies      string    `json:"tiktok_cookies"`
+	TwitterAuthToken   string    `json:"twitter_auth_token" env:"TWITTER_AUTH_TOKEN"`
+	InstagramSessionID string    `json:"instagram_session_id" env:"INSTAGRAM_SESSION_ID"`
+	TikTokCookies      string    `json:"tiktok_cookies" env:"TIKTOK_COOKIES"`
 	AutoSyncInterval   int       `json:"auto_sync_interval"` // In hours
 }
 
@@ -78,18 +82,30 @@ func LoadConfig() error {
 		return err
 	}
 
-	// Fall back to environment variables if not set in config
-	if globalConfig.TwitterAuthToken == "" {
-		globalConfig.TwitterAuthToken = os.Getenv("TWITTER_AUTH_TOKEN")
-	}
-	if globalConfig.InstagramSessionID == "" {
-		globalConfig.InstagramSessionID = os.Getenv("INSTAGRAM_SESSION_ID")
-	}
-	if globalConfig.TikTokCookies == "" {
-		globalConfig.TikTokCookies = os.Getenv("TIKTOK_COOKIES")
-	}
+	applyEnvSecrets()
 
 	return nil
+}
+
+// applyEnvSecrets fills secrets from environment if they are missing in config.
+func applyEnvSecrets() {
+	if err := godotenv.Load(); err != nil {
+		slog.Debug("no .env file loaded", "error", err)
+	}
+	var envCfg Config
+	if err := env.Parse(&envCfg); err != nil {
+		slog.Warn("failed to parse env secrets", "error", err)
+		return
+	}
+	if globalConfig.TwitterAuthToken == "" && envCfg.TwitterAuthToken != "" {
+		globalConfig.TwitterAuthToken = envCfg.TwitterAuthToken
+	}
+	if globalConfig.InstagramSessionID == "" && envCfg.InstagramSessionID != "" {
+		globalConfig.InstagramSessionID = envCfg.InstagramSessionID
+	}
+	if globalConfig.TikTokCookies == "" && envCfg.TikTokCookies != "" {
+		globalConfig.TikTokCookies = envCfg.TikTokCookies
+	}
 }
 
 func SaveConfig(cfg Config) error {
