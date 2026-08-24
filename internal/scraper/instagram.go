@@ -109,7 +109,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		chromedp.DisableGPU,
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.WindowSize(1280, 900),
-		chromedp.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
+		chromedp.UserAgent(desktopUA),
 		chromedp.Flag("enable-automation", false),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 	)
@@ -592,7 +592,7 @@ func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, output
 		slog.Warn("Failed to build Instagram CDN request", "user", username, "filename", filename, "error", err)
 		return false
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", desktopUA)
 	req.Header.Set("Referer", "https://www.instagram.com/")
 	req.Header.Set("Accept", "image/avif,image/webp,*/*;q=0.8")
 

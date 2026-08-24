@@ -614,7 +614,7 @@ func downloadTwitterImage(ctx context.Context, item TwitterDownloadItem, outputD
 		slog.Error("Failed to create image download request", "user", username, "url", formatURL, "error", err)
 		return false
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", desktopUA)
 
 	var resp *http.Response
 	err = retry.Do(func() error {
@@ -674,7 +674,7 @@ func downloadTwitterVideo(ctx context.Context, item TwitterDownloadItem, outputD
 		slog.Error("Failed to create video download request", "user", username, "url", item.URL, "error", err)
 		return false
 	}
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("User-Agent", desktopUA)
 
 	var resp *http.Response
 	err = retry.Do(func() error {
