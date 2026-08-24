@@ -440,40 +440,35 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	o.cancels[username] = cancel
 	o.mu.Unlock()
 
-	var err error
-	var scrapeFn func(ctx context.Context, username string, saveText bool, lastSync time.Time) error
-	switch platform {
-	case "instagram":
-		scrapeFn = func(ctx context.Context, username string, saveText bool, lastSync time.Time) error {
-			return scraper.ScrapeInstagramUser(ctx, username, saveText, lastSync)
-		}
-	case "twitter":
-		scrapeFn = func(ctx context.Context, username string, saveText bool, lastSync time.Time) error {
-			c := config.GetConfig()
-			var skipRetweets bool
-			var filters []string
-			downloadPhotos := true
-			downloadVideos := true
-			for _, acc := range c.Accounts {
-				if strings.EqualFold(acc.Username, username) {
-					skipRetweets = acc.SkipRetweets
-					filters = acc.Filters
-					downloadPhotos = acc.ShouldDownloadPhotos()
-					downloadVideos = acc.ShouldDownloadVideos()
-					break
-				}
-			}
-			return scraper.ScrapeTwitterUser(ctx, username, saveText, skipRetweets, filters, downloadPhotos, downloadVideos, lastSync)
-		}
-	case "tiktok":
-		scrapeFn = func(ctx context.Context, username string, saveText bool, lastSync time.Time) error {
-			return scraper.ScrapeYTDLP(ctx, platform, username, saveText, lastSync)
-		}
-	default:
-		err = fmt.Errorf("unknown platform: %s", platform)
+	target := scraper.Target{
+		Username: username,
+		Platform: platform,
+		SaveText: saveText,
 	}
-	if err == nil {
-		err = scrapeFn(timeoutCtx, username, saveText, lastSync)
+	var err error
+	opts := scraper.Options{
+		LastSync:  lastSync,
+		ForceFull: job.forceFullSync,
+	}
+
+	c := config.GetConfig()
+	for _, acc := range c.Accounts {
+		if strings.EqualFold(acc.Username, username) {
+			target.SkipRetweets = acc.SkipRetweets
+			target.Filters = acc.Filters
+			dp := acc.ShouldDownloadPhotos()
+			dv := acc.ShouldDownloadVideos()
+			target.DownloadPhotos = &dp
+			target.DownloadVideos = &dv
+			break
+		}
+	}
+
+	s, ok := scraper.Get(platform)
+	if !ok {
+		err = fmt.Errorf("unknown platform: %s", platform)
+	} else {
+		err = s.Scrape(timeoutCtx, target, opts)
 	}
 
 	o.mu.Lock()

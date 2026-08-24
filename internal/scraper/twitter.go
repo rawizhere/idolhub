@@ -66,7 +66,20 @@ func navigateNoWait(urlStr string) chromedp.Action {
 	})
 }
 
-func ScrapeTwitterUser(ctx context.Context, username string, saveText bool, skipRetweets bool, filters []string, downloadPhotos bool, downloadVideos bool, lastSync time.Time) error {
+func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
+	username := t.Username
+	saveText := t.SaveText
+	skipRetweets := t.SkipRetweets
+	filters := t.Filters
+	downloadPhotos := true
+	downloadVideos := true
+	if t.DownloadPhotos != nil {
+		downloadPhotos = *t.DownloadPhotos
+	}
+	if t.DownloadVideos != nil {
+		downloadVideos = *t.DownloadVideos
+	}
+	lastSync := opts.LastSync
 	slog.Info("Scraping Twitter target user", "user", username, "platform", "twitter", "save_text", saveText, "skip_retweets", skipRetweets, "filters", filters, "download_photos", downloadPhotos, "download_videos", downloadVideos, "last_sync", lastSync)
 
 	c := config.GetConfig()
@@ -85,14 +98,14 @@ func ScrapeTwitterUser(ctx context.Context, username string, saveText bool, skip
 		return err
 	}
 
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+	allocOpts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
 		chromedp.DisableGPU,
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.WindowSize(1920, 1080),
 	)
 
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, allocOpts...)
 	defer cancelAlloc()
 
 	dpCtx, cancelDp := chromedp.NewContext(allocCtx)

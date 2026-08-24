@@ -26,12 +26,12 @@ import (
 	"golang.org/x/time/rate"
 )
 
-func ScrapeInstagramUser(ctx context.Context, username string, saveText bool, lastSync time.Time) error {
+func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
 	c := config.GetConfig()
 	if c.InstagramSessionID == "" {
 		return fmt.Errorf("instagram session ID is not configured")
 	}
-	return scrapeInstagramDirect(ctx, username, saveText, lastSync)
+	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync)
 }
 
 type igDirectItem struct {

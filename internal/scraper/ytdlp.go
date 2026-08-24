@@ -91,7 +91,11 @@ func ytdlpPlatformConfig(platform string) ytdlpPlatform {
 }
 
 // ScrapeYTDLP downloads videos from TikTok via yt-dlp. Optional Netscape cookies from config are written to a temp file and cleaned up after.
-func ScrapeYTDLP(ctx context.Context, platform, username string, saveText bool, lastSync time.Time) error {
+func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
+	platform := t.Platform
+	username := t.Username
+	saveText := t.SaveText
+	lastSync := opts.LastSync
 	pc := ytdlpPlatformConfig(platform)
 	if pc.url == "" {
 		return fmt.Errorf("unsupported yt-dlp platform: %s", platform)
