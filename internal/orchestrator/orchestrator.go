@@ -157,20 +157,21 @@ func (h *taskLogHandler) Handle(ctx context.Context, r slog.Record) error {
 	return h.Handler.Handle(ctx, r)
 }
 
+func pushLog(logs []TaskLog, t time.Time, level, msg string) []TaskLog {
+	logs = append(logs, TaskLog{Timestamp: t, Level: level, Message: msg})
+	if len(logs) > maxTaskLogs {
+		return logs[len(logs)-maxTaskLogs:]
+	}
+	return logs
+}
+
 func (o *Orchestrator) AppendGlobalLog(t time.Time, level, msg string) {
 	o.mu.Lock()
 	displayMsg := msg
 	if !strings.HasPrefix(displayMsg, "[SYSTEM]") && !strings.HasPrefix(displayMsg, "[@") {
 		displayMsg = "[SYSTEM] " + displayMsg
 	}
-	o.globalLogs = append(o.globalLogs, TaskLog{
-		Timestamp: t,
-		Level:     level,
-		Message:   displayMsg,
-	})
-	if len(o.globalLogs) > maxTaskLogs {
-		o.globalLogs = o.globalLogs[len(o.globalLogs)-maxTaskLogs:]
-	}
+	o.globalLogs = pushLog(o.globalLogs, t, level, displayMsg)
 	o.mu.Unlock()
 
 	o.broadcast(SSEEvent{
@@ -267,25 +268,11 @@ func (o *Orchestrator) AppendTaskLog(username string, t time.Time, level, msg st
 	o.mu.Lock()
 	p, exists := o.progress[username]
 	if exists {
-		p.Logs = append(p.Logs, TaskLog{
-			Timestamp: t,
-			Level:     level,
-			Message:   msg,
-		})
-		if len(p.Logs) > maxTaskLogs {
-			p.Logs = p.Logs[len(p.Logs)-maxTaskLogs:]
-		}
+		p.Logs = pushLog(p.Logs, t, level, msg)
 		p.UpdatedAt = time.Now()
 	}
 
-	o.globalLogs = append(o.globalLogs, TaskLog{
-		Timestamp: t,
-		Level:     level,
-		Message:   fmt.Sprintf("[@%s] %s", username, msg),
-	})
-	if len(o.globalLogs) > maxTaskLogs {
-		o.globalLogs = o.globalLogs[len(o.globalLogs)-maxTaskLogs:]
-	}
+	o.globalLogs = pushLog(o.globalLogs, t, level, fmt.Sprintf("[@%s] %s", username, msg))
 
 	o.mu.Unlock()
 
