@@ -4,11 +4,10 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,11 +17,6 @@ import (
 	"time"
 
 	"idolhub/internal/download"
-
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/cdproto/network"
-	"github.com/chromedp/chromedp"
-	"golang.org/x/time/rate"
 )
 
 func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
@@ -104,88 +98,13 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		return err
 	}
 
-	allocOpts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.NoSandbox,
-		chromedp.DisableGPU,
-		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.WindowSize(1280, 900),
-		chromedp.UserAgent(desktopUA),
-		chromedp.Flag("enable-automation", false),
-		chromedp.Flag("disable-blink-features", "AutomationControlled"),
-	)
-
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, allocOpts...)
-	defer cancelAlloc()
-
-	dpCtx, cancelDp := chromedp.NewContext(allocCtx)
-	defer cancelDp()
-
-	dpCtx, cancelTimeout := context.WithTimeout(dpCtx, 2*time.Hour)
-	defer cancelTimeout()
-
-	if err := chromedp.Run(dpCtx, network.Enable()); err != nil {
-		return fmt.Errorf("failed to enable network: %w", err)
-	}
-
-	navSuccess := false
-	for navAttempt := 1; navAttempt <= 3; navAttempt++ {
-		navErr := chromedp.Run(dpCtx,
-			navigateNoWait("https://www.instagram.com/"),
-			chromedp.Sleep(2*time.Second),
-		)
-		if navErr == nil {
-			navSuccess = true
-			break
-		}
-		slog.Warn("Instagram initial navigation failed, retrying", "user", username, "attempt", navAttempt, "error", navErr)
-		if navAttempt < 3 {
-			time.Sleep(time.Duration(navAttempt*2) * time.Second)
-		}
-	}
-	if !navSuccess {
-		slog.Warn("Instagram initial navigation failed after retries, trying cookie injection anyway", "user", username)
-	}
-
-	if err := chromedp.Run(dpCtx,
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			expr := cdp.TimeSinceEpoch(time.Now().Add(180 * 24 * time.Hour))
-			return network.SetCookie("sessionid", sessionID).
-				WithDomain(".instagram.com").
-				WithPath("/").
-				WithExpires(&expr).
-				WithHTTPOnly(true).
-				WithSecure(true).
-				Do(ctx)
-		}),
-	); err != nil {
-		return fmt.Errorf("failed to set Instagram session cookie: %w", err)
-	}
-
-	var isLoggedIn bool
-	if err := chromedp.Run(dpCtx,
-		navigateNoWait("https://www.instagram.com/accounts/edit/"),
-		igJitterAction(),
-		chromedp.Evaluate(`window.location.pathname !== '/accounts/login/' && !document.querySelector('input[name="username"]')`, &isLoggedIn),
-	); err != nil {
-		return fmt.Errorf("failed to verify Instagram session: %w", err)
-	}
-	if !isLoggedIn {
-		slog.Error("Instagram session ID is invalid or expired", "user", username)
-		return fmt.Errorf("instagram session ID is invalid or expired — please log in and copy a fresh sessionid cookie: %w", ErrAuthExpired)
-	}
-	slog.Info("Instagram session is valid", "user", username)
-	report(30, "session valid")
-
-	apiClient, err := igAPIClient(dpCtx)
+	client := newIGClient(sessionID)
+	userID, err := client.resolveUserID(ctx, username)
 	if err != nil {
-		return fmt.Errorf("failed to export browser cookies: %w", err)
-	}
-
-	userID, err := resolveInstagramUserID(dpCtx, username, apiClient)
-	if err != nil {
-		return fmt.Errorf("failed to resolve Instagram user ID: %w", err)
+		return err
 	}
 	slog.Info("Resolved Instagram user ID", "user", username, "user_id", userID)
+	report(30, "session valid")
 	report(35, "resolved user id")
 
 	fileIdx := newIgFileIndex(outputDir)
@@ -222,17 +141,17 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 
 		slog.Info("Fetching Instagram media feed page", "user", username, "page", page, "url", apiURL)
 
-		if err := igLimiter.Wait(ctx); err != nil {
-			close(jobs)
-			pool.Wait()
-			return ctx.Err()
-		}
-		feedJSON, ferr := igAPIGet(ctx, apiClient, apiURL)
+		feedBytes, ferr := client.doGet(ctx, apiURL, username)
 		if ferr != nil {
+			if errors.Is(ferr, download.ErrRateLimited) || errors.Is(ferr, ErrAuthExpired) {
+				close(jobs)
+				pool.Wait()
+				return ferr
+			}
 			slog.Error("Failed to fetch Instagram feed page", "user", username, "page", page, "error", ferr)
 			break
 		}
-		if feedJSON == "" {
+		if len(feedBytes) == 0 {
 			slog.Info("Empty Instagram feed response, stopping", "user", username)
 			break
 		}
@@ -258,7 +177,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 			NextMaxID     string `json:"next_max_id"`
 		}
 
-		if err := json.Unmarshal([]byte(feedJSON), &feed); err != nil {
+		if err := json.Unmarshal(feedBytes, &feed); err != nil {
 			slog.Error("Failed to parse Instagram feed JSON", "user", username, "error", err)
 			break
 		}
@@ -381,100 +300,27 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	return nil
 }
 
-// igLimiter paces Instagram requests to avoid rate limits.
-var igLimiter = rate.NewLimiter(rate.Every(2*time.Second), 1)
-
-// igJitterAction spaces requests politely via the shared limiter.
-func igJitterAction() chromedp.Action {
-	return chromedp.ActionFunc(func(ctx context.Context) error {
-		return igLimiter.Wait(ctx)
-	})
-}
-
-// igAPIClient exports browser cookies into a plain HTTP client for API calls.
-func igAPIClient(dpCtx context.Context) (*http.Client, error) {
-	var rawCookies []*network.Cookie
-	if err := chromedp.Run(dpCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-		cookies, err := network.GetCookies().Do(ctx)
-		rawCookies = cookies
-		return err
-	})); err != nil {
-		return nil, err
-	}
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, err
-	}
-	for _, c := range rawCookies {
-		u := &url.URL{Scheme: "https", Host: strings.TrimPrefix(c.Domain, "."), Path: c.Path}
-		jar.SetCookies(u, []*http.Cookie{{
-			Name:     c.Name,
-			Value:    c.Value,
-			Domain:   c.Domain,
-			Path:     c.Path,
-			Secure:   c.Secure,
-			HttpOnly: c.HTTPOnly,
-		}})
-	}
-	return &http.Client{Timeout: 30 * time.Second, Jar: jar}, nil
-}
-
-func igAPIGet(ctx context.Context, client *http.Client, apiURL string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", desktopUA)
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("X-IG-App-ID", "936619743392459")
-	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", download.StatusError(resp.StatusCode)
-	}
-	return string(body), nil
-}
-
-// resolveInstagramUserID resolves numeric user ID from username
-func resolveInstagramUserID(ctx context.Context, username string, client *http.Client) (string, error) {
-	if err := igLimiter.Wait(ctx); err != nil {
-		return "", err
-	}
-
+// resolveUserID resolves the numeric user ID from username, doubling as a session check.
+func (c *igClient) resolveUserID(ctx context.Context, username string) (string, error) {
 	profileAPI := fmt.Sprintf("https://www.instagram.com/api/v1/users/web_profile_info/?username=%s", url.PathEscape(username))
-	profileJSON, err := igAPIGet(ctx, client, profileAPI)
+	profileBytes, err := c.doGet(ctx, profileAPI, username)
 	if err != nil {
 		slog.Warn("Instagram web_profile_info returned error, falling back to search", "username", username, "error", err)
-	} else if profileJSON != "" {
+	} else {
 		var profile struct {
 			Data struct {
 				User struct {
 					ID string `json:"id"`
-					Pk int64  `json:"pk"`
 				} `json:"user"`
 			} `json:"data"`
 		}
-		if err := json.Unmarshal([]byte(profileJSON), &profile); err == nil && profile.Data.User.ID != "" {
+		if err := json.Unmarshal(profileBytes, &profile); err == nil && profile.Data.User.ID != "" {
 			return profile.Data.User.ID, nil
 		}
 	}
 
-	// Fall back to the topsearch API
-	if err := igLimiter.Wait(ctx); err != nil {
-		return "", err
-	}
 	searchAPI := fmt.Sprintf("https://www.instagram.com/api/v1/web/search/topsearch/?query=%s", url.PathEscape(username))
-	searchJSON, err := igAPIGet(ctx, client, searchAPI)
+	searchBytes, err := c.doGet(ctx, searchAPI, username)
 	if err != nil {
 		return "", fmt.Errorf("failed to query Instagram search API: %w", err)
 	}
@@ -487,7 +333,7 @@ func resolveInstagramUserID(ctx context.Context, username string, client *http.C
 			} `json:"user"`
 		} `json:"users"`
 	}
-	if err := json.Unmarshal([]byte(searchJSON), &search); err == nil {
+	if err := json.Unmarshal(searchBytes, &search); err == nil {
 		for _, u := range search.Users {
 			if strings.EqualFold(u.User.Username, username) {
 				return u.User.ID, nil
