@@ -80,6 +80,11 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 		downloadVideos = *t.DownloadVideos
 	}
 	lastSync := opts.LastSync
+	report := func(pct int, msg string) {
+		if opts.OnProgress != nil {
+			opts.OnProgress(pct, msg)
+		}
+	}
 	slog.Info("Scraping Twitter target user", "user", username, "platform", "twitter", "save_text", saveText, "skip_retweets", skipRetweets, "filters", filters, "download_photos", downloadPhotos, "download_videos", downloadVideos, "last_sync", lastSync)
 
 	c := config.GetConfig()
@@ -428,6 +433,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	}
 
 	slog.Info("Navigating to Twitter/X", "user", username, "url", targetURL)
+	report(20, "navigating")
 
 	err := chromedp.Run(dpCtx,
 		network.Enable(),
@@ -464,6 +470,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 		return fmt.Errorf("twitter auth token is invalid or expired — please log in to x.com and copy a fresh auth_token cookie: %w", ErrAuthExpired)
 	}
 	slog.Info("Twitter session is valid", "user", username, "path", currentPath)
+	report(30, "session valid")
 
 	err = chromedp.Run(dpCtx,
 		navigateNoWait(targetURL),
@@ -530,7 +537,9 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	listenerWg.Wait()
 
 	close(jobs)
+	report(50, "feed collected")
 	wg.Wait()
+	report(90, "downloads done")
 
 	if err != nil {
 		slog.Error("Twitter chromedp scraping task failed", "user", username, "error", err)

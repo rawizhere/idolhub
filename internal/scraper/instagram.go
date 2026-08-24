@@ -31,7 +31,7 @@ func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
 	if c.InstagramSessionID == "" {
 		return fmt.Errorf("instagram session ID is not configured")
 	}
-	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync)
+	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync, opts.OnProgress)
 }
 
 type igDirectItem struct {
@@ -85,7 +85,7 @@ func bestVideoURL(vs []igVideoVersion) string {
 }
 
 // scrapeInstagramDirect pulls timeline media via the private Instagram web API
-func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time) error {
+func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, onProgress func(pct int, msg string)) error {
 	c := config.GetConfig()
 	sessionID := c.InstagramSessionID
 	if sessionID == "" {
@@ -93,6 +93,12 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	}
 
 	numWorkers := 5
+
+	report := func(pct int, msg string) {
+		if onProgress != nil {
+			onProgress(pct, msg)
+		}
+	}
 
 	slog.Info("Scraping Instagram target user via direct API", "user", username, "platform", "instagram", "last_sync", lastSync)
 
@@ -102,7 +108,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		return err
 	}
 
-	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+	allocOpts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.NoSandbox,
 		chromedp.DisableGPU,
 		chromedp.Flag("disable-dev-shm-usage", true),
@@ -112,7 +118,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 	)
 
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, opts...)
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, allocOpts...)
 	defer cancelAlloc()
 
 	dpCtx, cancelDp := chromedp.NewContext(allocCtx)
@@ -172,12 +178,14 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		return fmt.Errorf("instagram session ID is invalid or expired — please log in and copy a fresh sessionid cookie: %w", ErrAuthExpired)
 	}
 	slog.Info("Instagram session is valid", "user", username)
+	report(30, "session valid")
 
 	userID, err := resolveInstagramUserID(dpCtx, username)
 	if err != nil {
 		return fmt.Errorf("failed to resolve Instagram user ID: %w", err)
 	}
 	slog.Info("Resolved Instagram user ID", "user", username, "user_id", userID)
+	report(35, "resolved user id")
 
 	fileIdx := newIgFileIndex(outputDir)
 
@@ -285,6 +293,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		}
 
 		slog.Info("Instagram feed page parsed", "user", username, "page", page, "items", len(feed.Items), "more_available", feed.MoreAvailable)
+		report(50, "feed parsed")
 
 		for _, item := range feed.Items {
 			itemTime := time.Unix(item.TakenAt, 0).UTC()
@@ -390,6 +399,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 
 	close(jobs)
 	wg.Wait()
+	report(90, "downloads done")
 
 	if saveText && len(postsJSON) > 0 {
 		postsPath := filepath.Join("downloads", "instagram", username, "posts.json")

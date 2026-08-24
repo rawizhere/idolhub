@@ -104,6 +104,11 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 		return fmt.Errorf("yt-dlp is not available; install yt-dlp or restart the server")
 	}
 
+	report := func(pct int, msg string) {
+		if opts.OnProgress != nil {
+			opts.OnProgress(pct, msg)
+		}
+	}
 	slog.Info("yt-dlp scrape starting", "platform", platform, "user", username, "last_sync", lastSync)
 
 	outputDir := filepath.Join("downloads", platform, username)
@@ -137,6 +142,7 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 			defer func() { _ = os.Remove(cookiePath) }()
 			cmd = cmd.Cookies(cookiePath)
 			slog.Info("yt-dlp using cookies", "platform", platform, "user", username)
+			report(20, "using cookies")
 		}
 	}
 
@@ -188,6 +194,7 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 	EnsureDirectoryVideoCodecs(ctx, outputDir)
 
 	slog.Info("yt-dlp video scraping completed successfully", "platform", platform, "user", username)
+	report(90, "downloads done")
 	return nil
 }
 

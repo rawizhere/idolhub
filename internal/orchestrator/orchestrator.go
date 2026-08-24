@@ -287,12 +287,6 @@ func (o *Orchestrator) AppendTaskLog(username string, t time.Time, level, msg st
 		o.globalLogs = o.globalLogs[len(o.globalLogs)-maxTaskLogs:]
 	}
 
-	status := ""
-	currentProgress := 0
-	if exists {
-		status = p.Status
-		currentProgress = p.Progress
-	}
 	o.mu.Unlock()
 
 	o.broadcast(SSEEvent{
@@ -301,31 +295,14 @@ func (o *Orchestrator) AppendTaskLog(username string, t time.Time, level, msg st
 		Level:    level,
 		Message:  msg,
 	})
+}
 
-	// Estimate progress based on log message content
-	if exists && (status == "running" || status == "queued") {
-		progress := currentProgress
-		if progress < 10 {
-			progress = 10
-		}
-		ml := strings.ToLower(msg)
-		if strings.Contains(ml, "navigating") || strings.Contains(ml, "testing twitter mirror") || strings.Contains(ml, "session is valid") || strings.Contains(ml, "yt-dlp using cookies") {
-			progress = 20
-		} else if strings.Contains(ml, "timeline page parsed") || strings.Contains(ml, "instagram post count") || strings.Contains(ml, "instagram feed page parsed") || strings.Contains(ml, "resolved instagram user id") || strings.Contains(ml, "downloading video stream") || strings.Contains(ml, "yt-dlp progress") {
-			progress = 50
-		} else if strings.Contains(ml, "concurrent download workers") {
-			progress = 70
-		} else if strings.Contains(ml, "file downloaded") || strings.Contains(ml, "instagram file downloaded") || strings.Contains(ml, "twitter image downloaded") || strings.Contains(ml, "twitter video downloaded") || strings.Contains(ml, "video scraping completed") {
-			progress = 90
-		}
-		if progress != currentProgress {
-			o.mu.Lock()
-			if p, exists := o.progress[username]; exists {
-				p.Progress = progress
-			}
-			o.mu.Unlock()
-		}
+func (o *Orchestrator) setProgress(username string, pct int) {
+	o.mu.Lock()
+	if p, exists := o.progress[username]; exists && (p.Status == "running" || p.Status == "queued") {
+		p.Progress = pct
 	}
+	o.mu.Unlock()
 }
 
 func (o *Orchestrator) GetGlobalLogs() []TaskLog {
@@ -449,6 +426,9 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	opts := scraper.Options{
 		LastSync:  lastSync,
 		ForceFull: job.forceFullSync,
+		OnProgress: func(pct int, _ string) {
+			o.setProgress(username, pct)
+		},
 	}
 
 	c := config.GetConfig()
