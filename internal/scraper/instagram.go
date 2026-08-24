@@ -20,6 +20,7 @@ import (
 
 	"idolhub/internal/config"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
@@ -198,7 +199,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 					return
 				default:
 				}
-				if downloadInstagramDirectMedia(item, outputDir, &postsMu, &postsJSON, username, fileIdx) {
+				if downloadInstagramDirectMedia(ctx, item, outputDir, &postsMu, &postsJSON, username, fileIdx) {
 					atomic.AddInt32(&downloadedCount, 1)
 				} else {
 					atomic.AddInt32(&skippedCount, 1)
@@ -551,7 +552,7 @@ func (idx *igFileIndex) add(filename string) {
 }
 
 // downloadInstagramDirectMedia downloads a media item from CDN
-func downloadInstagramDirectMedia(item igDirectItem, outputDir string, postsMu *sync.Mutex, postsJSON *[]map[string]interface{}, username string, fileIdx *igFileIndex) bool {
+func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, outputDir string, postsMu *sync.Mutex, postsJSON *[]map[string]interface{}, username string, fileIdx *igFileIndex) bool {
 	if fileIdx != nil && fileIdx.exists(item) {
 		return false
 	}
@@ -590,7 +591,7 @@ func downloadInstagramDirectMedia(item igDirectItem, outputDir string, postsMu *
 		return false
 	}
 
-	req, err := http.NewRequest("GET", item.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", item.URL, nil)
 	if err != nil {
 		slog.Warn("Failed to build Instagram CDN request", "user", username, "filename", filename, "error", err)
 		return false
@@ -600,17 +601,24 @@ func downloadInstagramDirectMedia(item igDirectItem, outputDir string, postsMu *
 	req.Header.Set("Accept", "image/avif,image/webp,*/*;q=0.8")
 
 	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Do(req)
+	var resp *http.Response
+	err = retry.Do(func() error {
+		r, doErr := client.Do(req)
+		if doErr != nil {
+			return doErr
+		}
+		if r.StatusCode != http.StatusOK {
+			_ = r.Body.Close()
+			return fmt.Errorf("unexpected status %d", r.StatusCode)
+		}
+		resp = r
+		return nil
+	}, retry.Attempts(3), retry.Delay(time.Second), retry.DelayType(retry.BackOffDelay), retry.LastErrorOnly(true), retry.Context(ctx))
 	if err != nil {
 		slog.Warn("Failed to download Instagram direct media", "user", username, "filename", filename, "error", err)
 		return false
 	}
 	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		slog.Warn("Instagram CDN returned error code", "user", username, "filename", filename, "status", resp.StatusCode)
-		return false
-	}
 
 	out, err := os.Create(filePath)
 	if err != nil {

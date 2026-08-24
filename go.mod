@@ -12,6 +12,7 @@ require (
 
 require (
 	github.com/ProtonMail/go-crypto v1.3.0 // indirect
+	github.com/avast/retry-go/v4 v4.7.0 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect

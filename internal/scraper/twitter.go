@@ -19,6 +19,7 @@ import (
 
 	"idolhub/internal/config"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
@@ -603,7 +604,7 @@ func downloadTwitterImage(ctx context.Context, item TwitterDownloadItem, outputD
 		return false // File already exists
 	}
 
-	// Jitter delay
+	// jitter before download
 	time.Sleep(time.Duration(500+rand.IntN(1500)) * time.Millisecond)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", formatURL, nil)
@@ -614,21 +615,19 @@ func downloadTwitterImage(ctx context.Context, item TwitterDownloadItem, outputD
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
 	var resp *http.Response
-	downloadSuccess := false
-
-	for attempt := 1; attempt <= 3; attempt++ {
-		resp, err = client.Do(req)
-		if err == nil && resp.StatusCode == http.StatusOK {
-			downloadSuccess = true
-			break
+	err = retry.Do(func() error {
+		r, doErr := client.Do(req)
+		if doErr != nil {
+			return doErr
 		}
-		if resp != nil {
-			_ = resp.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			_ = r.Body.Close()
+			return fmt.Errorf("unexpected status %d", r.StatusCode)
 		}
-		time.Sleep(time.Duration(attempt) * time.Second)
-	}
-
-	if !downloadSuccess {
+		resp = r
+		return nil
+	}, retry.Attempts(3), retry.Delay(time.Second), retry.DelayType(retry.BackOffDelay), retry.LastErrorOnly(true), retry.Context(ctx))
+	if err != nil {
 		slog.Warn("Failed to download image", "user", username, "filename", filename, "error", err)
 		return false
 	}
@@ -664,7 +663,7 @@ func downloadTwitterVideo(ctx context.Context, item TwitterDownloadItem, outputD
 		return false // File already exists
 	}
 
-	// Jitter delay
+	// jitter before download
 	time.Sleep(time.Duration(500+rand.IntN(1500)) * time.Millisecond)
 
 	slog.Info("Starting Twitter video download", "user", username, "tweet_id", item.TweetID)
@@ -675,17 +674,24 @@ func downloadTwitterVideo(ctx context.Context, item TwitterDownloadItem, outputD
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
-	resp, err := client.Do(req)
+	var resp *http.Response
+	err = retry.Do(func() error {
+		r, doErr := client.Do(req)
+		if doErr != nil {
+			return doErr
+		}
+		if r.StatusCode != http.StatusOK {
+			_ = r.Body.Close()
+			return fmt.Errorf("unexpected status %d", r.StatusCode)
+		}
+		resp = r
+		return nil
+	}, retry.Attempts(3), retry.Delay(time.Second), retry.DelayType(retry.BackOffDelay), retry.LastErrorOnly(true), retry.Context(ctx))
 	if err != nil {
 		slog.Warn("Failed to download video", "user", username, "tweet_id", item.TweetID, "error", err)
 		return false
 	}
 	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		slog.Warn("Failed to download video: server status error", "user", username, "tweet_id", item.TweetID, "status", resp.StatusCode)
-		return false
-	}
 
 	out, err := os.Create(filePath)
 	if err != nil {
