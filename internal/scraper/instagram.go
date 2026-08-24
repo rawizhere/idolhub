@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -24,6 +23,7 @@ import (
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
+	"golang.org/x/time/rate"
 )
 
 func ScrapeInstagramUser(ctx context.Context, username string, saveText bool, lastSync time.Time) error {
@@ -162,7 +162,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	var isLoggedIn bool
 	if err := chromedp.Run(dpCtx,
 		navigateNoWait("https://www.instagram.com/accounts/edit/"),
-		igJitterAction(2*time.Second, 2*time.Second),
+		igJitterAction(),
 		chromedp.Evaluate(`window.location.pathname !== '/accounts/login/' && !document.querySelector('input[name="username"]')`, &isLoggedIn),
 	); err != nil {
 		return fmt.Errorf("failed to verify Instagram session: %w", err)
@@ -242,7 +242,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 					}
 				}).then(r => r.text()).then(t => window.__igFeed = t).catch(e => window.__igFeed = "ERROR:" + e.message)
 			`, apiURL, url.PathEscape(username)), nil),
-			igJitterAction(2*time.Second, 2*time.Second),
+			igJitterAction(),
 			chromedp.Evaluate(`window.__igFeed || ""`, &feedJSON),
 		); err != nil {
 			slog.Error("Failed to fetch Instagram feed page", "user", username, "page", page, "error", err)
@@ -381,12 +381,10 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		nextMaxID = feed.NextMaxID
 
 		// Rate-limit with jitter between pages
-		select {
-		case <-ctx.Done():
+		if err := igLimiter.Wait(ctx); err != nil {
 			close(jobs)
 			wg.Wait()
 			return ctx.Err()
-		case <-time.After(time.Duration(2000+rand.IntN(2000)) * time.Millisecond):
 		}
 	}
 
@@ -402,14 +400,21 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	return nil
 }
 
-// igJitterAction returns a random chromedp.Sleep action
-func igJitterAction(min, span time.Duration) chromedp.Action {
-	return chromedp.Sleep(min + time.Duration(rand.Int64N(int64(span))))
+// igLimiter paces Instagram requests to avoid rate limits.
+var igLimiter = rate.NewLimiter(rate.Every(2*time.Second), 1)
+
+// igJitterAction spaces requests politely via the shared limiter.
+func igJitterAction() chromedp.Action {
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		return igLimiter.Wait(ctx)
+	})
 }
 
 // resolveInstagramUserID resolves numeric user ID from username
 func resolveInstagramUserID(ctx context.Context, username string) (string, error) {
-	time.Sleep(1*time.Second + time.Duration(rand.Int64N(2*int64(time.Second))))
+	if err := igLimiter.Wait(ctx); err != nil {
+		return "", err
+	}
 
 	profileAPI := fmt.Sprintf("https://www.instagram.com/api/v1/users/web_profile_info/?username=%s", url.PathEscape(username))
 	var profileJSON string
@@ -425,7 +430,7 @@ func resolveInstagramUserID(ctx context.Context, username string) (string, error
 				}
 			}).then(r => r.text()).then(t => window.__igProfile = t).catch(e => window.__igProfile = "ERROR:" + e.message)
 		`, profileAPI, url.PathEscape(username)), nil),
-		igJitterAction(2*time.Second, 2*time.Second),
+		igJitterAction(),
 		chromedp.Evaluate(`window.__igProfile || ""`, &profileJSON),
 	); err != nil {
 		return "", fmt.Errorf("failed to query Instagram web_profile_info: %w", err)
@@ -450,7 +455,9 @@ func resolveInstagramUserID(ctx context.Context, username string) (string, error
 	}
 
 	// Fall back to the topsearch API
-	time.Sleep(1*time.Second + time.Duration(rand.Int64N(2*int64(time.Second))))
+	if err := igLimiter.Wait(ctx); err != nil {
+		return "", err
+	}
 	var searchJSON string
 	if err := chromedp.Run(ctx,
 		chromedp.Evaluate(fmt.Sprintf(`
@@ -463,7 +470,7 @@ func resolveInstagramUserID(ctx context.Context, username string) (string, error
 				}
 			}).then(r => r.text()).then(t => window.__igSearch = t).catch(e => window.__igSearch = "")
 		`, url.PathEscape(username)), nil),
-		igJitterAction(2*time.Second, 2*time.Second),
+		igJitterAction(),
 		chromedp.Evaluate(`window.__igSearch || ""`, &searchJSON),
 	); err != nil {
 		return "", fmt.Errorf("failed to query Instagram search API: %w", err)

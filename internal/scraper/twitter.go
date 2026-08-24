@@ -24,6 +24,7 @@ import (
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+	"golang.org/x/time/rate"
 )
 
 type TwitterDownloadItem struct {
@@ -458,6 +459,7 @@ func ScrapeTwitterUser(ctx context.Context, username string, saveText bool, skip
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			lastCount := 0
 			retries := 0
+			limiter := rate.NewLimiter(rate.Every(7*time.Second), 1)
 			for i := 1; ; i++ {
 				select {
 				case <-ctx.Done():
@@ -478,10 +480,11 @@ func ScrapeTwitterUser(ctx context.Context, username string, saveText bool, skip
 
 				slog.Info("Scrolling Twitter feed", "user", username, "scroll", i)
 
-				sleepSec := 5 + rand.IntN(5) // Sleep between 5 and 9 seconds
+				if err := limiter.Wait(ctx); err != nil {
+					return err
+				}
 				err := chromedp.Run(ctx,
 					chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight);`, nil),
-					chromedp.Sleep(time.Duration(sleepSec)*time.Second),
 				)
 				if err != nil {
 					return err
