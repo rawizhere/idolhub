@@ -16,9 +16,12 @@ type Target struct {
 }
 
 type Options struct {
-	LastSync   time.Time
-	ForceFull  bool
-	OnProgress func(pct int, msg string)
+	LastSync           time.Time
+	ForceFull          bool
+	OnProgress         func(pct int, msg string)
+	TwitterAuthToken   string
+	InstagramSessionID string
+	TikTokCookies      string
 }
 
 type Scraper interface {

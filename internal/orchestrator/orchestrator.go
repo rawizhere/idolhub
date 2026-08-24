@@ -444,6 +444,10 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 		}
 	}
 
+	opts.TwitterAuthToken = c.TwitterAuthToken
+	opts.InstagramSessionID = c.InstagramSessionID
+	opts.TikTokCookies = c.TikTokCookies
+
 	s, ok := scraper.Get(platform)
 	if !ok {
 		err = fmt.Errorf("unknown platform: %s", platform)

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"idolhub/internal/config"
 	"idolhub/internal/download"
 
 	ytdlp "github.com/lrstanley/go-ytdlp"
@@ -77,13 +76,12 @@ type ytdlpPlatform struct {
 	cookie string
 }
 
-func ytdlpPlatformConfig(platform string) ytdlpPlatform {
-	c := config.GetConfig()
+func ytdlpPlatformConfig(platform, cookie string) ytdlpPlatform {
 	switch platform {
 	case "tiktok":
 		return ytdlpPlatform{
 			url:    "https://www.tiktok.com/@%s",
-			cookie: c.TikTokCookies,
+			cookie: cookie,
 		}
 	default:
 		return ytdlpPlatform{}
@@ -96,7 +94,7 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 	username := t.Username
 	saveText := t.SaveText
 	lastSync := opts.LastSync
-	pc := ytdlpPlatformConfig(platform)
+	pc := ytdlpPlatformConfig(platform, opts.TikTokCookies)
 	if pc.url == "" {
 		return fmt.Errorf("unsupported yt-dlp platform: %s", platform)
 	}

@@ -17,7 +17,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"idolhub/internal/config"
 	"idolhub/internal/download"
 
 	"github.com/avast/retry-go/v4"
@@ -88,8 +87,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	}
 	slog.Info("Scraping Twitter target user", "user", username, "platform", "twitter", "save_text", saveText, "skip_retweets", skipRetweets, "filters", filters, "download_photos", downloadPhotos, "download_videos", downloadVideos, "last_sync", lastSync)
 
-	c := config.GetConfig()
-	twitterAuthToken := c.TwitterAuthToken
+	twitterAuthToken := opts.TwitterAuthToken
 	if twitterAuthToken == "" {
 		err := fmt.Errorf("twitter auth token is not set in settings")
 		slog.Error("Scraper aborted", "error", err)

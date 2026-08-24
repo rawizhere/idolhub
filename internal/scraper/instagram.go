@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"idolhub/internal/config"
 	"idolhub/internal/download"
 
 	"github.com/avast/retry-go/v4"
@@ -27,11 +26,10 @@ import (
 )
 
 func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
-	c := config.GetConfig()
-	if c.InstagramSessionID == "" {
+	if opts.InstagramSessionID == "" {
 		return fmt.Errorf("instagram session ID is not configured")
 	}
-	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync, opts.OnProgress)
+	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync, opts.InstagramSessionID, opts.OnProgress)
 }
 
 type igDirectItem struct {
@@ -85,9 +83,7 @@ func bestVideoURL(vs []igVideoVersion) string {
 }
 
 // scrapeInstagramDirect pulls timeline media via the private Instagram web API
-func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, onProgress func(pct int, msg string)) error {
-	c := config.GetConfig()
-	sessionID := c.InstagramSessionID
+func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, sessionID string, onProgress func(pct int, msg string)) error {
 	if sessionID == "" {
 		return fmt.Errorf("instagram session ID is not set")
 	}
