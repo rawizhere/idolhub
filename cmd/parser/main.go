@@ -548,6 +548,8 @@ func (a *App) handleScrapeClear(w http.ResponseWriter, r *http.Request) {
 }
 
 func accountsEqual(a, b config.Account) bool {
+	a.LastSyncStatus, b.LastSyncStatus = "", ""
+	a.LastSyncTime, b.LastSyncTime = time.Time{}, time.Time{}
 	return reflect.DeepEqual(a, b)
 }
 
