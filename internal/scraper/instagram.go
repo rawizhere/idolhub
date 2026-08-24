@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -18,7 +17,6 @@ import (
 
 	"idolhub/internal/download"
 
-	"github.com/avast/retry-go/v4"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/chromedp"
@@ -184,6 +182,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	report(35, "resolved user id")
 
 	fileIdx := newIgFileIndex(outputDir)
+	cdnClient := &http.Client{Timeout: 5 * time.Minute}
 
 	jobs := make(chan igDirectItem, 1000)
 	var downloadedCount int32
@@ -192,7 +191,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	var postsMu sync.Mutex
 
 	pool := download.Start(ctx, jobs, numWorkers, func(ctx context.Context, item igDirectItem) bool {
-		return downloadInstagramDirectMedia(ctx, item, outputDir, &postsMu, &postsJSON, username, fileIdx)
+		return downloadInstagramDirectMedia(ctx, item, outputDir, &postsMu, &postsJSON, username, fileIdx, cdnClient)
 	})
 
 	var nextMaxID string
@@ -548,7 +547,7 @@ func (idx *igFileIndex) add(filename string) {
 }
 
 // downloadInstagramDirectMedia downloads a media item from CDN
-func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, outputDir string, postsMu *sync.Mutex, postsJSON *[]map[string]interface{}, username string, fileIdx *igFileIndex) bool {
+func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, outputDir string, postsMu *sync.Mutex, postsJSON *[]map[string]interface{}, username string, fileIdx *igFileIndex, client *http.Client) bool {
 	if fileIdx != nil && fileIdx.exists(item) {
 		return false
 	}
@@ -577,54 +576,22 @@ func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, output
 
 	datePrefix := item.Date.Format("2006-01-02_15-04-05")
 	filename := fmt.Sprintf("%s_%s", datePrefix, baseName)
-
 	filePath := filepath.Join(outputDir, filename)
 
-	if _, err := os.Stat(filePath); err == nil {
-		if fileIdx != nil {
-			fileIdx.add(filename)
-		}
-		return false
+	header := http.Header{
+		"User-Agent": []string{desktopUA},
+		"Referer":    []string{"https://www.instagram.com/"},
+		"Accept":     []string{"image/avif,image/webp,*/*;q=0.8"},
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "GET", item.URL, nil)
-	if err != nil {
-		slog.Warn("Failed to build Instagram CDN request", "user", username, "filename", filename, "error", err)
-		return false
-	}
-	req.Header.Set("User-Agent", desktopUA)
-	req.Header.Set("Referer", "https://www.instagram.com/")
-	req.Header.Set("Accept", "image/avif,image/webp,*/*;q=0.8")
-
-	client := &http.Client{Timeout: 5 * time.Minute}
-	var resp *http.Response
-	err = retry.Do(func() error {
-		r, doErr := client.Do(req)
-		if doErr != nil {
-			return doErr
-		}
-		if r.StatusCode != http.StatusOK {
-			_ = r.Body.Close()
-			return HTTPStatusErr(r.StatusCode)
-		}
-		resp = r
-		return nil
-	}, retry.Attempts(3), retry.Delay(time.Second), retry.DelayType(retry.BackOffDelay), retry.LastErrorOnly(true), retry.Context(ctx))
+	downloaded, err := download.File(ctx, client, item.URL, filePath, download.FileOpts{Header: header})
 	if err != nil {
 		slog.Warn("Failed to download Instagram direct media", "user", username, "filename", filename, "error", err)
 		return false
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	out, err := os.Create(filePath)
-	if err != nil {
-		slog.Warn("Failed to create file on disk", "user", username, "filename", filename, "error", err)
-		return false
-	}
-	defer func() { _ = out.Close() }()
-
-	if _, err := io.Copy(out, resp.Body); err != nil {
-		slog.Warn("Failed to write data to file", "user", username, "filename", filename, "error", err)
+	if !downloaded {
+		if fileIdx != nil {
+			fileIdx.add(filename)
+		}
 		return false
 	}
 
@@ -634,10 +601,6 @@ func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, output
 	}
 	slog.Info("Instagram file downloaded", "user", username, "filename", filename, "type", label)
 
-	go func() {
-		thumbDir := filepath.Join(outputDir, "thumbnails")
-		thumbFilename := strings.TrimSuffix(filename, filepath.Ext(filename)) + ".jpg"
-		_ = download.GenerateThumbnail(filePath, filepath.Join(thumbDir, thumbFilename))
-	}()
+	download.ThumbnailAsync(filePath)
 	return true
 }

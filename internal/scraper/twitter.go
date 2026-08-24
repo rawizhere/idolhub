@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,7 +17,6 @@ import (
 
 	"idolhub/internal/download"
 
-	"github.com/avast/retry-go/v4"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
@@ -602,58 +599,20 @@ func downloadTwitterImage(ctx context.Context, item TwitterDownloadItem, outputD
 	}
 	filePath := filepath.Join(outputDir, filename)
 
-	if _, err := os.Stat(filePath); err == nil {
-		return false // File already exists
-	}
-
-	// jitter before download
-	time.Sleep(time.Duration(500+rand.IntN(1500)) * time.Millisecond)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", formatURL, nil)
-	if err != nil {
-		slog.Error("Failed to create image download request", "user", username, "url", formatURL, "error", err)
-		return false
-	}
-	req.Header.Set("User-Agent", desktopUA)
-
-	var resp *http.Response
-	err = retry.Do(func() error {
-		r, doErr := client.Do(req)
-		if doErr != nil {
-			return doErr
-		}
-		if r.StatusCode != http.StatusOK {
-			_ = r.Body.Close()
-			return HTTPStatusErr(r.StatusCode)
-		}
-		resp = r
-		return nil
-	}, retry.Attempts(3), retry.Delay(time.Second), retry.DelayType(retry.BackOffDelay), retry.LastErrorOnly(true), retry.Context(ctx))
+	downloaded, err := download.File(ctx, client, formatURL, filePath, download.FileOpts{
+		Header: http.Header{"User-Agent": []string{desktopUA}},
+		Jitter: 2 * time.Second,
+	})
 	if err != nil {
 		slog.Warn("Failed to download image", "user", username, "filename", filename, "error", err)
 		return false
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	out, err := os.Create(filePath)
-	if err != nil {
-		slog.Error("Failed to create image file", "user", username, "path", filePath, "error", err)
-		return false
-	}
-	defer func() { _ = out.Close() }()
-
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		slog.Warn("Failed to save image bytes to disk", "user", username, "filename", filename, "error", err)
+	if !downloaded {
 		return false
 	}
 
 	slog.Info("Twitter image downloaded", "user", username, "filename", filename)
-	go func() {
-		thumbDir := filepath.Join(outputDir, "thumbnails")
-		thumbFilename := strings.TrimSuffix(filename, filepath.Ext(filename)) + ".jpg"
-		_ = download.GenerateThumbnail(filePath, filepath.Join(thumbDir, thumbFilename))
-	}()
+	download.ThumbnailAsync(filePath)
 	return true
 }
 
@@ -661,58 +620,20 @@ func downloadTwitterVideo(ctx context.Context, item TwitterDownloadItem, outputD
 	filename := fmt.Sprintf("%s_%s_video.mp4", item.DateStr, item.TweetID)
 	filePath := filepath.Join(outputDir, filename)
 
-	if _, err := os.Stat(filePath); err == nil {
-		return false // File already exists
-	}
-
-	// jitter before download
-	time.Sleep(time.Duration(500+rand.IntN(1500)) * time.Millisecond)
-
 	slog.Info("Starting Twitter video download", "user", username, "tweet_id", item.TweetID)
-	req, err := http.NewRequestWithContext(ctx, "GET", item.URL, nil)
-	if err != nil {
-		slog.Error("Failed to create video download request", "user", username, "url", item.URL, "error", err)
-		return false
-	}
-	req.Header.Set("User-Agent", desktopUA)
-
-	var resp *http.Response
-	err = retry.Do(func() error {
-		r, doErr := client.Do(req)
-		if doErr != nil {
-			return doErr
-		}
-		if r.StatusCode != http.StatusOK {
-			_ = r.Body.Close()
-			return HTTPStatusErr(r.StatusCode)
-		}
-		resp = r
-		return nil
-	}, retry.Attempts(3), retry.Delay(time.Second), retry.DelayType(retry.BackOffDelay), retry.LastErrorOnly(true), retry.Context(ctx))
+	downloaded, err := download.File(ctx, client, item.URL, filePath, download.FileOpts{
+		Header: http.Header{"User-Agent": []string{desktopUA}},
+		Jitter: 2 * time.Second,
+	})
 	if err != nil {
 		slog.Warn("Failed to download video", "user", username, "tweet_id", item.TweetID, "error", err)
 		return false
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	out, err := os.Create(filePath)
-	if err != nil {
-		slog.Error("Failed to create video file", "user", username, "path", filePath, "error", err)
-		return false
-	}
-	defer func() { _ = out.Close() }()
-
-	_, err = io.Copy(out, resp.Body)
-	if err != nil {
-		slog.Warn("Failed to write video file", "user", username, "tweet_id", item.TweetID, "error", err)
+	if !downloaded {
 		return false
 	}
 
 	slog.Info("Twitter video downloaded successfully", "user", username, "filename", filename)
-	go func() {
-		thumbDir := filepath.Join(outputDir, "thumbnails")
-		thumbFilename := strings.TrimSuffix(filename, filepath.Ext(filename)) + ".jpg"
-		_ = download.GenerateThumbnail(filePath, filepath.Join(thumbDir, thumbFilename))
-	}()
+	download.ThumbnailAsync(filePath)
 	return true
 }
