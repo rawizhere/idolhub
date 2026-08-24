@@ -2,8 +2,6 @@ package scraper
 
 import (
 	"fmt"
-	"image"
-	"image/jpeg"
 	"io"
 	"log/slog"
 	"os"
@@ -11,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"golang.org/x/image/draw"
+	"github.com/disintegration/imaging"
 	_ "golang.org/x/image/webp"
 )
 
@@ -38,59 +36,29 @@ func GenerateThumbnail(srcPath, dstPath string) error {
 		return nil
 	}
 
-	f, err := os.Open(srcPath)
-	if err != nil {
-		return fmt.Errorf("failed to open source image: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	img, format, err := image.Decode(f)
+	srcImg, err := imaging.Open(srcPath, imaging.AutoOrientation(true))
 	if err != nil {
 		slog.Warn("Failed to decode image, falling back to copying original", "src", srcPath, "error", err)
-		_ = f.Close()
-		in, err := os.Open(srcPath)
-		if err != nil {
-			return err
+		in, oerr := os.Open(srcPath)
+		if oerr != nil {
+			return oerr
 		}
 		defer func() { _ = in.Close() }()
-		out, err := os.Create(dstPath)
-		if err != nil {
-			return err
+		out, oerr := os.Create(dstPath)
+		if oerr != nil {
+			return oerr
 		}
 		defer func() { _ = out.Close() }()
-		_, err = io.Copy(out, in)
-		return err
+		_, oerr = io.Copy(out, in)
+		return oerr
 	}
 
-	bounds := img.Bounds()
-	width := bounds.Dx()
-	height := bounds.Dy()
-
-	targetWidth := 480
-	if width < targetWidth {
-		targetWidth = width
-	}
-	targetHeight := int((float64(height) / float64(width)) * float64(targetWidth))
-	if targetHeight < 1 {
-		targetHeight = 1
+	thumb := imaging.Thumbnail(srcImg, 480, 480, imaging.Lanczos)
+	if err := imaging.Save(thumb, dstPath, imaging.JPEGQuality(80)); err != nil {
+		return fmt.Errorf("failed to encode thumbnail as jpeg: %w", err)
 	}
 
-	rect := image.Rect(0, 0, targetWidth, targetHeight)
-	dstImg := image.NewRGBA(rect)
-
-	draw.BiLinear.Scale(dstImg, rect, img, bounds, draw.Over, nil)
-
-	outF, err := os.Create(dstPath)
-	if err != nil {
-		return fmt.Errorf("failed to create destination thumbnail: %w", err)
-	}
-	defer func() { _ = outF.Close() }()
-
-	if err := jpeg.Encode(outF, dstImg, &jpeg.Options{Quality: 80}); err != nil {
-		return fmt.Errorf("failed to encode thumbnail as jpeg (%s): %w", format, err)
-	}
-
-	slog.Debug("Image thumbnail generated successfully", "src", srcPath, "dst", dstPath, "format", format)
+	slog.Debug("Image thumbnail generated successfully", "src", srcPath, "dst", dstPath)
 	return nil
 }
 
