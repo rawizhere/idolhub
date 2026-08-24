@@ -8,7 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
+
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 type MediaEntry struct {
@@ -17,17 +18,17 @@ type MediaEntry struct {
 }
 
 type Index struct {
-	mu    sync.RWMutex
-	files map[string][]MediaEntry
+	files *lru.Cache[string, []MediaEntry]
 }
 
 var GlobalIndex *Index
 
 func Init() {
-	idx := &Index{
-		files: make(map[string][]MediaEntry),
+	cache, err := lru.New[string, []MediaEntry](512)
+	if err != nil {
+		panic(err)
 	}
-	GlobalIndex = idx
+	GlobalIndex = &Index{files: cache}
 }
 
 func keyOf(platform, username string) string {
@@ -85,28 +86,15 @@ func scan(dir string) []MediaEntry {
 // Get returns cached file entries for a target
 func (idx *Index) Get(platform, username string) []MediaEntry {
 	key := keyOf(platform, username)
-	dir := dirOf(platform, username)
-
-	idx.mu.RLock()
-	if files, ok := idx.files[key]; ok {
-		idx.mu.RUnlock()
+	if files, ok := idx.files.Get(key); ok {
 		return files
 	}
-	idx.mu.RUnlock()
 
-	files := scan(dir)
+	files := scan(dirOf(platform, username))
 	if files == nil {
 		files = []MediaEntry{}
 	}
-
-	idx.mu.Lock()
-	if files, ok := idx.files[key]; ok {
-		idx.mu.Unlock()
-		return files
-	}
-	idx.files[key] = files
-	idx.mu.Unlock()
-
+	idx.files.Add(key, files)
 	return files
 }
 
@@ -117,16 +105,12 @@ func (idx *Index) Count(platform, username string) int {
 
 // Invalidate removes the cached file list for a target
 func (idx *Index) Invalidate(platform, username string) {
-	idx.mu.Lock()
-	delete(idx.files, keyOf(platform, username))
-	idx.mu.Unlock()
+	idx.files.Remove(keyOf(platform, username))
 }
 
 // InvalidateAll clears all cached entries
 func (idx *Index) InvalidateAll() {
-	idx.mu.Lock()
-	clear(idx.files)
-	idx.mu.Unlock()
+	idx.files.Purge()
 }
 
 // FindLocalFile resolves a media URL to a cached local filename for a target.

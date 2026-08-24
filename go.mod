@@ -21,6 +21,7 @@ require (
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/gobwas/ws v1.4.0 // indirect
+	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/tmaxmax/go-sse v0.11.0 // indirect
