@@ -256,26 +256,11 @@ type scrapeRequest struct {
 	ForceFull bool   `json:"force_full,omitempty"`
 }
 
-type PostMediaFile struct {
-	Filename     string `json:"filename"`
-	URL          string `json:"url"`
-	ThumbnailURL string `json:"thumbnail_url"`
-}
-
-type GalleryPost struct {
-	TweetID     string          `json:"tweet_id"`
-	Date        string          `json:"date"`
-	Text        string          `json:"text"`
-	MediaURLs   []string        `json:"media_urls"`
-	LocalFiles  []PostMediaFile `json:"local_files"`
-	YoutubeURLs []string        `json:"youtube_urls,omitempty"`
-}
-
 type GalleryResponse struct {
 	Username string         `json:"username"`
 	Platform string         `json:"platform"`
 	Files    []gallery.File `json:"files"`
-	Posts    []GalleryPost  `json:"posts"`
+	Posts    []gallery.Post `json:"posts"`
 }
 
 func (a *App) handleGallery(w http.ResponseWriter, r *http.Request) {
@@ -290,47 +275,35 @@ func (a *App) handleGallery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dir := filepath.Join("downloads", platform, username)
-
 	files := a.mediaIndex.View(platform, username)
+	posts := a.mediaIndex.Posts(platform, username)
 
-	var posts []GalleryPost
-	postsPath := filepath.Join(dir, "posts.json")
-	if data, err := os.ReadFile(postsPath); err == nil {
-		var rawPosts []GalleryPost
-		if json.Unmarshal(data, &rawPosts) == nil {
-			for i, p := range rawPosts {
-				var localFiles []PostMediaFile
-				for _, mediaURL := range p.MediaURLs {
-					gf := a.findLocalFile(mediaURL, platform, username, files)
-					if gf == nil {
-						videoName := p.TweetID + "_video.mp4"
-						for j := range files {
-							if files[j].Filename == videoName {
-								gf = &files[j]
-								break
-							}
-						}
-					}
-					if gf != nil {
-						localFiles = append(localFiles, PostMediaFile{
-							Filename:     gf.Filename,
-							URL:          gf.URL,
-							ThumbnailURL: gf.ThumbnailURL,
-						})
+	for i, p := range posts {
+		var localFiles []gallery.PostMediaFile
+		for _, mediaURL := range p.MediaURLs {
+			gf := a.findLocalFile(mediaURL, platform, username, files)
+			if gf == nil {
+				videoName := p.TweetID + "_video.mp4"
+				for j := range files {
+					if files[j].Filename == videoName {
+						gf = &files[j]
+						break
 					}
 				}
-				rawPosts[i].LocalFiles = localFiles
 			}
-			slices.SortFunc(rawPosts, func(a, b GalleryPost) int {
-				return cmp.Compare(b.Date, a.Date)
-			})
-			posts = rawPosts
+			if gf != nil {
+				localFiles = append(localFiles, gallery.PostMediaFile{
+					Filename:     gf.Filename,
+					URL:          gf.URL,
+					ThumbnailURL: gf.ThumbnailURL,
+				})
+			}
 		}
+		posts[i].LocalFiles = localFiles
 	}
-	if posts == nil {
-		posts = []GalleryPost{}
-	}
+	slices.SortFunc(posts, func(a, b gallery.Post) int {
+		return cmp.Compare(b.Date, a.Date)
+	})
 
 	_ = json.NewEncoder(w).Encode(GalleryResponse{
 		Username: username,
@@ -613,7 +586,6 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 	platform := p.Platform
 	username := p.Username
 	page := p.Page
-	dir := p.Dir
 	search := p.Search
 	sortParam := p.Sort
 	year := p.Year
@@ -673,38 +645,31 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if p.Tags != "" && p.Tags != "all" {
-		postsPath := filepath.Join(dir, "posts.json")
-		postsData, err := os.ReadFile(postsPath)
-		if err == nil {
-			var rawPosts []GalleryPost
-			if json.Unmarshal(postsData, &rawPosts) == nil {
-				matchingFilenames := make(map[string]bool)
-				for _, rp := range rawPosts {
-					if !gallery.TagSelected(gallery.SplitList(p.Tags), gallery.Hashtags(rp.Text)) {
-						continue
-					}
-					for _, mu := range rp.MediaURLs {
-						if gf := a.findLocalFile(mu, platform, username, galleryFiles); gf != nil {
-							matchingFilenames[gf.Filename] = true
-						}
-					}
-					videoName := rp.TweetID + "_video.mp4"
-					for _, gf := range galleryFiles {
-						if gf.Filename == videoName {
-							matchingFilenames[gf.Filename] = true
-							break
-						}
-					}
+		matchingFilenames := make(map[string]bool)
+		for _, rp := range a.mediaIndex.Posts(platform, username) {
+			if !gallery.TagSelected(gallery.SplitList(p.Tags), gallery.Hashtags(rp.Text)) {
+				continue
+			}
+			for _, mu := range rp.MediaURLs {
+				if gf := a.findLocalFile(mu, platform, username, galleryFiles); gf != nil {
+					matchingFilenames[gf.Filename] = true
 				}
-				filtered := allFiles[:0]
-				for _, f := range allFiles {
-					if matchingFilenames[f.Filename] {
-						filtered = append(filtered, f)
-					}
+			}
+			videoName := rp.TweetID + "_video.mp4"
+			for _, gf := range galleryFiles {
+				if gf.Filename == videoName {
+					matchingFilenames[gf.Filename] = true
+					break
 				}
-				allFiles = filtered
 			}
 		}
+		filtered := allFiles[:0]
+		for _, f := range allFiles {
+			if matchingFilenames[f.Filename] {
+				filtered = append(filtered, f)
+			}
+		}
+		allFiles = filtered
 	}
 
 	pageFiles, totalPages := gallery.Page(allFiles, page, galleryPageSize)
@@ -712,19 +677,7 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp galleryPageParams) {
-	postsPath := filepath.Join(gp.Dir, "posts.json")
-	data, err := os.ReadFile(postsPath)
-	if err != nil {
-		templ.Handler(templates.GalleryPostsPage(nil, gp.Platform, gp.Username, gp.Sort, gp.Search, gp.Year, gp.Month, gp.Tags, 1, 1)).ServeHTTP(w, r)
-		return
-	}
-
-	var rawPosts []GalleryPost
-	if json.Unmarshal(data, &rawPosts) != nil {
-		templ.Handler(templates.GalleryPostsPage(nil, gp.Platform, gp.Username, gp.Sort, gp.Search, gp.Year, gp.Month, gp.Tags, 1, 1)).ServeHTTP(w, r)
-		return
-	}
-
+	rawPosts := a.mediaIndex.Posts(gp.Platform, gp.Username)
 	files := a.mediaIndex.View(gp.Platform, gp.Username)
 
 	var allPosts []templates.GalleryPostData

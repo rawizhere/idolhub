@@ -2,7 +2,6 @@ package gallery
 
 import (
 	"cmp"
-	"encoding/json"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -20,6 +19,7 @@ type MediaEntry struct {
 
 type Index struct {
 	files *lru.Cache[string, []MediaEntry]
+	posts *lru.Cache[string, []Post]
 }
 
 var GlobalIndex *Index
@@ -29,7 +29,11 @@ func Init() {
 	if err != nil {
 		panic(err)
 	}
-	GlobalIndex = &Index{files: cache}
+	posts, err := lru.New[string, []Post](512)
+	if err != nil {
+		panic(err)
+	}
+	GlobalIndex = &Index{files: cache, posts: posts}
 	GlobalIndex.watch()
 }
 
@@ -146,12 +150,15 @@ func (idx *Index) Count(platform, username string) int {
 
 // Invalidate removes the cached file list for a target
 func (idx *Index) Invalidate(platform, username string) {
-	idx.files.Remove(keyOf(platform, username))
+	key := keyOf(platform, username)
+	idx.files.Remove(key)
+	idx.posts.Remove(key)
 }
 
 // InvalidateAll clears all cached entries
 func (idx *Index) InvalidateAll() {
 	idx.files.Purge()
+	idx.posts.Purge()
 }
 
 // FindLocalFile resolves a media URL to a cached local filename for a target.
@@ -187,20 +194,7 @@ func (idx *Index) FindLocalFile(platform, username, mediaURL string) (string, bo
 // FilePostText maps each local filename of a target to its concatenated post captions.
 func (idx *Index) FilePostText(platform, username string) map[string]string {
 	res := make(map[string]string)
-	postsPath := filepath.Join(dirOf(platform, username), "posts.json")
-	data, err := os.ReadFile(postsPath)
-	if err != nil {
-		return res
-	}
-	var posts []struct {
-		Text      string   `json:"text"`
-		TweetID   string   `json:"tweet_id"`
-		MediaURLs []string `json:"media_urls"`
-	}
-	if err := json.Unmarshal(data, &posts); err != nil {
-		return res
-	}
-	for _, p := range posts {
+	for _, p := range idx.Posts(platform, username) {
 		for _, mu := range p.MediaURLs {
 			if name, ok := idx.FindLocalFile(platform, username, mu); ok {
 				res[name] = appendWithSpace(res[name], p.Text)
