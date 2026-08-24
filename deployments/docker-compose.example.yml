@@ -9,13 +9,11 @@ services:
     environment:
       - TZ=${TZ:-Europe/Moscow}
       - PORT=${PORT:-8080}
-      - CHROME_BIN=/usr/bin/chromium-browser
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
     volumes:
       - ./configs:/app/configs
       - app_data:/app/downloads
-    shm_size: "512m"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8080}/api/config"]

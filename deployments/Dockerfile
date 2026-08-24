@@ -34,7 +34,6 @@ FROM alpine:3.21
 ARG YT_DLP_VERSION=2026.08.19
 
 RUN apk add --no-cache \
-    chromium \
     ffmpeg \
     python3 \
     py3-pip \
@@ -57,9 +56,6 @@ COPY --from=builder /app/idolhub .
 COPY deploy/entrypoint.sh /app/entrypoint.sh
 
 RUN chown -R idolhub:idolhub /app && chmod +x /app/entrypoint.sh
-
-ENV CHROME_BIN=/usr/bin/chromium-browser \
-    CHROME_PATH=/usr/bin/chromium-browser
 
 VOLUME ["/app/downloads"]
 
