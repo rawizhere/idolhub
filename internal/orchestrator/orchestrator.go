@@ -598,35 +598,30 @@ func (o *Orchestrator) countDownloadedMedia(platform, username string) int {
 func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 	slog.Info("Starting auto-sync scheduler")
 
-	// Initialize LastSync to now so we don't trigger immediately on startup
 	o.mu.Lock()
 	o.LastSync = time.Now()
 	o.mu.Unlock()
 
 	for {
 		interval := config.GetConfig().AutoSyncInterval
-		if interval <= 0 {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(time.Minute):
-				continue
+		wait := time.Minute
+		if interval > 0 {
+			wait = time.Until(cron.Every(time.Duration(interval) * time.Hour).Next(time.Now()))
+			if wait <= 0 {
+				wait = time.Minute
 			}
-		}
-
-		wait := time.Until(cron.Every(time.Duration(interval) * time.Hour).Next(time.Now()))
-		if wait < 0 {
-			wait = time.Minute
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(wait):
 		}
+		if interval <= 0 {
+			continue
+		}
 
 		c := config.GetConfig()
 		slog.Info("Auto-sync interval reached, triggering sync for all accounts", "interval_hours", interval)
-		// Skip accounts that are currently running or queued to avoid spam
 		o.mu.RLock()
 		runningSet := make(map[string]bool)
 		for _, p := range o.progress {
@@ -642,7 +637,11 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 				continue
 			}
 			o.StartScrape(acc.Username, acc.Platform, acc.SaveText, false)
-			time.Sleep(10 * time.Second)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+			}
 		}
 		o.mu.Lock()
 		o.LastSync = time.Now()
