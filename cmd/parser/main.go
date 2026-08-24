@@ -664,42 +664,7 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 		allFiles = filtered
 	}
 
-	var years []string
-	if year != "" && year != "all" {
-		years = strings.Split(year, ",")
-	}
-	var months []string
-	if month != "" && month != "all" {
-		months = strings.Split(month, ",")
-	}
-
-	if len(years) > 0 || len(months) > 0 {
-		filtered := allFiles[:0]
-		for _, f := range allFiles {
-			yearMatch := len(years) == 0
-			if len(years) > 0 && len(f.Date) >= 4 {
-				for _, y := range years {
-					if f.Date[:4] == y {
-						yearMatch = true
-						break
-					}
-				}
-			}
-			monthMatch := len(months) == 0
-			if len(months) > 0 && len(f.Date) >= 7 {
-				for _, m := range months {
-					if f.Date[5:7] == m {
-						monthMatch = true
-						break
-					}
-				}
-			}
-			if yearMatch && monthMatch {
-				filtered = append(filtered, f)
-			}
-		}
-		allFiles = filtered
-	}
+	allFiles = gallery.FilterByYearMonth(allFiles, func(f templates.GalleryFileData) string { return f.Date }, gallery.SplitList(year), gallery.SplitList(month))
 
 	if sortParam == "asc" {
 		for i, j := 0, len(allFiles)-1; i < j; i, j = i+1, j-1 {
@@ -713,34 +678,23 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			var rawPosts []GalleryPost
 			if json.Unmarshal(postsData, &rawPosts) == nil {
-				selectedTags := strings.Split(p.Tags, ",")
-				hashtagRe := regexp.MustCompile(`#\w+`)
 				matchingFilenames := make(map[string]bool)
 				for _, rp := range rawPosts {
-					postTags := hashtagRe.FindAllString(rp.Text, -1)
-					for _, st := range selectedTags {
-						st = strings.ToLower(strings.TrimSpace(st))
-						for _, pt := range postTags {
-							if strings.ToLower(pt) == st {
-								for _, mu := range rp.MediaURLs {
-									if gf := a.findLocalFile(mu, platform, username, galleryFiles); gf != nil {
-										matchingFilenames[gf.Filename] = true
-									}
-								}
-								if rp.TweetID != "" {
-									videoName := rp.TweetID + "_video.mp4"
-									for _, gf := range galleryFiles {
-										if gf.Filename == videoName {
-											matchingFilenames[gf.Filename] = true
-											break
-										}
-									}
-								}
-								goto nextRP
-							}
+					if !gallery.TagSelected(gallery.SplitList(p.Tags), gallery.Hashtags(rp.Text)) {
+						continue
+					}
+					for _, mu := range rp.MediaURLs {
+						if gf := a.findLocalFile(mu, platform, username, galleryFiles); gf != nil {
+							matchingFilenames[gf.Filename] = true
 						}
 					}
-				nextRP:
+					videoName := rp.TweetID + "_video.mp4"
+					for _, gf := range galleryFiles {
+						if gf.Filename == videoName {
+							matchingFilenames[gf.Filename] = true
+							break
+						}
+					}
 				}
 				filtered := allFiles[:0]
 				for _, f := range allFiles {
@@ -753,20 +707,7 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	total := len(allFiles)
-	totalPages := (total + galleryPageSize - 1) / galleryPageSize
-	if totalPages == 0 {
-		totalPages = 1
-	}
-	offset := (page - 1) * galleryPageSize
-	end := offset + galleryPageSize
-	if offset > total {
-		offset = total
-	}
-	if end > total {
-		end = total
-	}
-	pageFiles := allFiles[offset:end]
+	pageFiles, totalPages := gallery.Page(allFiles, page, galleryPageSize)
 	templ.Handler(templates.GalleryGridPage(pageFiles, platform, username, filter, search, sortParam, year, month, p.Tags, page, totalPages)).ServeHTTP(w, r)
 }
 
@@ -874,76 +815,18 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 	}
 
 	if gp.Tags != "" && gp.Tags != "all" {
-		selectedTags := strings.Split(gp.Tags, ",")
-		hashtagRe := regexp.MustCompile(`#\w+`)
 		filtered := allPosts[:0]
 		for _, p := range allPosts {
-			postTags := hashtagRe.FindAllString(p.CleanText, -1)
-			for _, st := range selectedTags {
-				st = strings.ToLower(strings.TrimSpace(st))
-				for _, pt := range postTags {
-					if strings.ToLower(pt) == st {
-						filtered = append(filtered, p)
-						goto nextPost
-					}
-				}
-			}
-		nextPost:
-		}
-		allPosts = filtered
-	}
-
-	var years []string
-	if gp.Year != "" && gp.Year != "all" {
-		years = strings.Split(gp.Year, ",")
-	}
-	var months []string
-	if gp.Month != "" && gp.Month != "all" {
-		months = strings.Split(gp.Month, ",")
-	}
-
-	if len(years) > 0 || len(months) > 0 {
-		filtered := allPosts[:0]
-		for _, p := range allPosts {
-			yearMatch := len(years) == 0
-			if len(years) > 0 && len(p.DateLabel) >= 4 {
-				for _, y := range years {
-					if p.DateLabel[:4] == y {
-						yearMatch = true
-						break
-					}
-				}
-			}
-			monthMatch := len(months) == 0
-			if len(months) > 0 && len(p.DateLabel) >= 7 {
-				for _, m := range months {
-					if p.DateLabel[5:7] == m {
-						monthMatch = true
-						break
-					}
-				}
-			}
-			if yearMatch && monthMatch {
+			if gallery.TagSelected(gallery.SplitList(gp.Tags), gallery.Hashtags(p.CleanText)) {
 				filtered = append(filtered, p)
 			}
 		}
 		allPosts = filtered
 	}
 
-	total := len(allPosts)
-	totalPages := (total + galleryPageSize - 1) / galleryPageSize
-	if totalPages == 0 {
-		totalPages = 1
-	}
-	offset := (gp.Page - 1) * galleryPageSize
-	end := offset + galleryPageSize
-	if offset > total {
-		offset = total
-	}
-	if end > total {
-		end = total
-	}
-	pagePosts := allPosts[offset:end]
+	allPosts = gallery.FilterByYearMonth(allPosts, func(p templates.GalleryPostData) string { return p.DateLabel }, gallery.SplitList(gp.Year), gallery.SplitList(gp.Month))
+
+	pagePosts, totalPages := gallery.Page(allPosts, gp.Page, galleryPageSize)
 
 	templ.Handler(templates.GalleryPostsPage(pagePosts, gp.Platform, gp.Username, gp.Sort, gp.Search, gp.Year, gp.Month, gp.Tags, gp.Page, totalPages)).ServeHTTP(w, r)
 }
