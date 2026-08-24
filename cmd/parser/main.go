@@ -22,6 +22,7 @@ import (
 
 	"idolhub/cmd/parser/web/templates"
 	"idolhub/internal/config"
+	"idolhub/internal/download"
 	"idolhub/internal/gallery"
 	"idolhub/internal/logging"
 	"idolhub/internal/orchestrator"
@@ -386,7 +387,7 @@ func (a *App) handleMedia(w http.ResponseWriter, r *http.Request) {
 				srcFile := filepath.Join(parentDir, base+cExt)
 				if _, serr := os.Stat(srcFile); serr == nil {
 					_ = os.MkdirAll(dir, 0755)
-					_ = scraper.GenerateThumbnail(srcFile, filePath)
+					_ = download.GenerateThumbnail(srcFile, filePath)
 					break
 				}
 			}

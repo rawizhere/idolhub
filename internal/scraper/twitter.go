@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"idolhub/internal/config"
+	"idolhub/internal/download"
 
 	"github.com/avast/retry-go/v4"
 	"github.com/chromedp/cdproto/cdp"
@@ -120,38 +121,13 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	defer cancelTimeout()
 
 	jobs := make(chan TwitterDownloadItem, 10000)
-	var wg sync.WaitGroup
-	var downloadedCount int32
-	var skippedCount int32
 	client := &http.Client{Timeout: 45 * time.Second}
-
-	slog.Info("Spawning concurrent download workers for Twitter", "user", username, "workers_count", numWorkers)
-	for w := 1; w <= numWorkers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			slog.Debug("Worker started", "worker", w)
-			for item := range jobs {
-				slog.Debug("Processing job", "tweet_id", item.TweetID, "url", item.URL, "video", item.IsVideo)
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					var downloaded bool
-					if item.IsVideo {
-						downloaded = downloadTwitterVideo(ctx, item, outputDir, client, username)
-					} else {
-						downloaded = downloadTwitterImage(ctx, item, outputDir, client, username)
-					}
-					if downloaded {
-						atomic.AddInt32(&downloadedCount, 1)
-					} else {
-						atomic.AddInt32(&skippedCount, 1)
-					}
-				}
-			}
-		}()
-	}
+	pool := download.Start(ctx, jobs, numWorkers, func(ctx context.Context, item TwitterDownloadItem) bool {
+		if item.IsVideo {
+			return downloadTwitterVideo(ctx, item, outputDir, client, username)
+		}
+		return downloadTwitterImage(ctx, item, outputDir, client, username)
+	})
 
 	queuedURLs := make(map[string]bool)
 	var scrapedPosts []TweetPost
@@ -538,7 +514,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 
 	close(jobs)
 	report(50, "feed collected")
-	wg.Wait()
+	downloadedCount, skippedCount := pool.Wait()
 	report(90, "downloads done")
 
 	if err != nil {
@@ -675,7 +651,7 @@ func downloadTwitterImage(ctx context.Context, item TwitterDownloadItem, outputD
 	go func() {
 		thumbDir := filepath.Join(outputDir, "thumbnails")
 		thumbFilename := strings.TrimSuffix(filename, filepath.Ext(filename)) + ".jpg"
-		_ = GenerateThumbnail(filePath, filepath.Join(thumbDir, thumbFilename))
+		_ = download.GenerateThumbnail(filePath, filepath.Join(thumbDir, thumbFilename))
 	}()
 	return true
 }
@@ -735,7 +711,7 @@ func downloadTwitterVideo(ctx context.Context, item TwitterDownloadItem, outputD
 	go func() {
 		thumbDir := filepath.Join(outputDir, "thumbnails")
 		thumbFilename := strings.TrimSuffix(filename, filepath.Ext(filename)) + ".jpg"
-		_ = GenerateThumbnail(filePath, filepath.Join(thumbDir, thumbFilename))
+		_ = download.GenerateThumbnail(filePath, filepath.Join(thumbDir, thumbFilename))
 	}()
 	return true
 }

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"idolhub/internal/download"
 )
 
 // probeVideoCodec returns the video codec name using ffprobe.
@@ -64,7 +66,7 @@ func TranscodeToH264(ctx context.Context, srcPath string) error {
 	// Regenerate thumbnail to match new container
 	thumbFilename := strings.TrimSuffix(filepath.Base(srcPath), filepath.Ext(srcPath)) + ".jpg"
 	thumbPath := filepath.Join(filepath.Dir(srcPath), "thumbnails", thumbFilename)
-	_ = GenerateThumbnail(srcPath, thumbPath)
+	_ = download.GenerateThumbnail(srcPath, thumbPath)
 
 	return nil
 }

@@ -14,10 +14,10 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"idolhub/internal/config"
+	"idolhub/internal/download"
 
 	"github.com/avast/retry-go/v4"
 	"github.com/chromedp/cdproto/cdp"
@@ -190,31 +190,14 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	fileIdx := newIgFileIndex(outputDir)
 
 	jobs := make(chan igDirectItem, 1000)
-	var wg sync.WaitGroup
 	var downloadedCount int32
 	var skippedCount int32
 	var postsJSON []map[string]interface{}
 	var postsMu sync.Mutex
 
-	slog.Info("Spawning concurrent download workers for Instagram direct", "user", username, "workers_count", numWorkers)
-	for w := 1; w <= numWorkers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for item := range jobs {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-				if downloadInstagramDirectMedia(ctx, item, outputDir, &postsMu, &postsJSON, username, fileIdx) {
-					atomic.AddInt32(&downloadedCount, 1)
-				} else {
-					atomic.AddInt32(&skippedCount, 1)
-				}
-			}
-		}()
-	}
+	pool := download.Start(ctx, jobs, numWorkers, func(ctx context.Context, item igDirectItem) bool {
+		return downloadInstagramDirectMedia(ctx, item, outputDir, &postsMu, &postsJSON, username, fileIdx)
+	})
 
 	var nextMaxID string
 	page := 0
@@ -224,7 +207,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		select {
 		case <-ctx.Done():
 			close(jobs)
-			wg.Wait()
+			pool.Wait()
 			return ctx.Err()
 		default:
 		}
@@ -392,13 +375,13 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		// Rate-limit with jitter between pages
 		if err := igLimiter.Wait(ctx); err != nil {
 			close(jobs)
-			wg.Wait()
+			pool.Wait()
 			return ctx.Err()
 		}
 	}
 
 	close(jobs)
-	wg.Wait()
+	downloadedCount, skippedCount = pool.Wait()
 	report(90, "downloads done")
 
 	if saveText && len(postsJSON) > 0 {
@@ -658,7 +641,7 @@ func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, output
 	go func() {
 		thumbDir := filepath.Join(outputDir, "thumbnails")
 		thumbFilename := strings.TrimSuffix(filename, filepath.Ext(filename)) + ".jpg"
-		_ = GenerateThumbnail(filePath, filepath.Join(thumbDir, thumbFilename))
+		_ = download.GenerateThumbnail(filePath, filepath.Join(thumbDir, thumbFilename))
 	}()
 	return true
 }

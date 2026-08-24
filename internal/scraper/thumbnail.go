@@ -1,66 +1,13 @@
 package scraper
 
 import (
-	"fmt"
-	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
-	"github.com/disintegration/imaging"
-	_ "golang.org/x/image/webp"
+	"idolhub/internal/download"
 )
-
-func GenerateThumbnail(srcPath, dstPath string) error {
-	dir := filepath.Dir(dstPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create thumbnail directory: %w", err)
-	}
-
-	ext := strings.ToLower(filepath.Ext(srcPath))
-
-	if ext == ".mp4" || ext == ".mov" || ext == ".m4v" {
-		if _, err := exec.LookPath("ffmpeg"); err != nil {
-			slog.Warn("ffmpeg not found in PATH, skipping video thumbnail generation", "src", srcPath)
-			return nil
-		}
-
-		cmd := exec.Command("ffmpeg", "-y", "-ss", "00:00:00.100", "-i", srcPath, "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "3", "-update", "1", dstPath)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			slog.Warn("ffmpeg failed to extract video thumbnail", "src", srcPath, "error", err, "output", string(out))
-			return err
-		}
-		slog.Debug("Video thumbnail generated successfully", "src", srcPath, "dst", dstPath)
-		return nil
-	}
-
-	srcImg, err := imaging.Open(srcPath, imaging.AutoOrientation(true))
-	if err != nil {
-		slog.Warn("Failed to decode image, falling back to copying original", "src", srcPath, "error", err)
-		in, oerr := os.Open(srcPath)
-		if oerr != nil {
-			return oerr
-		}
-		defer func() { _ = in.Close() }()
-		out, oerr := os.Create(dstPath)
-		if oerr != nil {
-			return oerr
-		}
-		defer func() { _ = out.Close() }()
-		_, oerr = io.Copy(out, in)
-		return oerr
-	}
-
-	thumb := imaging.Thumbnail(srcImg, 480, 480, imaging.Lanczos)
-	if err := imaging.Save(thumb, dstPath, imaging.JPEGQuality(80)); err != nil {
-		return fmt.Errorf("failed to encode thumbnail as jpeg: %w", err)
-	}
-
-	slog.Debug("Image thumbnail generated successfully", "src", srcPath, "dst", dstPath)
-	return nil
-}
 
 const thumbVersionMarker = "downloads/.thumb_v480p"
 
@@ -104,7 +51,7 @@ func MigrateThumbnails() {
 			thumbPath := filepath.Join(filepath.Dir(path), "thumbnails", thumbFilename)
 			info, err := os.Stat(thumbPath)
 			if upgradeAll || os.IsNotExist(err) || (err == nil && info.Size() == 0) {
-				if err := GenerateThumbnail(path, thumbPath); err != nil {
+				if err := download.GenerateThumbnail(path, thumbPath); err != nil {
 					slog.Error("Failed to generate thumbnail during migration", "file", path, "error", err)
 				} else {
 					generatedCount++

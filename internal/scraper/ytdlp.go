@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"idolhub/internal/config"
+	"idolhub/internal/download"
 
 	ytdlp "github.com/lrstanley/go-ytdlp"
 )
@@ -170,25 +171,7 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 		}
 	}
 
-	thumbDir := filepath.Join(outputDir, "thumbnails")
-	if err := os.MkdirAll(thumbDir, 0755); err == nil {
-		if entries, err := os.ReadDir(outputDir); err == nil {
-			for _, entry := range entries {
-				if entry.IsDir() {
-					continue
-				}
-				name := entry.Name()
-				ext := strings.ToLower(filepath.Ext(name))
-				if ext == ".mp4" || ext == ".webm" || ext == ".mov" {
-					thumbName := strings.TrimSuffix(name, ext) + ".jpg"
-					thumbPath := filepath.Join(thumbDir, thumbName)
-					if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
-						_ = GenerateThumbnail(filepath.Join(outputDir, name), thumbPath)
-					}
-				}
-			}
-		}
-	}
+	download.GenerateVideoThumbnails(outputDir)
 
 	// Ensure video codecs are browser-compatible (H.264)
 	EnsureDirectoryVideoCodecs(ctx, outputDir)
