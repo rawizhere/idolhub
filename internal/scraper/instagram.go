@@ -605,7 +605,7 @@ func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, output
 		}
 		if r.StatusCode != http.StatusOK {
 			_ = r.Body.Close()
-			return fmt.Errorf("unexpected status %d", r.StatusCode)
+			return HTTPStatusErr(r.StatusCode)
 		}
 		resp = r
 		return nil
