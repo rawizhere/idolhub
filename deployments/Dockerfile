@@ -10,7 +10,8 @@ RUN for f in cmd/parser/web/templates/*.templ; do \
 
 # ---- Templ ----
 FROM golang:1.26-alpine AS templ
-RUN go install github.com/a-h/templ/cmd/templ@latest
+ARG TEMPL_VERSION=v0.3.1020
+RUN go install github.com/a-h/templ/cmd/templ@${TEMPL_VERSION}
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
@@ -28,7 +29,9 @@ COPY --from=templ /app/cmd/parser/web/templates/*_templ.go cmd/parser/web/templa
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/idolhub ./cmd/parser
 
 # ---- Runtime ----
-FROM alpine:3.20
+FROM alpine:3.21
+
+ARG YT_DLP_VERSION=2026.08.19
 
 RUN apk add --no-cache \
     chromium \
@@ -41,7 +44,7 @@ RUN apk add --no-cache \
     curl \
     su-exec \
     && pip install --no-cache-dir --break-system-packages curl_cffi \
-    && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+    && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/yt-dlp -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp \
     && rm -rf /var/cache/apk/*
 
