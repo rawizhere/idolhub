@@ -15,6 +15,8 @@ import (
 
 	"github.com/tmaxmax/go-sse"
 
+	"github.com/robfig/cron/v3"
+
 	"idolhub/internal/config"
 	"idolhub/internal/gallery"
 	"idolhub/internal/scraper"
@@ -628,9 +630,7 @@ func (o *Orchestrator) countDownloadedMedia(platform, username string) int {
 }
 
 func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
-	slog.Info("Starting auto-sync background worker loop")
-	ticker := time.NewTicker(1 * time.Minute)
-	defer ticker.Stop()
+	slog.Info("Starting auto-sync scheduler")
 
 	// Initialize LastSync to now so we don't trigger immediately on startup
 	o.mu.Lock()
@@ -638,45 +638,49 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 	o.mu.Unlock()
 
 	for {
+		interval := config.GetConfig().AutoSyncInterval
+		if interval <= 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Minute):
+				continue
+			}
+		}
+
+		wait := time.Until(cron.Every(time.Duration(interval) * time.Hour).Next(time.Now()))
+		if wait < 0 {
+			wait = time.Minute
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			c := config.GetConfig()
-			interval := c.AutoSyncInterval
-			if interval <= 0 {
-				continue
-			}
+		case <-time.After(wait):
+		}
 
-			o.mu.Lock()
-			timeSinceLastSync := time.Since(o.LastSync)
-			o.mu.Unlock()
-
-			if timeSinceLastSync >= time.Duration(interval)*time.Hour {
-				slog.Info("Auto-sync interval reached, triggering sync for all accounts", "interval_hours", interval)
-				// Skip accounts that are currently running or queued to avoid spam
-				o.mu.RLock()
-				runningSet := make(map[string]bool)
-				for _, p := range o.progress {
-					if p.Status == "running" || p.Status == "queued" {
-						runningSet[p.Username] = true
-					}
-				}
-				o.mu.RUnlock()
-
-				for _, acc := range c.Accounts {
-					if runningSet[acc.Username] {
-						slog.Debug("Skipping auto-sync, task already running or queued", "user", acc.Username)
-						continue
-					}
-					o.StartScrape(acc.Username, acc.Platform, acc.SaveText, false)
-					time.Sleep(10 * time.Second)
-				}
-				o.mu.Lock()
-				o.LastSync = time.Now()
-				o.mu.Unlock()
+		c := config.GetConfig()
+		slog.Info("Auto-sync interval reached, triggering sync for all accounts", "interval_hours", interval)
+		// Skip accounts that are currently running or queued to avoid spam
+		o.mu.RLock()
+		runningSet := make(map[string]bool)
+		for _, p := range o.progress {
+			if p.Status == "running" || p.Status == "queued" {
+				runningSet[p.Username] = true
 			}
 		}
+		o.mu.RUnlock()
+
+		for _, acc := range c.Accounts {
+			if runningSet[acc.Username] {
+				slog.Debug("Skipping auto-sync, task already running or queued", "user", acc.Username)
+				continue
+			}
+			o.StartScrape(acc.Username, acc.Platform, acc.SaveText, false)
+			time.Sleep(10 * time.Second)
+		}
+		o.mu.Lock()
+		o.LastSync = time.Now()
+		o.mu.Unlock()
 	}
 }
 
