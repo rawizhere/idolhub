@@ -211,8 +211,12 @@ func TestAccountSyncInfoRoundTrip(t *testing.T) {
 		t.Errorf("default info = %+v, want idle with zero time", info)
 	}
 
-	if _, err := s.Accounts.GetSyncInfo(ctx, "twitter", "missing"); err == nil {
-		t.Error("expected error for missing account, got none")
+	info, err = s.Accounts.GetSyncInfo(ctx, "twitter", "missing")
+	if err != nil {
+		t.Fatalf("get sync info for missing account: %v", err)
+	}
+	if info.Status != "idle" || !info.Time.IsZero() {
+		t.Errorf("missing account info = %+v, want idle with zero time", info)
 	}
 }
 

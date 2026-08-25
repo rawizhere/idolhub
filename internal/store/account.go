@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -91,6 +92,9 @@ func (s *AccountStore) GetSyncInfo(ctx context.Context, platform, username strin
 		`SELECT COALESCE(last_sync_status, 'idle'), last_sync_time FROM accounts WHERE platform = ? AND username = ?`,
 		platform, username)
 	info, err := scanSyncInfo(row.Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SyncInfo{Status: "idle"}, nil
+	}
 	if err != nil {
 		return SyncInfo{}, fmt.Errorf("store: sync info get: %w", err)
 	}

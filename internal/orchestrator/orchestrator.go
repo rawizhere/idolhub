@@ -80,6 +80,14 @@ type Orchestrator struct {
 	accounts       *store.AccountStore
 	posts          *store.PostStore
 	jobCh          chan scrapeJob
+	logEvents      chan logEvent
+}
+
+type logEvent struct {
+	user  string
+	t     time.Time
+	level string
+	msg   string
 }
 
 var GlobalOrchestrator *Orchestrator
@@ -107,8 +115,15 @@ func InitOrchestrator(mediaIndex *gallery.Index, st *store.Store) {
 		accounts:       st.Accounts,
 		posts:          st.Posts,
 		jobCh:          make(chan scrapeJob, 100),
+		logEvents:      make(chan logEvent, 4096),
 	}
 	GlobalOrchestrator = orch
+
+	go func() {
+		for evt := range orch.logEvents {
+			orch.dispatch(evt)
+		}
+	}()
 
 	slog.SetDefault(slog.New(&taskLogHandler{
 		Handler: slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
@@ -153,13 +168,25 @@ func (h *taskLogHandler) Handle(ctx context.Context, r slog.Record) error {
 		formattedMsg = fmt.Sprintf("%s (%s)", formattedMsg, strings.Join(attrs, ", "))
 	}
 
-	if targetUser != "" {
-		h.orch.AppendTaskLog(targetUser, time.Now(), r.Level.String(), formattedMsg)
+	evt := logEvent{user: targetUser, t: time.Now(), level: r.Level.String(), msg: formattedMsg}
+	if h.orch.logEvents == nil {
+		h.orch.dispatch(evt)
 	} else {
-		h.orch.AppendGlobalLog(time.Now(), r.Level.String(), formattedMsg)
+		select {
+		case h.orch.logEvents <- evt:
+		default:
+		}
 	}
 
 	return h.Handler.Handle(ctx, r)
+}
+
+func (o *Orchestrator) dispatch(evt logEvent) {
+	if evt.user != "" {
+		o.AppendTaskLog(evt.user, evt.t, evt.level, evt.msg)
+	} else {
+		o.AppendGlobalLog(evt.t, evt.level, evt.msg)
+	}
 }
 
 func pushLog(logs []TaskLog, t time.Time, level, msg string) []TaskLog {
