@@ -2,6 +2,7 @@ package download
 
 import (
 	"context"
+	"errors"
 	"io"
 	"math/rand/v2"
 	"net/http"
@@ -44,7 +45,7 @@ func File(ctx context.Context, client *http.Client, rawURL, dstPath string, o Fi
 		}
 		resp = r
 		return nil
-	}, retryOpts(ctx)...)
+	}, append(retryOpts(ctx), retry.RetryIf(isRetryable))...)
 	if err != nil {
 		return false, err
 	}
@@ -65,6 +66,15 @@ func File(ctx context.Context, client *http.Client, rawURL, dstPath string, o Fi
 type FileOpts struct {
 	Header http.Header
 	Jitter time.Duration
+}
+
+// isRetryable allows retries only for network errors and 5xx responses.
+func isRetryable(err error) bool {
+	var se *statusError
+	if errors.As(err, &se) {
+		return se.code >= 500
+	}
+	return true
 }
 
 func retryOpts(ctx context.Context) []retry.Option {

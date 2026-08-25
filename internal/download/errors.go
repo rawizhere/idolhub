@@ -9,13 +9,32 @@ import (
 var ErrRateLimited = errors.New("rate limited")
 var ErrNotFound = errors.New("not found")
 
-func StatusError(code int) error {
-	switch code {
+type statusError struct {
+	code int
+}
+
+func (e *statusError) Error() string {
+	switch e.code {
 	case http.StatusTooManyRequests:
-		return fmt.Errorf("%w: status %d", ErrRateLimited, code)
+		return fmt.Sprintf("%s: status %d", ErrRateLimited, e.code)
 	case http.StatusNotFound:
-		return fmt.Errorf("%w: status %d", ErrNotFound, code)
+		return fmt.Sprintf("%s: status %d", ErrNotFound, e.code)
 	default:
-		return fmt.Errorf("unexpected status %d", code)
+		return fmt.Sprintf("unexpected status %d", e.code)
 	}
+}
+
+func (e *statusError) Unwrap() error {
+	switch e.code {
+	case http.StatusTooManyRequests:
+		return ErrRateLimited
+	case http.StatusNotFound:
+		return ErrNotFound
+	default:
+		return nil
+	}
+}
+
+func StatusError(code int) error {
+	return &statusError{code: code}
 }
