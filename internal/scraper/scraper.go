@@ -24,48 +24,25 @@ type Options struct {
 	TikTokCookies      string
 }
 
-type Scraper interface {
-	Name() string
-	Scrape(ctx context.Context, t Target, opts Options) error
+// Scraper is a scrape function for a platform.
+type Scraper func(ctx context.Context, t Target, opts Options) error
+
+// Scrape runs the scrape function.
+func (s Scraper) Scrape(ctx context.Context, t Target, opts Options) error {
+	return s(ctx, t, opts)
 }
 
-var registry = map[string]Scraper{}
+var registry = map[string]Scraper{
+	"twitter":   ScrapeTwitterUser,
+	"instagram": ScrapeInstagramUser,
+	"tiktok":    ScrapeYTDLP,
+}
 
-func Register(s Scraper) {
-	registry[s.Name()] = s
+func Register(platform string, s Scraper) {
+	registry[platform] = s
 }
 
 func Get(platform string) (Scraper, bool) {
 	s, ok := registry[platform]
 	return s, ok
-}
-
-func init() {
-	Register(twitterScraper{})
-	Register(instagramScraper{})
-	Register(tiktokScraper{})
-}
-
-type twitterScraper struct{}
-
-func (twitterScraper) Name() string { return "twitter" }
-
-func (twitterScraper) Scrape(ctx context.Context, t Target, opts Options) error {
-	return ScrapeTwitterUser(ctx, t, opts)
-}
-
-type instagramScraper struct{}
-
-func (instagramScraper) Name() string { return "instagram" }
-
-func (instagramScraper) Scrape(ctx context.Context, t Target, opts Options) error {
-	return ScrapeInstagramUser(ctx, t, opts)
-}
-
-type tiktokScraper struct{}
-
-func (tiktokScraper) Name() string { return "tiktok" }
-
-func (tiktokScraper) Scrape(ctx context.Context, t Target, opts Options) error {
-	return ScrapeYTDLP(ctx, t, opts)
 }
