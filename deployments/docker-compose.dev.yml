@@ -1,5 +1,6 @@
 services:
   idolhub:
+    image: idolhub:local
     build:
       context: ..
       dockerfile: deployments/Dockerfile

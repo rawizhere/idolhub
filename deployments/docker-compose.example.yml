@@ -1,5 +1,6 @@
 services:
   idolhub:
+    image: rawizhere/idolhub:latest
     build:
       context: ..
       dockerfile: deployments/Dockerfile
