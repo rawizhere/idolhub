@@ -9,7 +9,7 @@ RUN for f in cmd/parser/web/templates/*.templ; do \
     npx @tailwindcss/cli -i cmd/parser/web/static/input.css -o app.css --minify
 
 # ---- Templ ----
-FROM golang:1.26-alpine AS templ
+FROM golang:1.27-alpine AS templ
 ARG TEMPL_VERSION=v0.3.1020
 RUN go install github.com/a-h/templ/cmd/templ@${TEMPL_VERSION}
 WORKDIR /app
@@ -19,7 +19,7 @@ COPY cmd/parser/web/templates/ cmd/parser/web/templates/
 RUN templ generate -path ./cmd/parser/web/templates/
 
 # ---- Build ----
-FROM golang:1.26-alpine AS builder
+FROM golang:1.27-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
