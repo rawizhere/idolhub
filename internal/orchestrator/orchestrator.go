@@ -182,7 +182,7 @@ func (o *Orchestrator) AppendGlobalLog(t time.Time, level, msg string) {
 	})
 }
 
-// Subscribe is unused; SSE is served directly via sseServer.
+// SSEHandler serves the SSE stream directly via sseServer.
 func (o *Orchestrator) SSEHandler() http.Handler {
 	return o.sseServer
 }
@@ -344,6 +344,7 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 	p.Status = "queued"
 	p.Logs = []TaskLog{}
 	p.AuthError = false
+	queuedAt := p.UpdatedAt
 	o.mu.Unlock()
 
 	if forceFullSync {
@@ -360,7 +361,7 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 	}
 
 	o.broadcast(SSEEvent{Type: "status", Username: username, Status: "queued", Progress: 0})
-	SavePersistedSyncInfo(username, "queued", p.UpdatedAt)
+	SavePersistedSyncInfo(username, "queued", queuedAt)
 }
 
 func (o *Orchestrator) worker() {
@@ -385,6 +386,11 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 
 	o.mu.Lock()
 	p := o.progress[username]
+	if p == nil {
+		o.mu.Unlock()
+		slog.Warn("Skipping scrape for removed target", "user", username)
+		return
+	}
 	p.Status = "running"
 	p.Progress = 5
 	persistUser := p.Username
@@ -546,33 +552,38 @@ func (o *Orchestrator) LastSyncTime() time.Time {
 }
 
 func (o *Orchestrator) GetAllProgress(accounts []config.Account) []TaskProgress {
-	o.mu.RLock()
-	snapshot := make([]*TaskProgress, 0, len(accounts))
-	for _, acc := range accounts {
-		if v, exists := o.progress[acc.Username]; exists {
-			snapshot = append(snapshot, v)
-		}
-	}
-	o.mu.RUnlock()
-
 	const mediaCountTTL = 30 * time.Second
 
-	result := make([]TaskProgress, 0, len(snapshot))
-	for _, v := range snapshot {
-		entry := *v
-
-		now := time.Now()
-		if v.mediaCountCachedAt.IsZero() || now.Sub(v.mediaCountCachedAt) > mediaCountTTL {
-			count := o.countDownloadedMedia(entry.Platform, entry.Username)
-			o.mu.Lock()
-			v.mediaCountCached = count
-			v.mediaCountCachedAt = now
-			o.mu.Unlock()
-			entry.MediaCount = count
-		} else {
+	now := time.Now()
+	o.mu.RLock()
+	sources := make([]*TaskProgress, 0, len(accounts))
+	result := make([]TaskProgress, 0, len(accounts))
+	for _, acc := range accounts {
+		v, exists := o.progress[acc.Username]
+		sources = append(sources, v)
+		entry := TaskProgress{}
+		if exists {
+			// Copy under read lock to avoid racing concurrent writers.
+			entry = *v
 			entry.MediaCount = v.mediaCountCached
 		}
 		result = append(result, entry)
+	}
+	o.mu.RUnlock()
+
+	for i, v := range sources {
+		if v == nil {
+			continue
+		}
+		if !result[i].mediaCountCachedAt.IsZero() && now.Sub(result[i].mediaCountCachedAt) <= mediaCountTTL {
+			continue
+		}
+		count := o.countDownloadedMedia(result[i].Platform, result[i].Username)
+		o.mu.Lock()
+		v.mediaCountCached = count
+		v.mediaCountCachedAt = now
+		o.mu.Unlock()
+		result[i].MediaCount = count
 	}
 	return result
 }
