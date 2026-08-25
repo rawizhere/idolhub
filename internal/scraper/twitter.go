@@ -2,8 +2,6 @@ package scraper
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,8 +15,7 @@ import (
 	"time"
 
 	"idolhub/internal/download"
-
-	twitterscraper "github.com/imperatrona/twitter-scraper"
+	"idolhub/internal/xscraper"
 )
 
 type TwitterDownloadItem struct {
@@ -88,22 +85,16 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 		return downloadTwitterImage(ctx, item, outputDir, client, username)
 	})
 
-	s := twitterscraper.New()
-	csrf := make([]byte, 16)
-	if _, err := rand.Read(csrf); err != nil {
-		return fmt.Errorf("failed to generate csrf token: %w", err)
+	s, err := xscraper.New(opts.TwitterAuthToken)
+	if err != nil {
+		return fmt.Errorf("failed to init twitter client: %w", err)
 	}
-	s.SetAuthToken(twitterscraper.AuthToken{
-		Token:     opts.TwitterAuthToken,
-		CSRFToken: hex.EncodeToString(csrf),
-	})
-	s.WithDelay(5)
 
 	tlCtx, cancelTimeline := context.WithCancel(ctx)
 	defer cancelTimeline()
-	var ch <-chan *twitterscraper.TweetResult
+	var ch <-chan *xscraper.TweetResult
 	if saveText {
-		ch = s.GetTweetsAndReplies(tlCtx, username, 5000)
+		ch = s.GetTweets(tlCtx, username, 5000)
 	} else {
 		ch = s.GetMediaTweets(tlCtx, username, 5000)
 	}
