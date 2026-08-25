@@ -68,7 +68,6 @@ func (r *result) parse() *Tweet {
 	tw := &Tweet{
 		ID:         legacy.IDStr,
 		Text:       text,
-		IsReply:    legacy.InReplyToStatusIDStr != "",
 		TimeParsed: parseCreatedAt(legacy.CreatedAt),
 	}
 

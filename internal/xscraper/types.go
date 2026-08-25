@@ -21,7 +21,6 @@ type Tweet struct {
 	ID         string
 	Text       string
 	IsRetweet  bool
-	IsReply    bool
 	TimeParsed time.Time
 	Photos     []Photo
 	Videos     []Video
@@ -118,12 +117,11 @@ type result struct {
 }
 
 type legacyTweet struct {
-	FullText             string `json:"full_text"`
-	IDStr                string `json:"id_str"`
-	InReplyToStatusIDStr string `json:"in_reply_to_status_id_str"`
-	CreatedAt            string `json:"created_at"`
-	UserIDStr            string `json:"user_id_str"`
-	Entities             struct {
+	FullText  string `json:"full_text"`
+	IDStr     string `json:"id_str"`
+	CreatedAt string `json:"created_at"`
+	UserIDStr string `json:"user_id_str"`
+	Entities  struct {
 		URLs []struct {
 			ExpandedURL string `json:"expanded_url"`
 		} `json:"urls"`
