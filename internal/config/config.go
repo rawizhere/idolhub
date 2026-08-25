@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/caarlos0/env/v11"
-	"github.com/joho/godotenv"
 )
 
 type Account struct {
@@ -89,9 +88,6 @@ func LoadConfig() error {
 
 // applyEnvSecrets fills secrets from environment if they are missing in config.
 func applyEnvSecrets() {
-	if err := godotenv.Load(); err != nil {
-		slog.Debug("no .env file loaded", "error", err)
-	}
 	var envCfg Config
 	if err := env.Parse(&envCfg); err != nil {
 		slog.Warn("failed to parse env secrets", "error", err)
