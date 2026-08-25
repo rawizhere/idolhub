@@ -2,7 +2,6 @@ package scraper
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"idolhub/internal/download"
+	"idolhub/internal/store"
 	"idolhub/internal/xscraper"
 )
 
@@ -23,14 +23,6 @@ type TwitterDownloadItem struct {
 	DateStr string
 	TweetID string
 	IsVideo bool
-}
-
-type TweetPost struct {
-	TweetID     string   `json:"tweet_id"`
-	Date        string   `json:"date"`
-	Text        string   `json:"text"`
-	MediaURLs   []string `json:"media_urls"`
-	YoutubeURLs []string `json:"youtube_urls,omitempty"`
 }
 
 func snowflakeToTime(tweetIDStr string) (time.Time, error) {
@@ -69,6 +61,10 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 		return err
 	}
 
+	if opts.Posts == nil {
+		return fmt.Errorf("post store is not configured")
+	}
+
 	numWorkers := 5
 	outputDir := filepath.Join("downloads", "twitter", username)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -100,8 +96,11 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	}
 	report(30, "timeline fetch")
 
+	type queuedMedia struct {
+		url  string
+		kind string
+	}
 	queuedURLs := make(map[string]bool)
-	var scrapedPosts []TweetPost
 
 	for result := range ch {
 		if result.Error != nil {
@@ -150,11 +149,12 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 			continue
 		}
 
-		var tweetMediaURLs []string
-		queueItem := func(rawURL string, isVideo bool) {
+		var tweetMedia []queuedMedia
+		queueItem := func(rawURL string, kind string) {
 			if rawURL == "" {
 				return
 			}
+			isVideo := kind == "video" || kind == "gif"
 			if isVideo && !downloadVideos {
 				return
 			}
@@ -174,7 +174,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 			}:
 			case <-ctx.Done():
 			}
-			tweetMediaURLs = append(tweetMediaURLs, rawURL)
+			tweetMedia = append(tweetMedia, queuedMedia{url: rawURL, kind: kind})
 		}
 
 		for _, ph := range tw.Photos {
@@ -182,50 +182,42 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 			if !strings.Contains(u, "?") {
 				u += "?format=jpg&name=large"
 			}
-			queueItem(u, false)
+			queueItem(u, "photo")
 		}
 		for _, v := range tw.Videos {
-			queueItem(v.URL, true)
+			queueItem(v.URL, "video")
 		}
 		for _, g := range tw.GIFs {
-			queueItem(g.URL, true)
-		}
-
-		var youtubeURLs []string
-		for _, u := range tw.URLs {
-			if strings.Contains(u, "youtube.com") || strings.Contains(u, "youtu.be") {
-				youtubeURLs = append(youtubeURLs, u)
-			}
+			queueItem(g.URL, "gif")
 		}
 
 		if saveText {
-			scrapedPosts = append(scrapedPosts, TweetPost{
-				TweetID:     tw.ID,
-				Date:        dateStr,
-				Text:        text,
-				MediaURLs:   tweetMediaURLs,
-				YoutubeURLs: youtubeURLs,
-			})
+			var media []store.PostMedia
+			for _, m := range tweetMedia {
+				media = append(media, store.PostMedia{URL: m.url, Kind: m.kind})
+			}
+			for _, u := range tw.URLs {
+				if strings.Contains(u, "youtube.com") || strings.Contains(u, "youtu.be") {
+					media = append(media, store.PostMedia{URL: u, Kind: "youtube"})
+				}
+			}
+			postedAt, _ := time.Parse("2006-01-02_15-04-05", dateStr)
+			if err := opts.Posts.UpsertPost(ctx, store.Post{
+				Platform:   "twitter",
+				Username:   username,
+				ExternalID: tw.ID,
+				PostedAt:   postedAt,
+				Text:       text,
+				Media:      media,
+			}); err != nil {
+				slog.Warn("Failed to save tweet to store", "user", username, "tweet_id", tw.ID, "error", err)
+			}
 		}
 	}
 
 	close(jobs)
 	report(90, "downloads done")
 	downloadedCount, skippedCount := pool.Wait()
-
-	if saveText && len(scrapedPosts) > 0 {
-		slog.Info("Saving tweet texts to single JSON", "user", username)
-		postsFilePath := filepath.Join(outputDir, "posts.json")
-
-		var maps []map[string]interface{}
-		if raw, err := json.Marshal(scrapedPosts); err == nil {
-			_ = json.Unmarshal(raw, &maps)
-		}
-		if len(maps) > 0 {
-			mergePostsJSON(postsFilePath, maps)
-			slog.Info("Tweet texts saved successfully", "user", username, "file", postsFilePath)
-		}
-	}
 
 	slog.Info("Twitter sync completed successfully", "user", username, "platform", "twitter", "downloaded", downloadedCount, "skipped_existing", skippedCount)
 	return nil

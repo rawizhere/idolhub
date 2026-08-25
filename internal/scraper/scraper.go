@@ -3,6 +3,8 @@ package scraper
 import (
 	"context"
 	"time"
+
+	"idolhub/internal/store"
 )
 
 type Target struct {
@@ -22,6 +24,7 @@ type Options struct {
 	TwitterAuthToken   string
 	InstagramSessionID string
 	TikTokCookies      string
+	Posts              *store.PostStore
 }
 
 // Scraper is a scrape function for a platform.

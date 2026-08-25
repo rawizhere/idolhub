@@ -20,6 +20,7 @@ import (
 	"idolhub/internal/config"
 	"idolhub/internal/gallery"
 	"idolhub/internal/scraper"
+	"idolhub/internal/store"
 )
 
 const numScrapeWorkers = 3
@@ -76,12 +77,14 @@ type Orchestrator struct {
 	autoSyncCtx    context.Context
 	autoSyncCancel context.CancelFunc
 	mediaIndex     *gallery.Index
+	accounts       *store.AccountStore
+	posts          *store.PostStore
 	jobCh          chan scrapeJob
 }
 
 var GlobalOrchestrator *Orchestrator
 
-func InitOrchestrator(mediaIndex *gallery.Index) {
+func InitOrchestrator(mediaIndex *gallery.Index, st *store.Store) {
 	autoSyncCtx, autoSyncCancel := context.WithCancel(context.Background())
 	sseServer := &sse.Server{
 		OnSession: func(w http.ResponseWriter, r *http.Request) ([]string, bool) {
@@ -101,6 +104,8 @@ func InitOrchestrator(mediaIndex *gallery.Index) {
 		autoSyncCtx:    autoSyncCtx,
 		autoSyncCancel: autoSyncCancel,
 		mediaIndex:     mediaIndex,
+		accounts:       st.Accounts,
+		posts:          st.Posts,
 		jobCh:          make(chan scrapeJob, 100),
 	}
 	GlobalOrchestrator = orch
@@ -200,31 +205,29 @@ func (o *Orchestrator) broadcast(evt SSEEvent) {
 	_ = o.sseServer.Publish(msg)
 }
 
-func loadPersistedSyncInfo(username string) (string, time.Time) {
-	c := config.GetConfig()
-	for _, acc := range c.Accounts {
-		if strings.EqualFold(acc.Username, username) {
-			status := acc.LastSyncStatus
-			if status == "" {
-				status = "idle"
-			}
-			return status, acc.LastSyncTime
-		}
+func (o *Orchestrator) loadPersistedSyncInfo(platform, username string) (string, time.Time) {
+	if o.accounts == nil {
+		return "idle", time.Time{}
 	}
-	return "idle", time.Time{}
+	info, err := o.accounts.GetSyncInfo(context.Background(), platform, username)
+	if err != nil {
+		slog.Warn("Failed to load sync info", "user", username, "error", err)
+		return "idle", time.Time{}
+	}
+	if info.Status == "" {
+		info.Status = "idle"
+	}
+	return info.Status, info.Time
 }
 
-// SavePersistedSyncInfo persists an account's sync status under the config lock
-func SavePersistedSyncInfo(username, status string, updatedAt time.Time) {
-	config.UpdateConfig(func(c *config.Config) {
-		for i, acc := range c.Accounts {
-			if strings.EqualFold(acc.Username, username) {
-				c.Accounts[i].LastSyncStatus = status
-				c.Accounts[i].LastSyncTime = updatedAt
-				return
-			}
-		}
-	})
+// SavePersistedSyncInfo persists an account's sync status in the store.
+func (o *Orchestrator) SavePersistedSyncInfo(platform, username, status string, updatedAt time.Time) {
+	if o.accounts == nil {
+		return
+	}
+	if err := o.accounts.SetSyncInfo(context.Background(), platform, username, status, updatedAt); err != nil {
+		slog.Warn("Failed to persist sync info", "user", username, "error", err)
+	}
 }
 
 func (o *Orchestrator) SyncTargets(accounts []config.Account) {
@@ -235,11 +238,11 @@ func (o *Orchestrator) SyncTargets(accounts []config.Account) {
 	for _, acc := range accounts {
 		current[acc.Username] = true
 		if _, exists := o.progress[acc.Username]; !exists {
-			status, updatedAt := loadPersistedSyncInfo(acc.Username)
+			status, updatedAt := o.loadPersistedSyncInfo(acc.Platform, acc.Username)
 			// Stale "running" or "queued" status from a previous instance — reset to idle
 			if status == "running" || status == "queued" {
 				status = "idle"
-				SavePersistedSyncInfo(acc.Username, "idle", updatedAt)
+				o.SavePersistedSyncInfo(acc.Platform, acc.Username, "idle", updatedAt)
 			}
 			o.progress[acc.Username] = &TaskProgress{
 				Username:  acc.Username,
@@ -258,7 +261,7 @@ func (o *Orchestrator) SyncTargets(accounts []config.Account) {
 	// Persist final status of removed accounts before deleting from memory
 	for k := range o.progress {
 		if !current[k] {
-			SavePersistedSyncInfo(k, o.progress[k].Status, o.progress[k].UpdatedAt)
+			o.SavePersistedSyncInfo(o.progress[k].Platform, k, o.progress[k].Status, o.progress[k].UpdatedAt)
 			delete(o.progress, k)
 		}
 	}
@@ -327,14 +330,16 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 
 	lastSync := p.UpdatedAt
 	forceFullSync := forceFull
-	if forceFull {
-		lastSync = time.Time{}
-	} else if saveText || platform == "tiktok" {
-		postsPath := filepath.Join("downloads", platform, username, "posts.json")
-		if _, err := os.Stat(postsPath); os.IsNotExist(err) {
-			forceFullSync = true
-			lastSync = time.Time{}
-		} else if isPostsCorrupted(postsPath) {
+	if !forceFullSync && (saveText || platform == "tiktok") {
+		storedCount := 0
+		if o.posts != nil {
+			count, err := o.posts.CountByAccount(context.Background(), platform, username)
+			if err != nil {
+				slog.Warn("Failed to count stored posts", "user", username, "error", err)
+			}
+			storedCount = count
+		}
+		if storedCount == 0 {
 			forceFullSync = true
 			lastSync = time.Time{}
 		}
@@ -361,7 +366,7 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 	}
 
 	o.broadcast(SSEEvent{Type: "status", Username: username, Status: "queued", Progress: 0})
-	SavePersistedSyncInfo(username, "queued", queuedAt)
+	o.SavePersistedSyncInfo(platform, username, "queued", queuedAt)
 }
 
 func (o *Orchestrator) worker() {
@@ -400,7 +405,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 
 	slog.Info("Starting media scrape worker", "user", username, "platform", platform)
 	o.broadcast(SSEEvent{Type: "status", Username: username, Status: "running", Progress: 5})
-	SavePersistedSyncInfo(persistUser, persistStatus, persistUpdated)
+	o.SavePersistedSyncInfo(platform, persistUser, persistStatus, persistUpdated)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 2*time.Hour)
@@ -440,6 +445,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	opts.TwitterAuthToken = c.TwitterAuthToken
 	opts.InstagramSessionID = c.InstagramSessionID
 	opts.TikTokCookies = c.TikTokCookies
+	opts.Posts = o.posts
 
 	s, ok := scraper.Get(platform)
 	if !ok {
@@ -477,7 +483,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	p.NewCount = newCount
 	p.mediaCountCached = afterCount
 	p.mediaCountCachedAt = time.Now()
-	SavePersistedSyncInfo(p.Username, p.Status, p.UpdatedAt)
+	o.SavePersistedSyncInfo(platform, p.Username, p.Status, p.UpdatedAt)
 	o.mu.Unlock()
 
 	o.broadcast(SSEEvent{Type: "status", Username: username, Status: p.Status, Progress: p.Progress})
@@ -524,7 +530,7 @@ func (o *Orchestrator) CancelScrape(username string) bool {
 	if p, exists := o.progress[username]; exists && p.Status == "queued" {
 		p.Status = "idle"
 		p.Progress = 0
-		SavePersistedSyncInfo(username, "idle", time.Now())
+		o.SavePersistedSyncInfo(p.Platform, username, "idle", time.Now())
 		o.mu.Unlock()
 		o.broadcast(SSEEvent{Type: "status", Username: username, Status: "idle", Progress: 0})
 		return true
@@ -658,18 +664,4 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 		o.LastSync = time.Now()
 		o.mu.Unlock()
 	}
-}
-
-// isPostsCorrupted returns true when posts.json has ≤5 entries (old overwrite-bug ate the rest).
-func isPostsCorrupted(path string) bool {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	var entries []map[string]interface{}
-	if err := json.Unmarshal(data, &entries); err != nil {
-		return false
-	}
-	// 5 is arbitrary — accounts with ≤5 real posts also resync, harmless since media already exists.
-	return len(entries) <= 5
 }

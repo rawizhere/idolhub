@@ -29,6 +29,7 @@ import (
 	"idolhub/internal/logging"
 	"idolhub/internal/orchestrator"
 	"idolhub/internal/scraper"
+	"idolhub/internal/store"
 
 	"github.com/a-h/templ"
 )
@@ -39,6 +40,7 @@ var staticAssets embed.FS
 type App struct {
 	orch       *orchestrator.Orchestrator
 	mediaIndex *gallery.Index
+	st         *store.Store
 }
 
 func main() {
@@ -52,13 +54,19 @@ func main() {
 		return
 	}
 
-	if err := config.LoadConfig(); err != nil {
+	st, err := store.Open("configs/idolhub.db")
+	if err != nil {
+		slog.Error("Failed to open store", "error", err)
+		os.Exit(1)
+	}
+
+	if err := config.LoadConfig(st); err != nil {
 		slog.Error("Failed to load configuration", "error", err)
 		os.Exit(1)
 	}
 
 	gallery.Init()
-	orchestrator.InitOrchestrator(gallery.GlobalIndex)
+	orchestrator.InitOrchestrator(gallery.GlobalIndex, st)
 	cfg := config.GetConfig()
 	slog.Info("Configuration loaded successfully", "targets_count", len(cfg.Accounts), "auto_sync_interval_hours", cfg.AutoSyncInterval)
 	orchestrator.GlobalOrchestrator.SyncTargets(cfg.Accounts)
@@ -69,6 +77,7 @@ func main() {
 	app := &App{
 		orch:       orchestrator.GlobalOrchestrator,
 		mediaIndex: gallery.GlobalIndex,
+		st:         st,
 	}
 
 	mux := http.NewServeMux()
@@ -120,6 +129,9 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("Server shutdown failed", "error", err)
 	}
+	if err := st.Close(); err != nil {
+		slog.Warn("Failed to close store", "error", err)
+	}
 	slog.Info("Server exited gracefully")
 }
 
@@ -153,7 +165,7 @@ func (a *App) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Content-Type", "application/json")
-	if err := config.LoadConfig(); err != nil {
+	if err := config.LoadConfig(a.st); err != nil {
 		slog.Warn("Failed to reload configuration", "error", err)
 	}
 	a.orch.SyncTargets(config.GetConfig().Accounts)
@@ -171,6 +183,7 @@ func (a *App) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	oldCfg := config.GetConfig()
+	var changed []config.Account
 	for i, newAcc := range cfg.Accounts {
 		var oldAcc *config.Account
 		for _, acc := range oldCfg.Accounts {
@@ -183,6 +196,7 @@ func (a *App) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 			if !accountsEqual(*oldAcc, newAcc) {
 				cfg.Accounts[i].LastSyncStatus = "idle"
 				cfg.Accounts[i].LastSyncTime = time.Time{}
+				changed = append(changed, newAcc)
 			} else {
 				cfg.Accounts[i].LastSyncStatus = oldAcc.LastSyncStatus
 				cfg.Accounts[i].LastSyncTime = oldAcc.LastSyncTime
@@ -190,9 +204,19 @@ func (a *App) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := config.SaveConfig(cfg); err != nil {
+	if err := config.SaveConfig(a.st, cfg); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	for _, acc := range changed {
+		if a.st == nil {
+			continue
+		}
+		err := a.st.Accounts.SetSyncInfo(r.Context(), acc.Platform, acc.Username, "idle", time.Time{})
+		if err != nil {
+			slog.Warn("Failed to reset sync info", "user", acc.Username, "error", err)
+		}
 	}
 
 	a.orch.SyncTargets(cfg.Accounts)
@@ -451,7 +475,7 @@ func (a *App) handleScrapeClear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orchestrator.SavePersistedSyncInfo(req.Username, "idle", time.Time{})
+	a.orch.SavePersistedSyncInfo(req.Platform, req.Username, "idle", time.Time{})
 	if a.mediaIndex != nil {
 		a.mediaIndex.Invalidate(req.Platform, req.Username)
 	}

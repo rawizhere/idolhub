@@ -79,6 +79,13 @@ ORDER BY platform, username`)
 	return out, rows.Err()
 }
 
+func (s *AccountStore) Delete(ctx context.Context, platform, username string) error {
+	if err := execContext(ctx, s.db, `DELETE FROM accounts WHERE platform = ? AND username = ?`, platform, username); err != nil {
+		return fmt.Errorf("store: account delete: %w", err)
+	}
+	return nil
+}
+
 func (s *AccountStore) GetSyncInfo(ctx context.Context, platform, username string) (SyncInfo, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT COALESCE(last_sync_status, 'idle'), last_sync_time FROM accounts WHERE platform = ? AND username = ?`,

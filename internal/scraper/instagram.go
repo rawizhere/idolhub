@@ -17,13 +17,17 @@ import (
 	"time"
 
 	"idolhub/internal/download"
+	"idolhub/internal/store"
 )
 
 func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
 	if opts.InstagramSessionID == "" {
 		return fmt.Errorf("instagram session ID is not configured")
 	}
-	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync, opts.InstagramSessionID, opts.OnProgress)
+	if opts.Posts == nil {
+		return fmt.Errorf("post store is not configured")
+	}
+	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync, opts.InstagramSessionID, opts.Posts, opts.OnProgress)
 }
 
 type igDirectItem struct {
@@ -77,7 +81,7 @@ func bestVideoURL(vs []igVideoVersion) string {
 }
 
 // scrapeInstagramDirect pulls timeline media via the private Instagram web API
-func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, sessionID string, onProgress func(pct int, msg string)) error {
+func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, sessionID string, posts *store.PostStore, onProgress func(pct int, msg string)) error {
 	if sessionID == "" {
 		return fmt.Errorf("instagram session ID is not set")
 	}
@@ -113,11 +117,9 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	jobs := make(chan igDirectItem, 1000)
 	var downloadedCount int32
 	var skippedCount int32
-	var postsJSON []map[string]interface{}
-	var postsMu sync.Mutex
 
 	pool := download.Start(ctx, jobs, numWorkers, func(ctx context.Context, item igDirectItem) bool {
-		return downloadInstagramDirectMedia(ctx, item, outputDir, &postsMu, &postsJSON, username, fileIdx, cdnClient)
+		return downloadInstagramDirectMedia(ctx, item, outputDir, username, fileIdx, cdnClient)
 	})
 
 	var nextMaxID string
@@ -191,9 +193,6 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 			if item.Caption != nil {
 				caption = item.Caption.Text
 			}
-			dateStr := itemTime.Format("2006-01-02_15-04-05")
-
-			var mediaURLs []string
 			var postEntries []igDirectItem
 
 			if item.MediaType == 8 && len(item.CarouselMedia) > 0 {
@@ -244,10 +243,6 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 				consecutiveExistingPosts = 0
 			}
 
-			for _, pe := range postEntries {
-				mediaURLs = append(mediaURLs, pe.URL)
-			}
-
 			for _, entry := range postEntries {
 				select {
 				case jobs <- entry:
@@ -256,15 +251,25 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 				}
 			}
 
-			if len(postEntries) > 0 {
-				postsMu.Lock()
-				postsJSON = append(postsJSON, map[string]interface{}{
-					"tweet_id":   item.ID,
-					"date":       dateStr,
-					"text":       caption,
-					"media_urls": mediaURLs,
-				})
-				postsMu.Unlock()
+			if len(postEntries) > 0 && saveText {
+				var media []store.PostMedia
+				for _, pe := range postEntries {
+					kind := "photo"
+					if pe.IsVideo {
+						kind = "video"
+					}
+					media = append(media, store.PostMedia{URL: pe.URL, Kind: kind})
+				}
+				if err := posts.UpsertPost(ctx, store.Post{
+					Platform:   "instagram",
+					Username:   username,
+					ExternalID: item.ID,
+					PostedAt:   itemTime,
+					Text:       caption,
+					Media:      media,
+				}); err != nil {
+					slog.Warn("Failed to save post to store", "user", username, "media_id", item.ID, "error", err)
+				}
 			}
 		}
 
@@ -290,11 +295,6 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	close(jobs)
 	downloadedCount, skippedCount = pool.Wait()
 	report(90, "downloads done")
-
-	if saveText && len(postsJSON) > 0 {
-		postsPath := filepath.Join("downloads", "instagram", username, "posts.json")
-		mergePostsJSON(postsPath, postsJSON)
-	}
 
 	slog.Info("Instagram direct sync progress summary", "user", username, "platform", "instagram", "downloaded", downloadedCount, "skipped_existing", skippedCount)
 	return nil
@@ -406,7 +406,7 @@ func (idx *igFileIndex) add(filename string) {
 }
 
 // downloadInstagramDirectMedia downloads a media item from CDN
-func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, outputDir string, postsMu *sync.Mutex, postsJSON *[]map[string]interface{}, username string, fileIdx *igFileIndex, client *http.Client) bool {
+func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, outputDir string, username string, fileIdx *igFileIndex, client *http.Client) bool {
 	if fileIdx != nil && fileIdx.exists(item) {
 		return false
 	}

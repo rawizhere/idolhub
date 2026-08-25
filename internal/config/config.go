@@ -1,13 +1,17 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/caarlos0/env/v11"
+
+	"idolhub/internal/store"
 )
 
 type Account struct {
@@ -49,21 +53,21 @@ var (
 	globalConfig Config
 )
 
-func UpdateConfig(fn func(*Config)) {
-	configMu.Lock()
-	fn(&globalConfig)
-	_ = saveConfigLocked()
-	configMu.Unlock()
-}
-
 const configPath = "configs/config.json"
 
-func LoadConfig() error {
+// LoadConfig loads accounts and secrets from the store DB when it has accounts,
+// falling back to configs/config.json so first boot keeps working.
+func LoadConfig(st *store.Store) error {
 	configMu.Lock()
 	defer configMu.Unlock()
 
 	globalConfig = Config{
 		Accounts: []Account{},
+	}
+
+	if st != nil && loadFromStore(st) {
+		applyEnvSecrets()
+		return nil
 	}
 
 	data, err := os.ReadFile(configPath)
@@ -104,11 +108,131 @@ func applyEnvSecrets() {
 	}
 }
 
-func SaveConfig(cfg Config) error {
+func loadFromStore(st *store.Store) bool {
+	ctx := context.Background()
+	rows, err := st.Accounts.List(ctx)
+	if err != nil {
+		slog.Warn("Failed to read accounts from store", "error", err)
+		return false
+	}
+	if len(rows) == 0 {
+		return false
+	}
+	accounts := make([]Account, 0, len(rows))
+	for _, row := range rows {
+		info, err := st.Accounts.GetSyncInfo(ctx, row.Platform, row.Username)
+		if err != nil {
+			slog.Warn("Failed to read sync info from store", "user", row.Username, "error", err)
+		}
+		accounts = append(accounts, Account{
+			Username:       row.Username,
+			Platform:       row.Platform,
+			SaveText:       row.SaveText,
+			SkipRetweets:   row.SkipRetweets,
+			Filters:        row.Filters,
+			DownloadPhotos: row.DownloadPhotos,
+			DownloadVideos: row.DownloadVideos,
+			LastSyncStatus: info.Status,
+			LastSyncTime:   info.Time,
+		})
+	}
+	globalConfig = Config{
+		Accounts:           accounts,
+		TwitterAuthToken:   settingString(st, ctx, "twitter_auth_token"),
+		InstagramSessionID: settingString(st, ctx, "instagram_session_id"),
+		TikTokCookies:      settingString(st, ctx, "tiktok_cookies"),
+		AutoSyncInterval:   settingInt(st, ctx, "auto_sync_interval"),
+	}
+	return true
+}
+
+func settingString(st *store.Store, ctx context.Context, key string) string {
+	raw, err := st.Settings.Get(ctx, key)
+	if err != nil {
+		return ""
+	}
+	var value string
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return ""
+	}
+	return value
+}
+
+func settingInt(st *store.Store, ctx context.Context, key string) int {
+	raw, err := st.Settings.Get(ctx, key)
+	if err != nil {
+		return 0
+	}
+	var value int
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return 0
+	}
+	return value
+}
+
+// SaveConfig updates the in-memory config and persists it to the store when
+// the store already has accounts, otherwise to configs/config.json.
+func SaveConfig(st *store.Store, cfg Config) error {
 	configMu.Lock()
 	defer configMu.Unlock()
 	globalConfig = cfg
+	if st != nil && storeHasAccounts(st) {
+		return saveToStore(st)
+	}
 	return saveConfigLocked()
+}
+
+func storeHasAccounts(st *store.Store) bool {
+	rows, err := st.Accounts.List(context.Background())
+	return err == nil && len(rows) > 0
+}
+
+func saveToStore(st *store.Store) error {
+	ctx := context.Background()
+	keep := make(map[string]bool)
+	for _, acc := range globalConfig.Accounts {
+		keep[acc.Platform+"/"+strings.ToLower(acc.Username)] = true
+		err := st.Accounts.Upsert(ctx, store.Account{
+			Platform:       acc.Platform,
+			Username:       acc.Username,
+			SaveText:       acc.SaveText,
+			SkipRetweets:   acc.SkipRetweets,
+			DownloadPhotos: acc.DownloadPhotos,
+			DownloadVideos: acc.DownloadVideos,
+			Filters:        acc.Filters,
+		})
+		if err != nil {
+			return err
+		}
+	}
+	rows, err := st.Accounts.List(ctx)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		if keep[row.Platform+"/"+strings.ToLower(row.Username)] {
+			continue
+		}
+		if err := st.Accounts.Delete(ctx, row.Platform, row.Username); err != nil {
+			return err
+		}
+	}
+	settings := map[string]any{
+		"twitter_auth_token":   globalConfig.TwitterAuthToken,
+		"instagram_session_id": globalConfig.InstagramSessionID,
+		"tiktok_cookies":       globalConfig.TikTokCookies,
+		"auto_sync_interval":   globalConfig.AutoSyncInterval,
+	}
+	for key, value := range settings {
+		b, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		if err := st.Settings.Set(ctx, key, string(b)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func saveConfigLocked() error {

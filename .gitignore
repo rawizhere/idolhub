@@ -13,6 +13,7 @@ docs/
 .superpowers/
 
 # --- Build ---
+/idolhub
 *.exe
 *.exe~
 *.dll

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"idolhub/internal/download"
+	"idolhub/internal/store"
 
 	ytdlp "github.com/lrstanley/go-ytdlp"
 )
@@ -98,6 +99,9 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 	if pc.url == "" {
 		return fmt.Errorf("unsupported yt-dlp platform: %s", platform)
 	}
+	if opts.Posts == nil {
+		return fmt.Errorf("post store is not configured")
+	}
 	if !ytResolvedReady {
 		return fmt.Errorf("yt-dlp is not available; install yt-dlp or restart the server")
 	}
@@ -162,9 +166,14 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 		infos, perr := result.GetExtractedInfo()
 		if perr != nil {
 			slog.Warn("failed to parse yt-dlp JSON output", "platform", platform, "user", username, "error", perr)
-		} else if posts := collectYTDLPPosts(infos); len(posts) > 0 {
-			mergePostsJSON(filepath.Join(outputDir, "posts.json"), posts)
-			slog.Info("Saved video posts metadata", "user", username, "count", len(posts))
+		} else if posts := collectYTDLPPosts(infos, platform); len(posts) > 0 {
+			for _, p := range posts {
+				p.Username = username
+				if err := opts.Posts.UpsertPost(ctx, p); err != nil {
+					slog.Warn("Failed to save post to store", "platform", platform, "user", username, "external_id", p.ExternalID, "error", err)
+				}
+			}
+			slog.Info("Saved video posts metadata", "platform", platform, "user", username, "count", len(posts))
 		}
 	}
 
@@ -178,9 +187,9 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 	return nil
 }
 
-// collectYTDLPPosts flattens yt-dlp playlist entries into posts.json format for the gallery.
-func collectYTDLPPosts(infos []*ytdlp.ExtractedInfo) []map[string]interface{} {
-	var posts []map[string]interface{}
+// collectYTDLPPosts flattens yt-dlp playlist entries into store posts.
+func collectYTDLPPosts(infos []*ytdlp.ExtractedInfo, platform string) []store.Post {
+	var posts []store.Post
 	for _, info := range infos {
 		videos := info.Entries
 		if videos == nil {
@@ -190,10 +199,11 @@ func collectYTDLPPosts(infos []*ytdlp.ExtractedInfo) []map[string]interface{} {
 			if v == nil || v.ID == "" {
 				continue
 			}
-			date := ""
+			var postedAt time.Time
 			if v.UploadDate != nil && len(*v.UploadDate) == 8 {
-				ud := *v.UploadDate
-				date = ud[:4] + "-" + ud[4:6] + "-" + ud[6:]
+				if t, err := time.Parse("20060102", *v.UploadDate); err == nil {
+					postedAt = t
+				}
 			}
 			title := ""
 			if v.Title != nil {
@@ -203,22 +213,19 @@ func collectYTDLPPosts(infos []*ytdlp.ExtractedInfo) []map[string]interface{} {
 			if v.Description != nil {
 				description = *v.Description
 			}
-			entry := map[string]interface{}{
-				"tweet_id":   v.ID,
-				"date":       date,
-				"media_urls": []string{v.ID},
-			}
+			text := description
 			if title != "" && description != "" && title != description {
-				entry["text"] = title + "\n\n" + description
+				text = title + "\n\n" + description
 			} else if title != "" {
-				entry["text"] = title
-			} else {
-				entry["text"] = description
+				text = title
 			}
-			if len(v.Tags) > 0 {
-				entry["tags"] = v.Tags
-			}
-			posts = append(posts, entry)
+			posts = append(posts, store.Post{
+				Platform:   platform,
+				ExternalID: v.ID,
+				PostedAt:   postedAt,
+				Text:       text,
+				Media:      []store.PostMedia{{URL: v.ID, Kind: "video"}},
+			})
 		}
 	}
 	return posts
