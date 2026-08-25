@@ -9,49 +9,50 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"sync/atomic"
 
 	"github.com/disintegration/imaging"
 	_ "golang.org/x/image/webp"
+	"golang.org/x/sync/errgroup"
 )
 
 // Pool runs fn over jobs across numWorkers goroutines and tallies results.
 type Pool[T any] struct {
-	wg sync.WaitGroup
-	d  int32
-	s  int32
+	g *errgroup.Group
+	d atomic.Int32
+	s atomic.Int32
 }
 
 // Start launches workers consuming jobs immediately, so the caller can keep
 // producing into jobs concurrently. Call Wait after closing jobs.
 func Start[T any](ctx context.Context, jobs <-chan T, numWorkers int, fn func(ctx context.Context, item T) bool) *Pool[T] {
-	p := &Pool[T]{}
-	for i := 0; i < numWorkers; i++ {
-		p.wg.Add(1)
-		go func() {
-			defer p.wg.Done()
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(numWorkers)
+	p := &Pool[T]{g: g}
+	for range numWorkers {
+		g.Go(func() error {
 			for item := range jobs {
 				select {
 				case <-ctx.Done():
-					return
+					return nil
 				default:
 				}
 				if fn(ctx, item) {
-					atomic.AddInt32(&p.d, 1)
+					p.d.Add(1)
 				} else {
-					atomic.AddInt32(&p.s, 1)
+					p.s.Add(1)
 				}
 			}
-		}()
+			return nil
+		})
 	}
 	return p
 }
 
 // Wait blocks until all workers finish and returns downloaded/skipped counts.
-func (p *Pool[T]) Wait() (downloaded, skipped int32) {
-	p.wg.Wait()
-	return p.d, p.s
+func (p *Pool[T]) Wait() (int32, int32) {
+	_ = p.g.Wait()
+	return p.d.Load(), p.s.Load()
 }
 
 func GenerateThumbnail(srcPath, dstPath string) error {
