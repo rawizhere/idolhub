@@ -70,7 +70,7 @@ jobs:
       - name: run tests
         run: go mod download && go test -race -coverprofile=coverage.out ./...
       - name: upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.out
