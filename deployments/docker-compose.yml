@@ -4,15 +4,15 @@ services:
     container_name: idolhub
     restart: unless-stopped
     ports:
-      - "${PORT:-8080}:${PORT:-8080}"
+      - "${PORT:-8080}:8080"
     volumes:
       - ../configs:/app/configs
       - ../downloads:/app/downloads
     environment:
       - TZ=${TZ:-Europe/Moscow}
-      - PORT=${PORT:-8080}
+      - PORT=8080
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:${PORT:-8080}/api/config"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/config"]
       interval: 30s
       timeout: 5s
       retries: 3
