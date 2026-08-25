@@ -76,11 +76,6 @@ func main() {
 	orchestrator.InitOrchestrator(gallery.GlobalIndex, st)
 	cfg := config.GetConfig()
 	slog.Info("Configuration loaded successfully", "targets_count", len(cfg.Accounts), "auto_sync_interval_hours", cfg.AutoSyncInterval)
-	orchestrator.GlobalOrchestrator.SyncTargets(cfg.Accounts)
-
-	scraper.MigrateThumbnails()
-	scraper.MigrateVideoCodecs()
-
 	app := &App{
 		orch:       orchestrator.GlobalOrchestrator,
 		mediaIndex: gallery.GlobalIndex,
@@ -124,6 +119,11 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
+	orchestrator.GlobalOrchestrator.SyncTargets(cfg.Accounts)
+
+	scraper.MigrateThumbnails()
+	scraper.MigrateVideoCodecs()
 
 	sig := <-quit
 	slog.Info("Received signal, shutting down", "signal", sig)
