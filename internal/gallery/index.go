@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
-	"github.com/fsnotify/fsnotify"
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/hashicorp/golang-lru/v2/expirable"
+	"golang.org/x/sync/singleflight"
 )
 
 type MediaEntry struct {
@@ -18,61 +19,18 @@ type MediaEntry struct {
 }
 
 type Index struct {
-	files *lru.Cache[string, []MediaEntry]
-	posts *lru.Cache[string, []Post]
+	files *expirable.LRU[string, []MediaEntry]
+	posts *expirable.LRU[string, []Post]
+	sf    singleflight.Group
 }
 
 var GlobalIndex *Index
 
 func Init() {
-	cache, err := lru.New[string, []MediaEntry](512)
-	if err != nil {
-		panic(err)
-	}
-	posts, err := lru.New[string, []Post](512)
-	if err != nil {
-		panic(err)
-	}
-	GlobalIndex = &Index{files: cache, posts: posts}
-	GlobalIndex.watch()
-}
-
-func (idx *Index) watch() {
-	w, err := fsnotify.NewWatcher()
-	if err != nil {
-		return
-	}
-	if err := w.Add("downloads"); err != nil {
-		_ = w.Close()
-		return
-	}
-	go func() {
-		for {
-			select {
-			case ev, ok := <-w.Events:
-				if !ok {
-					return
-				}
-				idx.invalidateFromPath(ev.Name)
-				if ev.Op.Has(fsnotify.Create) {
-					if fi, err := os.Stat(ev.Name); err == nil && fi.IsDir() {
-						_ = w.Add(ev.Name)
-					}
-				}
-			case <-w.Errors:
-			}
-		}
-	}()
-}
-
-func (idx *Index) invalidateFromPath(path string) {
-	rel, err := filepath.Rel("downloads", path)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
-		return
-	}
-	parts := strings.Split(rel, string(os.PathSeparator))
-	if len(parts) >= 2 {
-		idx.Invalidate(parts[0], parts[1])
+	ttl := time.Minute
+	GlobalIndex = &Index{
+		files: expirable.NewLRU[string, []MediaEntry](512, nil, ttl),
+		posts: expirable.NewLRU[string, []Post](512, nil, ttl),
 	}
 }
 
@@ -131,16 +89,18 @@ func scan(dir string) []MediaEntry {
 // Get returns cached file entries for a target
 func (idx *Index) Get(platform, username string) []MediaEntry {
 	key := keyOf(platform, username)
-	if files, ok := idx.files.Get(key); ok {
-		return files
-	}
-
-	files := scan(dirOf(platform, username))
-	if files == nil {
-		files = []MediaEntry{}
-	}
-	idx.files.Add(key, files)
-	return files
+	v, _, _ := idx.sf.Do("files/"+key, func() (any, error) {
+		if files, ok := idx.files.Get(key); ok {
+			return files, nil
+		}
+		files := scan(dirOf(platform, username))
+		if files == nil {
+			files = []MediaEntry{}
+		}
+		idx.files.Add(key, files)
+		return files, nil
+	})
+	return v.([]MediaEntry)
 }
 
 // Count returns the number of media files for a target

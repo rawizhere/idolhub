@@ -24,17 +24,19 @@ type Post struct {
 // Posts returns cached parsed posts.json for a target.
 func (idx *Index) Posts(platform, username string) []Post {
 	key := keyOf(platform, username)
-	if posts, ok := idx.posts.Get(key); ok {
-		return posts
-	}
-
-	var posts []Post
-	if data, err := os.ReadFile(filepath.Join(dirOf(platform, username), "posts.json")); err == nil {
-		_ = json.Unmarshal(data, &posts)
-	}
-	if posts == nil {
-		posts = []Post{}
-	}
-	idx.posts.Add(key, posts)
-	return posts
+	v, _, _ := idx.sf.Do("posts/"+key, func() (any, error) {
+		if posts, ok := idx.posts.Get(key); ok {
+			return posts, nil
+		}
+		var posts []Post
+		if data, err := os.ReadFile(filepath.Join(dirOf(platform, username), "posts.json")); err == nil {
+			_ = json.Unmarshal(data, &posts)
+		}
+		if posts == nil {
+			posts = []Post{}
+		}
+		idx.posts.Add(key, posts)
+		return posts, nil
+	})
+	return v.([]Post)
 }
