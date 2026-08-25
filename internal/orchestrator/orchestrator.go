@@ -357,6 +357,9 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 
 	lastSync := p.UpdatedAt
 	forceFullSync := forceFull
+	if forceFullSync {
+		lastSync = time.Time{}
+	}
 	if !forceFullSync && (saveText || platform == "tiktok") {
 		storedCount := 0
 		if o.posts != nil {
