@@ -26,7 +26,6 @@ type Scraper struct {
 	client     *xClient
 	limiter    *rate.Limiter
 	authToken  string
-	csrfToken  string
 	delayEvery time.Duration
 }
 
@@ -44,7 +43,6 @@ func New(authToken string) (*Scraper, error) {
 		client:     client,
 		limiter:    rate.NewLimiter(rate.Every(5*time.Second), 1),
 		authToken:  authToken,
-		csrfToken:  string(csrf),
 		delayEvery: 5 * time.Second,
 	}, nil
 }
