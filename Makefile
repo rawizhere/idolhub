@@ -6,7 +6,7 @@ BIN ?= idolhub
 all: build
 
 templ:
-	templ generate -path ./cmd/parser/web/templates/
+	$(GO) tool templ generate -path ./cmd/parser/web/templates/
 
 css:
 	rm -rf node_modules package.json package-lock.json
