@@ -125,7 +125,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 			if strings.Contains(err.Error(), "401") || strings.Contains(err.Error(), "403") {
 				return fmt.Errorf("%w: twitter rejected auth_token: %v", ErrAuthExpired, err)
 			}
-			break
+			return fmt.Errorf("twitter timeline fetch failed: %w", err)
 		}
 		tw := &result.Tweet
 
