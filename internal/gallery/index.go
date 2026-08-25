@@ -47,7 +47,7 @@ func dirOf(platform, username string) string {
 }
 
 func isMediaFile(name string) bool {
-	if name == "posts.json" || name == ".DS_Store" {
+	if name == "posts.json" || strings.HasSuffix(name, ".bak") || name == ".DS_Store" {
 		return false
 	}
 	return !strings.HasPrefix(name, ".")

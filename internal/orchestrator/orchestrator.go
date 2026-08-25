@@ -605,7 +605,7 @@ func (o *Orchestrator) countDownloadedMedia(platform, username string) int {
 	}
 	count := 0
 	for _, f := range files {
-		if !f.IsDir() && f.Name() != "posts.json" && f.Name() != ".DS_Store" {
+		if !f.IsDir() && f.Name() != "posts.json" && !strings.HasSuffix(f.Name(), ".bak") && f.Name() != ".DS_Store" {
 			count++
 		}
 	}

@@ -38,7 +38,7 @@ func MigrateThumbnails() {
 				return nil
 			}
 			name := d.Name()
-			if name == "posts.json" || name == ".DS_Store" || strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".tmp.mp4") || strings.Contains(name, ".transcoding.") {
+			if name == "posts.json" || strings.HasSuffix(name, ".bak") || name == ".DS_Store" || strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".tmp.mp4") || strings.Contains(name, ".transcoding.") {
 				return nil
 			}
 			ext := strings.ToLower(filepath.Ext(name))
