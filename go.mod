@@ -30,4 +30,4 @@ require (
 	golang.org/x/sys v0.47.0 // indirect
 )
 
-replace github.com/imperatrona/twitter-scraper => ./third_party/twitter-scraper
+replace github.com/imperatrona/twitter-scraper => github.com/rawizhere/twitter-scraper v0.0.0-20260825072931-79ba78e891a7
