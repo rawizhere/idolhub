@@ -43,6 +43,15 @@ type App struct {
 
 func main() {
 	logging.Init()
+
+	if len(os.Args) > 1 && os.Args[1] == "import-json" {
+		if err := runImportJSON(os.Args[2:]); err != nil {
+			slog.Error("import-json failed", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if err := config.LoadConfig(); err != nil {
 		slog.Error("Failed to load configuration", "error", err)
 		os.Exit(1)
