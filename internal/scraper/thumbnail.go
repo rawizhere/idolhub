@@ -9,7 +9,7 @@ import (
 	"idolhub/internal/download"
 )
 
-const thumbVersionMarker = "downloads/.thumb_v480p"
+const thumbVersionMarker = "downloads/.thumb_v480p_fit"
 
 func MigrateThumbnails() {
 	go func() {

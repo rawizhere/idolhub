@@ -95,7 +95,7 @@ func GenerateThumbnail(srcPath, dstPath string) error {
 		return oerr
 	}
 
-	thumb := imaging.Thumbnail(srcImg, 480, 480, imaging.Lanczos)
+	thumb := imaging.Fit(srcImg, 480, 480, imaging.Lanczos)
 	if err := imaging.Save(thumb, dstPath, imaging.JPEGQuality(80)); err != nil {
 		return fmt.Errorf("failed to encode thumbnail as jpeg: %w", err)
 	}
