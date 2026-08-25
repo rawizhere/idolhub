@@ -354,6 +354,9 @@ export function switchGalleryView(view) {
   if (gridView) gridView.style.display = view === "grid" ? "block" : "none";
   if (postsView) postsView.style.display = view === "posts" ? "block" : "none";
 
+  const typePills = document.getElementById("media-type-pills");
+  if (typePills) typePills.style.display = view === "grid" ? "flex" : "none";
+
   if (view === "grid") renderGalleryGrid();
   else renderGalleryPosts();
 }
