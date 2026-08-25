@@ -37,6 +37,8 @@ bin/
 
 # --- Config ---
 configs/config.json
+configs/idolhub.db
+configs/idolhub.db-*
 .env
 
 # --- Generated ---
