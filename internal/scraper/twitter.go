@@ -2,6 +2,8 @@ package scraper
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -87,7 +89,14 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	})
 
 	s := twitterscraper.New()
-	s.SetAuthToken(twitterscraper.AuthToken{Token: opts.TwitterAuthToken})
+	csrf := make([]byte, 16)
+	if _, err := rand.Read(csrf); err != nil {
+		return fmt.Errorf("failed to generate csrf token: %w", err)
+	}
+	s.SetAuthToken(twitterscraper.AuthToken{
+		Token:     opts.TwitterAuthToken,
+		CSRFToken: hex.EncodeToString(csrf),
+	})
 	s.WithDelay(5)
 
 	tlCtx, cancelTimeline := context.WithCancel(ctx)
