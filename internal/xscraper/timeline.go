@@ -27,24 +27,18 @@ func parseTimeline(body []byte) ([]*Tweet, string, error) {
 				cursor = e.Content.Value
 				continue
 			}
-			if r := e.Content.ItemContent.TweetResults.Result; r.Legacy.IDStr != "" {
-				if tw := r.parse(); tw != nil {
-					tweets = append(tweets, tw)
-				}
+			if tw := e.Content.ItemContent.TweetResults.Result.parse(); tw != nil {
+				tweets = append(tweets, tw)
 			}
 			for _, it := range e.Content.ItemArray {
-				if r := it.Item.ItemContent.TweetResults.Result; r.Legacy.IDStr != "" {
-					if tw := r.parse(); tw != nil {
-						tweets = append(tweets, tw)
-					}
+				if tw := it.Item.ItemContent.TweetResults.Result.parse(); tw != nil {
+					tweets = append(tweets, tw)
 				}
 			}
 		}
 		for _, it := range instruction.ModuleItems {
-			if r := it.Item.ItemContent.TweetResults.Result; r.Legacy.IDStr != "" {
-				if tw := r.parse(); tw != nil {
-					tweets = append(tweets, tw)
-				}
+			if tw := it.Item.ItemContent.TweetResults.Result.parse(); tw != nil {
+				tweets = append(tweets, tw)
 			}
 		}
 	}

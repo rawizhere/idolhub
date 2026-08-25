@@ -1,0 +1,119 @@
+{
+  "data": {
+    "user": {
+      "result": {
+        "__typename": "User",
+        "timeline_v2": {
+          "timeline": {
+            "instructions": [
+              {
+                "type": "TimelineAddEntries",
+                "entries": [
+                  {
+                    "entryId": "tweet-1001",
+                    "content": {
+                      "itemContent": {
+                        "tweet_results": {
+                          "result": {
+                            "__typename": "Tweet",
+                            "legacy": {
+                              "id_str": "1001",
+                              "full_text": "hello world https://t.co/abc",
+                              "created_at": "Mon Jan 02 15:04:05 +0000 2023",
+                              "entities": {"urls": [{"expanded_url": "https://example.com/post"}]},
+                              "extended_entities": {
+                                "media": [
+                                  {
+                                    "id_str": "m1",
+                                    "type": "photo",
+                                    "media_url_https": "https://pbs.twimg.com/media/m1.jpg"
+                                  },
+                                  {
+                                    "id_str": "m2",
+                                    "type": "video",
+                                    "media_url_https": "https://pbs.twimg.com/media/m2.jpg",
+                                    "video_info": {
+                                      "variants": [
+                                        {"bitrate": 632000, "content_type": "video/mp4", "url": "https://video.twimg.com/m2_small.mp4?tag=10"},
+                                        {"bitrate": 2176000, "content_type": "video/mp4", "url": "https://video.twimg.com/m2_big.mp4?tag=10"},
+                                        {"bitrate": 256000, "content_type": "application/x-mpegURL", "url": "https://video.twimg.com/m2.m3u8"}
+                                      ]
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "entryId": "tweet-1002",
+                    "content": {
+                      "itemContent": {
+                        "tweet_results": {
+                          "result": {
+                            "__typename": "Tweet",
+                            "legacy": {
+                              "id_str": "1002",
+                              "full_text": "RT @someone: look at this",
+                              "created_at": "Tue Jan 03 10:00:00 +0000 2023"
+                            },
+                            "retweeted_status_result": {
+                              "result": {
+                                "__typename": "Tweet",
+                                "legacy": {
+                                  "id_str": "900",
+                                  "full_text": "look at this",
+                                  "created_at": "Tue Jan 03 09:00:00 +0000 2023",
+                                  "extended_entities": {
+                                    "media": [
+                                      {
+                                        "id_str": "g1",
+                                        "type": "animated_gif",
+                                        "media_url_https": "https://pbs.twimg.com/media/g1.jpg",
+                                        "video_info": {
+                                          "variants": [
+                                            {"bitrate": 0, "content_type": "image/gif", "url": "https://video.twimg.com/g1.gif"},
+                                            {"bitrate": 1000000, "content_type": "video/mp4", "url": "https://video.twimg.com/g1.mp4"}
+                                          ]
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "entryId": "tweet-1003",
+                    "content": {
+                      "itemContent": {
+                        "tweet_results": {
+                          "result": {
+                            "__typename": "TweetWithVisibilityResults",
+                            "legacy": {},
+                            "tweet": {
+                              "legacy": {"id_str": "1003", "full_text": "", "created_at": "Wed Jan 04 12:30:00 +0000 2023"}
+                            },
+                            "note_tweet": {"note_tweet_results": {"result": {"text": "long form note text"}}}
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {"entryId": "cursor-bottom-0", "content": {"cursorType": "Bottom", "value": "DAABCgABGIGFn0n"}}
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

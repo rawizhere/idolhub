@@ -1,0 +1,33 @@
+{
+  "cursor": "DAABCgABGIGFn0n",
+  "tweets": [
+    {
+      "id": "1001",
+      "text": "hello world https://t.co/abc",
+      "date": "2023-01-02T15:04:05Z",
+      "photos": [
+        "https://pbs.twimg.com/media/m1.jpg"
+      ],
+      "videos": [
+        "https://video.twimg.com/m2_big.mp4"
+      ],
+      "urls": [
+        "https://example.com/post"
+      ]
+    },
+    {
+      "id": "1002",
+      "text": "RT @someone: look at this",
+      "is_retweet": true,
+      "date": "2023-01-03T10:00:00Z",
+      "gifs": [
+        "https://video.twimg.com/g1.mp4"
+      ]
+    },
+    {
+      "id": "1003",
+      "text": "long form note text",
+      "date": "2023-01-04T12:30:00Z"
+    }
+  ]
+}

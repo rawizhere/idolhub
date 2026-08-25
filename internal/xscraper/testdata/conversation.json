@@ -1,0 +1,68 @@
+{
+  "data": {
+    "user": {
+      "result": {
+        "timeline": {
+          "timeline": {
+            "instructions": [
+              {
+                "type": "TimelineAddToModule",
+                "moduleItems": [
+                  {
+                    "entryId": "conversationmodule-2001",
+                    "item": {
+                      "itemContent": {
+                        "tweet_results": {
+                          "result": {
+                            "__typename": "Tweet",
+                            "legacy": {"id_str": "2001", "full_text": "module tweet one", "created_at": "Thu Feb 02 08:00:00 +0000 2023"}
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "entryId": "conversationmodule-2002",
+                    "item": {
+                      "itemContent": {
+                        "tweet_results": {
+                          "result": {
+                            "__typename": "Tweet",
+                            "legacy": {
+                              "id_str": "2002",
+                              "full_text": "module tweet two",
+                              "created_at": "Thu Feb 02 08:05:00 +0000 2023",
+                              "extended_entities": {
+                                "media": [{"id_str": "p9", "type": "photo", "media_url_https": "https://pbs.twimg.com/media/p9.jpg"}]
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "TimelineAddEntries",
+                "entries": [
+                  {
+                    "entryId": "tweet-empty",
+                    "content": {
+                      "itemContent": {
+                        "tweet_results": {
+                          "result": {"__typename": "Tweet", "legacy": {"full_text": "no id here"}}
+                        }
+                      }
+                    }
+                  },
+                  {"entryId": "cursor-bottom-1", "content": {"cursorType": "Bottom", "value": "CURSOR-X"}}
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
