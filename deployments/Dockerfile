@@ -53,7 +53,7 @@ RUN adduser -D -h /home/idolhub idolhub \
 WORKDIR /app
 
 COPY --from=builder /app/idolhub .
-COPY deploy/entrypoint.sh /app/entrypoint.sh
+COPY deployments/entrypoint.sh /app/entrypoint.sh
 
 RUN chown -R idolhub:idolhub /app && chmod +x /app/entrypoint.sh
 

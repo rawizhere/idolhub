@@ -8,8 +8,8 @@ services:
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
     volumes:
-      - ./configs:/app/configs
-      - ./downloads:/app/downloads
+      - ../configs:/app/configs
+      - ../downloads:/app/downloads
     environment:
       - TZ=${TZ:-Europe/Moscow}
       - PORT=${PORT:-8080}

@@ -12,7 +12,7 @@ services:
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
     volumes:
-      - ./configs:/app/configs
+      - ../configs:/app/configs
       - app_data:/app/downloads
     restart: unless-stopped
     healthcheck:
