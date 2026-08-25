@@ -65,7 +65,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	gallery.Init()
+	gallery.Init(st.Posts)
 	orchestrator.InitOrchestrator(gallery.GlobalIndex, st)
 	cfg := config.GetConfig()
 	slog.Info("Configuration loaded successfully", "targets_count", len(cfg.Accounts), "auto_sync_interval_hours", cfg.AutoSyncInterval)

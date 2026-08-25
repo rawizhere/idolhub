@@ -11,6 +11,8 @@ import (
 
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"golang.org/x/sync/singleflight"
+
+	"idolhub/internal/store"
 )
 
 type MediaEntry struct {
@@ -19,18 +21,20 @@ type MediaEntry struct {
 }
 
 type Index struct {
-	files *expirable.LRU[string, []MediaEntry]
-	posts *expirable.LRU[string, []Post]
-	sf    singleflight.Group
+	files      *expirable.LRU[string, []MediaEntry]
+	posts      *expirable.LRU[string, []Post]
+	postsStore *store.PostStore
+	sf         singleflight.Group
 }
 
 var GlobalIndex *Index
 
-func Init() {
+func Init(posts *store.PostStore) {
 	ttl := time.Minute
 	GlobalIndex = &Index{
-		files: expirable.NewLRU[string, []MediaEntry](512, nil, ttl),
-		posts: expirable.NewLRU[string, []Post](512, nil, ttl),
+		files:      expirable.NewLRU[string, []MediaEntry](512, nil, ttl),
+		posts:      expirable.NewLRU[string, []Post](512, nil, ttl),
+		postsStore: posts,
 	}
 }
 
