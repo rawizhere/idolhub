@@ -3,6 +3,7 @@ package xscraper
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -176,5 +177,26 @@ func TestParseRetryAfter(t *testing.T) {
 		if got := parseRetryAfter(in); got != want {
 			t.Errorf("parseRetryAfter(%q) = %v, want %v", in, got, want)
 		}
+	}
+}
+
+func TestParseTimelineGraphqlErrors(t *testing.T) {
+	body := []byte(`{"errors":[{"code":88,"message":"Rate limit exceeded"}]}`)
+	_, _, err := parseTimeline(body)
+	var rle *RateLimitError
+	if !errors.As(err, &rle) {
+		t.Fatalf("expected RateLimitError, got %v", err)
+	}
+
+	body = []byte(`{"errors":[{"code":32,"message":"Could not authenticate you"}]}`)
+	_, _, err = parseTimeline(body)
+	if err == nil || errors.As(err, &rle) {
+		t.Fatalf("expected plain error, got %v", err)
+	}
+
+	body = []byte(`{"data":{"user":{"result":{"timeline":{"timeline":{"instructions":[]}}}}}}`)
+	tweets, _, err := parseTimeline(body)
+	if err != nil || len(tweets) != 0 {
+		t.Fatalf("expected empty result without error, got %v tweets, err %v", tweets, err)
 	}
 }

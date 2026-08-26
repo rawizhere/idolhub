@@ -117,6 +117,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	jobs := make(chan igDirectItem, 1000)
 	var downloadedCount int32
 	var skippedCount int32
+	postsSaved := 0
 
 	pool := download.Start(ctx, jobs, numWorkers, func(ctx context.Context, item igDirectItem) bool {
 		return downloadInstagramDirectMedia(ctx, item, outputDir, username, fileIdx, cdnClient)
@@ -272,6 +273,8 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 					Media:      media,
 				}); err != nil {
 					slog.Warn("Failed to save post to store", "user", username, "media_id", item.ID, "error", err)
+				} else {
+					postsSaved++
 				}
 			}
 		}
@@ -299,7 +302,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	downloadedCount, skippedCount = pool.Wait()
 	report(90, "downloads done")
 
-	slog.Info("Instagram direct sync progress summary", "user", username, "platform", "instagram", "downloaded", downloadedCount, "skipped_existing", skippedCount)
+	slog.Info("Instagram direct sync progress summary", "user", username, "platform", "instagram", "downloaded", downloadedCount, "skipped_existing", skippedCount, "posts_saved", postsSaved)
 	return nil
 }
 

@@ -71,14 +71,9 @@ func (s *Scraper) timeline(ctx context.Context, op string, vars map[string]inter
 			if cursor != "" {
 				vars["cursor"] = cursor
 			}
-			body, err := s.doGet(ctx, gqlURL+"/"+op, vars)
+			tweets, next, err := s.doTimelinePage(ctx, op, vars)
 			if err != nil {
 				ch <- &TweetResult{Error: err}
-				return
-			}
-			tweets, next, perr := parseTimeline(body)
-			if perr != nil {
-				ch <- &TweetResult{Error: perr}
 				return
 			}
 			if len(tweets) == 0 {
@@ -162,22 +157,33 @@ func (s *Scraper) userID(ctx context.Context, screenName string) (string, error)
 const maxRateLimitRetries = 5
 
 func (s *Scraper) doGet(ctx context.Context, endpoint string, vars map[string]interface{}) ([]byte, error) {
+	if err := s.limiter.Wait(ctx); err != nil {
+		return nil, err
+	}
 	varsJSON, _ := json.Marshal(vars)
 	featsJSON, _ := json.Marshal(timelineFeatures())
 	u := endpoint + "?variables=" + url.QueryEscape(string(varsJSON)) + "&features=" + url.QueryEscape(string(featsJSON))
+	return s.client.get(ctx, u)
+}
 
+// doTimelinePage fetches one timeline page and retries while x.com reports a rate limit,
+// either as HTTP 429 or as a graphql error payload with HTTP 200.
+func (s *Scraper) doTimelinePage(ctx context.Context, op string, vars map[string]interface{}) ([]*Tweet, string, error) {
 	backoff := 15 * time.Second
 	for attempt := 0; ; attempt++ {
-		if err := s.limiter.Wait(ctx); err != nil {
-			return nil, err
-		}
-		body, err := s.client.get(ctx, u)
-		var rle *RateLimitError
+		body, err := s.doGet(ctx, gqlURL+"/"+op, vars)
 		if err == nil {
-			return body, nil
+			var tweets []*Tweet
+			var next string
+			tweets, next, err = parseTimeline(body)
+			var prle *RateLimitError
+			if !errors.As(err, &prle) {
+				return tweets, next, err
+			}
 		}
+		var rle *RateLimitError
 		if !errors.As(err, &rle) || attempt >= maxRateLimitRetries {
-			return nil, err
+			return nil, "", err
 		}
 		wait := rle.RetryAfter
 		if wait <= 0 {
@@ -187,7 +193,7 @@ func (s *Scraper) doGet(ctx context.Context, endpoint string, vars map[string]in
 		slog.Warn("x.com rate limited, backing off", "attempt", attempt+1, "wait", wait)
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, "", ctx.Err()
 		case <-time.After(wait):
 		}
 	}

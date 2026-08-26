@@ -53,6 +53,10 @@ type gqlResponse struct {
 			} `json:"result"`
 		} `json:"user"`
 	} `json:"data"`
+	Errors []struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"errors"`
 }
 
 type entry struct {

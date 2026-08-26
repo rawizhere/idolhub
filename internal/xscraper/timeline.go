@@ -14,6 +14,19 @@ func parseTimeline(body []byte) ([]*Tweet, string, error) {
 		return nil, "", err
 	}
 
+	if len(resp.Errors) > 0 {
+		for _, e := range resp.Errors {
+			if e.Code == 88 {
+				return nil, "", &RateLimitError{}
+			}
+		}
+		msgs := make([]string, 0, len(resp.Errors))
+		for _, e := range resp.Errors {
+			msgs = append(msgs, fmt.Sprintf("code %d: %s", e.Code, e.Message))
+		}
+		return nil, "", fmt.Errorf("graphql errors: %s", strings.Join(msgs, "; "))
+	}
+
 	instructions := resp.Data.User.Result.Timeline.Timeline.Instructions
 	if len(instructions) == 0 {
 		instructions = resp.Data.User.Result.TimelineV2.Timeline.Instructions

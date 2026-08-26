@@ -101,6 +101,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 		kind string
 	}
 	queuedURLs := make(map[string]bool)
+	postsSaved := 0
 
 	for result := range ch {
 		if result.Error != nil {
@@ -211,6 +212,8 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 				Media:      media,
 			}); err != nil {
 				slog.Warn("Failed to save tweet to store", "user", username, "tweet_id", tw.ID, "error", err)
+			} else {
+				postsSaved++
 			}
 		}
 	}
@@ -219,7 +222,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	report(90, "downloads done")
 	downloadedCount, skippedCount := pool.Wait()
 
-	slog.Info("Twitter sync completed successfully", "user", username, "platform", "twitter", "downloaded", downloadedCount, "skipped_existing", skippedCount)
+	slog.Info("Twitter sync completed successfully", "user", username, "platform", "twitter", "downloaded", downloadedCount, "skipped_existing", skippedCount, "posts_saved", postsSaved)
 	return nil
 }
 
