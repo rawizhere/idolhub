@@ -163,3 +163,18 @@ func TestTimelineFeatures(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRetryAfter(t *testing.T) {
+	cases := map[string]time.Duration{
+		"17":   17 * time.Second,
+		"  5 ": 5 * time.Second,
+		"":     0,
+		"abc":  0,
+		"-3":   0,
+	}
+	for in, want := range cases {
+		if got := parseRetryAfter(in); got != want {
+			t.Errorf("parseRetryAfter(%q) = %v, want %v", in, got, want)
+		}
+	}
+}

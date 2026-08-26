@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/url"
 	"time"
 
@@ -157,12 +159,36 @@ func (s *Scraper) userID(ctx context.Context, screenName string) (string, error)
 	return parseUserID(body)
 }
 
+const maxRateLimitRetries = 5
+
 func (s *Scraper) doGet(ctx context.Context, endpoint string, vars map[string]interface{}) ([]byte, error) {
-	if err := s.limiter.Wait(ctx); err != nil {
-		return nil, err
-	}
 	varsJSON, _ := json.Marshal(vars)
 	featsJSON, _ := json.Marshal(timelineFeatures())
 	u := endpoint + "?variables=" + url.QueryEscape(string(varsJSON)) + "&features=" + url.QueryEscape(string(featsJSON))
-	return s.client.get(ctx, u)
+
+	backoff := 15 * time.Second
+	for attempt := 0; ; attempt++ {
+		if err := s.limiter.Wait(ctx); err != nil {
+			return nil, err
+		}
+		body, err := s.client.get(ctx, u)
+		var rle *RateLimitError
+		if err == nil {
+			return body, nil
+		}
+		if !errors.As(err, &rle) || attempt >= maxRateLimitRetries {
+			return nil, err
+		}
+		wait := rle.RetryAfter
+		if wait <= 0 {
+			wait = backoff
+			backoff *= 2
+		}
+		slog.Warn("x.com rate limited, backing off", "attempt", attempt+1, "wait", wait)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
+	}
 }

@@ -4,11 +4,26 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strconv"
+	"strings"
+	"time"
 
 	fhttp "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
 )
+
+// RateLimitError is returned on HTTP 429 with the server-provided delay.
+type RateLimitError struct {
+	RetryAfter time.Duration
+}
+
+func (e *RateLimitError) Error() string {
+	if e.RetryAfter > 0 {
+		return fmt.Sprintf("rate limited, retry after %s", e.RetryAfter)
+	}
+	return "rate limited"
+}
 
 // xClient issues requests with a Chrome-like TLS fingerprint.
 type xClient struct {
@@ -51,8 +66,19 @@ func (c *xClient) get(ctx context.Context, rawURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if resp.StatusCode == fhttp.StatusTooManyRequests {
+		return nil, &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
+	}
 	if resp.StatusCode != fhttp.StatusOK {
 		return nil, fmt.Errorf("response status %s: %s", resp.Status, body)
 	}
 	return body, nil
+}
+
+func parseRetryAfter(v string) time.Duration {
+	secs, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || secs < 0 {
+		return 0
+	}
+	return time.Duration(secs) * time.Second
 }
