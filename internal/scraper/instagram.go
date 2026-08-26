@@ -27,7 +27,7 @@ func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
 	if opts.Posts == nil {
 		return fmt.Errorf("post store is not configured")
 	}
-	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync, opts.InstagramSessionID, opts.Posts, opts.OnProgress)
+	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync, opts.ForceFull, opts.InstagramSessionID, opts.Posts, opts.OnProgress)
 }
 
 type igDirectItem struct {
@@ -81,7 +81,7 @@ func bestVideoURL(vs []igVideoVersion) string {
 }
 
 // scrapeInstagramDirect pulls timeline media via the private Instagram web API
-func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, sessionID string, posts *store.PostStore, onProgress func(pct int, msg string)) error {
+func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, forceFull bool, sessionID string, posts *store.PostStore, onProgress func(pct int, msg string)) error {
 	if sessionID == "" {
 		return fmt.Errorf("instagram session ID is not set")
 	}
@@ -224,11 +224,14 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 			// Check if this post is older than lastSync or already exists on disk
 			isOlderThanLastSync := !lastSync.IsZero() && itemTime.Before(lastSync)
 
-			allExisting := len(postEntries) > 0
-			for _, pe := range postEntries {
-				if !fileIdx.exists(pe) {
-					allExisting = false
-					break
+			allExisting := false
+			if !forceFull {
+				allExisting = len(postEntries) > 0
+				for _, pe := range postEntries {
+					if !fileIdx.exists(pe) {
+						allExisting = false
+						break
+					}
 				}
 			}
 
