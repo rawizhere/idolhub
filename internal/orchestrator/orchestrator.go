@@ -567,7 +567,7 @@ func (o *Orchestrator) CancelScrape(username string) bool {
 	if p, exists := o.progress[username]; exists && p.Status == "queued" {
 		p.Status = "idle"
 		p.Progress = 0
-		o.SavePersistedSyncInfo(p.Platform, username, "idle", time.Now())
+		o.SavePersistedSyncInfo(p.Platform, username, "idle", p.UpdatedAt)
 		o.mu.Unlock()
 		o.broadcast(SSEEvent{Type: "status", Username: username, Status: "idle", Progress: 0})
 		return true
