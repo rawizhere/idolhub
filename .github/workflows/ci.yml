@@ -50,14 +50,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: cmd/parser/web/package-lock.json
       - name: generate templ code
         run: |
           go mod download
           go tool templ generate -path ./cmd/parser/web/templates/
       - name: build css
+        working-directory: cmd/parser/web
         run: |
           npm ci
-          npx @tailwindcss/cli -i cmd/parser/web/static/input.css -o /tmp/app.css --minify
+          npx @tailwindcss/cli -i static/input.css -o /tmp/app.css --minify
       - name: check committed app.css is reproducible
         run: diff cmd/parser/web/static/app.css /tmp/app.css
 

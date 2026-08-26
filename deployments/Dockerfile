@@ -1,7 +1,7 @@
 # ---- Tailwind CSS ----
 FROM node:22-alpine AS tailwind
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY cmd/parser/web/package.json cmd/parser/web/package-lock.json ./
 RUN npm ci
 COPY cmd/parser/web/ cmd/parser/web/
 RUN for f in cmd/parser/web/templates/*.templ; do \

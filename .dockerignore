@@ -10,6 +10,7 @@ Desktop.ini
 .agents/
 
 # Build artifacts
+idolhub
 *.exe
 *.exe~
 *.dll
@@ -42,8 +43,6 @@ downloads/
 *_templ.go
 cmd/parser/web/static/app.css
 node_modules/
-package.json
-package-lock.json
 
 # VCS
 .git/
