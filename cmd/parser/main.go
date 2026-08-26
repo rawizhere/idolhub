@@ -2,8 +2,11 @@ package main
 
 import (
 	"cmp"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"io/fs"
 	"log/slog"
@@ -17,8 +20,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/agnivade/levenshtein"
 
@@ -62,6 +67,83 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://img.youtube.com; media-src 'self'; connect-src 'self'")
 		next.ServeHTTP(w, r)
+	})
+}
+
+var gzipPool = sync.Pool{
+	New: func() any {
+		gz, _ := gzip.NewWriterLevel(nil, 5)
+		return gz
+	},
+}
+
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	gz          *gzip.Writer
+	compress    bool
+	wroteHeader bool
+}
+
+func (g *gzipResponseWriter) WriteHeader(code int) {
+	if g.wroteHeader {
+		return
+	}
+	g.wroteHeader = true
+	h := g.Header()
+	if h.Get("Content-Encoding") == "" && compressibleType(h.Get("Content-Type")) {
+		h.Del("Content-Length")
+		h.Set("Content-Encoding", "gzip")
+		h.Add("Vary", "Accept-Encoding")
+		g.compress = true
+	}
+	g.ResponseWriter.WriteHeader(code)
+}
+
+func (g *gzipResponseWriter) Write(b []byte) (int, error) {
+	if !g.wroteHeader {
+		g.WriteHeader(http.StatusOK)
+	}
+	if g.compress {
+		return g.gz.Write(b)
+	}
+	return g.ResponseWriter.Write(b)
+}
+
+func (g *gzipResponseWriter) Flush() {
+	if g.compress {
+		_ = g.gz.Flush()
+	}
+	if f, ok := g.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func compressibleType(ct string) bool {
+	base, _, _ := strings.Cut(ct, ";")
+	switch base {
+	case "", "text/event-stream":
+		return false
+	}
+	return strings.HasPrefix(base, "text/") ||
+		base == "application/json" ||
+		base == "application/javascript" ||
+		base == "application/xml" ||
+		base == "image/svg+xml"
+}
+
+func gzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		gz := gzipPool.Get().(*gzip.Writer)
+		defer func() {
+			_ = gz.Close()
+			gzipPool.Put(gz)
+		}()
+		gz.Reset(w)
+		next.ServeHTTP(&gzipResponseWriter{ResponseWriter: w, gz: gz}, r)
 	})
 }
 
@@ -119,6 +201,7 @@ func main() {
 	mux.HandleFunc("POST /api/scrape/cancel", app.handleScrapeCancel)
 	mux.HandleFunc("POST /api/scrape/clear", app.handleScrapeClear)
 	mux.HandleFunc("GET /api/gallery", app.handleGallery)
+	mux.HandleFunc("GET /api/gallery/meta", app.handleGalleryMeta)
 	mux.HandleFunc("GET /api/search", app.handleGlobalSearchAPI)
 	mux.HandleFunc("GET /api/events", app.handleSSE)
 	mux.HandleFunc("GET /gallery/{platform}/{username}", app.handleGalleryPage)
@@ -137,7 +220,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              port,
-		Handler:           securityHeaders(mux),
+		Handler:           securityHeaders(gzipMiddleware(mux)),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
@@ -189,12 +272,47 @@ func init() {
 	}
 }
 
+var staticETags = buildStaticETags()
+
+func buildStaticETags() map[string]string {
+	etags := make(map[string]string)
+	err := fs.WalkDir(staticAssets, "web/static", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		data, err := staticAssets.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		sum := sha256.Sum256(data)
+		etags[strings.TrimPrefix(path, "web/static/")] = `"` + hex.EncodeToString(sum[:16]) + `"`
+		return nil
+	})
+	if err != nil {
+		slog.Warn("Failed to hash embedded assets", "error", err)
+	}
+	return etags
+}
+
 func (a *App) serveStatic() http.Handler {
 	sub, _ := fs.Sub(staticAssets, "web/static")
 	fileServer := http.FileServerFS(sub)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Pragma", "no-cache")
+		name := strings.Trim(strings.TrimPrefix(r.URL.Path, "/static"), "/")
+		if name == "" {
+			name = "index.html"
+		}
+		if name == "index.html" {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Pragma", "no-cache")
+		} else if etag, ok := staticETags[name]; ok {
+			w.Header().Set("Cache-Control", "max-age=3600")
+			w.Header().Set("ETag", etag)
+			if r.Header.Get("If-None-Match") == etag {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
 		if r.URL.Path != "/" && strings.HasSuffix(r.URL.Path, "/") {
 			http.NotFound(w, r)
 			return
@@ -315,19 +433,14 @@ func (a *App) handleGallery(w http.ResponseWriter, r *http.Request) {
 
 	files := a.mediaIndex.View(platform, username)
 	posts := a.mediaIndex.Posts(platform, username)
+	byName := fileMap(files)
 
 	for i, p := range posts {
 		var localFiles []gallery.PostMediaFile
 		for _, mediaURL := range p.MediaURLs {
-			gf := a.findLocalFile(mediaURL, platform, username, files)
-			if gf == nil {
-				videoName := p.TweetID + "_video.mp4"
-				for j := range files {
-					if files[j].Filename == videoName {
-						gf = &files[j]
-						break
-					}
-				}
+			gf := a.findLocalFile(mediaURL, platform, username, byName)
+			if gf == nil && p.TweetID != "" {
+				gf = byName[p.TweetID+"_video.mp4"]
 			}
 			if gf != nil {
 				localFiles = append(localFiles, gallery.PostMediaFile{
@@ -359,6 +472,12 @@ func (a *App) handleMedia(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if strings.Contains("/"+relPath, "/thumbnails/") {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+	} else {
+		w.Header().Set("Cache-Control", "private, max-age=300")
+	}
+
 	filePath := filepath.Join("downloads", filepath.FromSlash(filepath.Clean(relPath)))
 
 	if info, err := os.Stat(filePath); err != nil || info.IsDir() {
@@ -557,17 +676,20 @@ func accountsEqual(a, b config.Account) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-func (a *App) findLocalFile(mediaURL, platform, username string, files []gallery.File) *gallery.File {
+func fileMap(files []gallery.File) map[string]*gallery.File {
+	m := make(map[string]*gallery.File, len(files))
+	for i := range files {
+		m[files[i].Filename] = &files[i]
+	}
+	return m
+}
+
+func (a *App) findLocalFile(mediaURL, platform, username string, byName map[string]*gallery.File) *gallery.File {
 	name, ok := a.mediaIndex.FindLocalFile(platform, username, mediaURL)
 	if !ok {
 		return nil
 	}
-	for i := range files {
-		if files[i].Filename == name {
-			return &files[i]
-		}
-	}
-	return nil
+	return byName[name]
 }
 
 func fuzzyContains(haystack, needle string) bool {
@@ -590,6 +712,8 @@ func fuzzyContains(haystack, needle string) bool {
 const galleryPageSize = 48
 
 var youtubeRe = regexp.MustCompile(`^.*(youtu\.be/|v/|u/\w/|embed/|watch\?v=|&v=|shorts/)([^#&?]*).*`)
+
+var tcoRe = regexp.MustCompile(`https://t\.co/\S+`)
 
 func getYoutubeID(rawURL string) string {
 	m := youtubeRe.FindStringSubmatch(rawURL)
@@ -663,6 +787,7 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	galleryFiles := a.mediaIndex.View(platform, username)
+	byName := fileMap(galleryFiles)
 	allFiles := make([]templates.GalleryFileData, 0, len(galleryFiles))
 	for _, f := range galleryFiles {
 		allFiles = append(allFiles, templates.GalleryFileData{
@@ -717,16 +842,12 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			for _, mu := range rp.MediaURLs {
-				if gf := a.findLocalFile(mu, platform, username, galleryFiles); gf != nil {
+				if gf := a.findLocalFile(mu, platform, username, byName); gf != nil {
 					matchingFilenames[gf.Filename] = true
 				}
 			}
-			videoName := rp.TweetID + "_video.mp4"
-			for _, gf := range galleryFiles {
-				if gf.Filename == videoName {
-					matchingFilenames[gf.Filename] = true
-					break
-				}
+			if gf := byName[rp.TweetID+"_video.mp4"]; gf != nil {
+				matchingFilenames[gf.Filename] = true
 			}
 		}
 		filtered := allFiles[:0]
@@ -745,6 +866,7 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp galleryPageParams) {
 	rawPosts := a.mediaIndex.Posts(gp.Platform, gp.Username)
 	files := a.mediaIndex.View(gp.Platform, gp.Username)
+	byName := fileMap(files)
 
 	var allPosts []templates.GalleryPostData
 	for _, p := range rawPosts {
@@ -755,7 +877,7 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 				dateLabel = dateLabel[:10]
 			}
 		}
-		cleanText := regexp.MustCompile(`https://t\.co/\S+`).ReplaceAllString(p.Text, "")
+		cleanText := tcoRe.ReplaceAllString(p.Text, "")
 		cleanText = strings.TrimSpace(cleanText)
 
 		tweetIDSuffix := ""
@@ -769,15 +891,9 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 
 		var localFiles []templates.GalleryPostMediaFile
 		for _, mediaURL := range p.MediaURLs {
-			gf := a.findLocalFile(mediaURL, gp.Platform, gp.Username, files)
-			if gf == nil {
-				videoName := p.TweetID + "_video.mp4"
-				for j := range files {
-					if files[j].Filename == videoName {
-						gf = &files[j]
-						break
-					}
-				}
+			gf := a.findLocalFile(mediaURL, gp.Platform, gp.Username, byName)
+			if gf == nil && p.TweetID != "" {
+				gf = byName[p.TweetID+"_video.mp4"]
 			}
 			if gf != nil {
 				localFiles = append(localFiles, templates.GalleryPostMediaFile{
@@ -869,57 +985,169 @@ type GlobalSearchResponse struct {
 	Files      []GlobalSearchResultFile `json:"files"`
 }
 
+const (
+	minSearchQueryLen  = 2
+	searchResultLimit  = 200
+	searchFTSPostLimit = 100
+)
+
+// ftsQuery turns free text into a safe OR-joined FTS5 MATCH expression.
+func ftsQuery(q string) string {
+	words := strings.Fields(q)
+	for i, w := range words {
+		words[i] = `"` + strings.ReplaceAll(w, `"`, `""`) + `"`
+	}
+	return strings.Join(words, " ")
+}
+
+// ftsMatchedFiles maps local filenames whose post text matches an FTS5 query.
+func (a *App) ftsMatchedFiles(ctx context.Context, platform, username, query string, files []gallery.File) map[string]bool {
+	matched, err := a.st.Posts.SearchFullText(ctx, platform, username, query, searchFTSPostLimit)
+	if err != nil || len(matched) == 0 {
+		return nil
+	}
+	ids := make(map[string]bool, len(matched))
+	for _, m := range matched {
+		ids[m.ExternalID] = true
+	}
+	urlFiles := a.mediaIndex.URLFiles(platform, username)
+	names := make(map[string]bool)
+	for _, p := range a.mediaIndex.Posts(platform, username) {
+		if !ids[p.TweetID] {
+			continue
+		}
+		for _, mu := range p.MediaURLs {
+			if name, ok := urlFiles[mu]; ok {
+				names[name] = true
+			}
+		}
+		if videoName, ok := urlFiles["tweet:"+p.TweetID]; ok {
+			names[videoName] = true
+		}
+	}
+	return names
+}
+
 func (a *App) handleGlobalSearchAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Content-Type", "application/json")
 
 	query := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	cfg := config.GetConfig()
+	resp := GlobalSearchResponse{Query: query, Files: []GlobalSearchResultFile{}}
 
-	var matchingFiles []GlobalSearchResultFile
+	if utf8.RuneCountInString(query) >= minSearchQueryLen {
+		cfg := config.GetConfig()
+		fts := ftsQuery(query)
 
-	for _, acc := range cfg.Accounts {
-		platform := acc.Platform
-		username := acc.Username
-		galleryFiles := a.mediaIndex.View(platform, username)
-		if len(galleryFiles) == 0 {
-			continue
+		matchingFiles := []GlobalSearchResultFile{}
+		for _, acc := range cfg.Accounts {
+			platform := acc.Platform
+			username := acc.Username
+			galleryFiles := a.mediaIndex.View(platform, username)
+			if len(galleryFiles) == 0 {
+				continue
+			}
+
+			filePostText := gallery.GlobalIndex.FilePostText(platform, username)
+			ftsNames := a.ftsMatchedFiles(r.Context(), platform, username, fts, galleryFiles)
+
+			for _, gf := range galleryFiles {
+				caption := filePostText[gf.Filename]
+				matchesQuery := strings.Contains(strings.ToLower(gf.Filename), query) ||
+					strings.Contains(gf.Date, query) ||
+					strings.Contains(strings.ToLower(username), query) ||
+					ftsNames[gf.Filename]
+
+				if matchesQuery {
+					matchingFiles = append(matchingFiles, GlobalSearchResultFile{
+						Platform:     platform,
+						Username:     username,
+						Filename:     gf.Filename,
+						Type:         gf.Type,
+						Date:         gf.Date,
+						Size:         gf.Size,
+						URL:          gf.URL,
+						ThumbnailURL: gf.ThumbnailURL,
+						Caption:      caption,
+					})
+				}
+			}
 		}
 
-		filePostText := gallery.GlobalIndex.FilePostText(platform, username)
+		slices.SortFunc(matchingFiles, func(a, b GlobalSearchResultFile) int {
+			return cmp.Compare(b.Date, a.Date)
+		})
 
-		for _, gf := range galleryFiles {
-			caption := filePostText[gf.Filename]
-			matchesQuery := query == "" ||
-				strings.Contains(strings.ToLower(gf.Filename), query) ||
-				strings.Contains(gf.Date, query) ||
-				fuzzyContains(caption, query) ||
-				strings.Contains(strings.ToLower(username), query)
+		resp.TotalFiles = len(matchingFiles)
+		if len(matchingFiles) > searchResultLimit {
+			matchingFiles = matchingFiles[:searchResultLimit]
+		}
+		resp.Files = matchingFiles
+	}
 
-			if matchesQuery {
-				matchingFiles = append(matchingFiles, GlobalSearchResultFile{
-					Platform:     platform,
-					Username:     username,
-					Filename:     gf.Filename,
-					Type:         gf.Type,
-					Date:         gf.Date,
-					Size:         gf.Size,
-					URL:          gf.URL,
-					ThumbnailURL: gf.ThumbnailURL,
-					Caption:      caption,
-				})
-			}
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+type HashtagCount struct {
+	Tag   string `json:"tag"`
+	Count int    `json:"count"`
+}
+
+type GalleryFiltersResponse struct {
+	Years    []string       `json:"years"`
+	Hashtags []HashtagCount `json:"hashtags"`
+}
+
+func (a *App) handleGalleryMeta(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Content-Type", "application/json")
+
+	platform := r.URL.Query().Get("platform")
+	username := r.URL.Query().Get("username")
+	if platform == "" || username == "" {
+		http.Error(w, "Missing platform or username", http.StatusBadRequest)
+		return
+	}
+
+	years := make(map[string]struct{})
+	tagCounts := make(map[string]int)
+
+	for _, f := range a.mediaIndex.View(platform, username) {
+		if len(f.Date) >= 4 {
+			years[f.Date[:4]] = struct{}{}
+		}
+	}
+	for _, p := range a.mediaIndex.Posts(platform, username) {
+		if len(p.Date) >= 4 {
+			years[p.Date[:4]] = struct{}{}
+		}
+		for _, tag := range gallery.Hashtags(p.Text) {
+			tagCounts[tag]++
 		}
 	}
 
-	slices.SortFunc(matchingFiles, func(a, b GlobalSearchResultFile) int {
-		return cmp.Compare(b.Date, a.Date)
+	sortedYears := make([]string, 0, len(years))
+	for y := range years {
+		sortedYears = append(sortedYears, y)
+	}
+	slices.Sort(sortedYears)
+	slices.Reverse(sortedYears)
+
+	hashtags := make([]HashtagCount, 0, len(tagCounts))
+	for tag, count := range tagCounts {
+		hashtags = append(hashtags, HashtagCount{Tag: tag, Count: count})
+	}
+	slices.SortFunc(hashtags, func(a, b HashtagCount) int {
+		if a.Count != b.Count {
+			return cmp.Compare(b.Count, a.Count)
+		}
+		return cmp.Compare(a.Tag, b.Tag)
 	})
 
-	_ = json.NewEncoder(w).Encode(GlobalSearchResponse{
-		Query:      query,
-		TotalFiles: len(matchingFiles),
-		Files:      matchingFiles,
+	_ = json.NewEncoder(w).Encode(GalleryFiltersResponse{
+		Years:    sortedYears,
+		Hashtags: hashtags,
 	})
 }

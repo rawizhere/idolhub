@@ -1,6 +1,6 @@
 import { state } from "./state.js";
 import { toast, debounce } from "./utils.js";
-import { fetchGalleryMeta } from "./api.js";
+import { fetchGalleryMeta, fetchGalleryFilterMeta } from "./api.js";
 
 const PSWP_VIDEO_W = 1920;
 const PSWP_VIDEO_H = 1080;
@@ -267,9 +267,15 @@ export async function selectGalleryTarget(platform, username) {
   showGalleryState("loading");
 
   try {
-    state.galleryMeta = await fetchGalleryMeta(platform, username);
+    const [meta, filterMeta] = await Promise.all([
+      fetchGalleryMeta(platform, username),
+      fetchGalleryFilterMeta(platform, username)
+    ]);
+    state.galleryMeta = meta;
+    state.galleryFilterMeta = filterMeta;
   } catch (err) {
     console.error("Gallery meta error:", err);
+    state.galleryFilterMeta = null;
   }
 
   const files = state.galleryMeta?.files || [];
@@ -477,21 +483,21 @@ export function populateDateDropdown() {
   const monthList = document.getElementById("month-dropdown-list");
   if (!yearList || !monthList) return;
 
-  const yearsSet = new Set();
-  const files = state.galleryMeta?.files || [];
-  files.forEach(f => {
-    if (f.date && /^\d{4}-\d{2}-\d{2}/.test(f.date)) {
-      yearsSet.add(f.date.slice(0, 4));
-    }
-  });
-  const posts = state.galleryMeta?.posts || [];
-  posts.forEach(p => {
-    if (p.date && /^\d{4}-\d{2}-\d{2}/.test(p.date)) {
-      yearsSet.add(p.date.slice(0, 4));
-    }
-  });
-
-  const sortedYears = Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
+  let sortedYears = state.galleryFilterMeta?.years;
+  if (!sortedYears) {
+    const yearsSet = new Set();
+    (state.galleryMeta?.files || []).forEach(f => {
+      if (f.date && /^\d{4}-\d{2}-\d{2}/.test(f.date)) {
+        yearsSet.add(f.date.slice(0, 4));
+      }
+    });
+    (state.galleryMeta?.posts || []).forEach(p => {
+      if (p.date && /^\d{4}-\d{2}-\d{2}/.test(p.date)) {
+        yearsSet.add(p.date.slice(0, 4));
+      }
+    });
+    sortedYears = Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
+  }
   let yHTML = "";
   sortedYears.forEach(yr => {
     const isChecked = state.selectedYears.has(yr);
@@ -574,14 +580,18 @@ export function populateHashtagDropdown() {
   const dropdown = document.getElementById("hashtag-dropdown");
   if (!container || !dropdown) return;
 
-  const posts = state.galleryMeta?.posts || [];
-  const hashtagsMap = new Map();
-  posts.forEach(post => {
-    const tags = extractHashtags(post.text);
-    tags.forEach(tag => {
-      hashtagsMap.set(tag, (hashtagsMap.get(tag) || 0) + 1);
+  const serverTags = state.galleryFilterMeta?.hashtags;
+  let hashtagsMap;
+  if (serverTags) {
+    hashtagsMap = new Map(serverTags.map(t => [t.tag, t.count]));
+  } else {
+    hashtagsMap = new Map();
+    (state.galleryMeta?.posts || []).forEach(post => {
+      extractHashtags(post.text).forEach(tag => {
+        hashtagsMap.set(tag, (hashtagsMap.get(tag) || 0) + 1);
+      });
     });
-  });
+  }
 
   if (hashtagsMap.size === 0) {
     container.style.display = "none";

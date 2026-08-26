@@ -59,6 +59,12 @@ export async function fetchGalleryMeta(platform, username) {
   return res.json();
 }
 
+export async function fetchGalleryFilterMeta(platform, username) {
+  const res = await fetch(`/api/gallery/meta?platform=${encodeURIComponent(platform)}&username=${encodeURIComponent(username)}`);
+  if (!res.ok) throw new Error("Failed to fetch gallery filter meta");
+  return res.json();
+}
+
 export async function fetchGlobalSearch(query) {
   const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
   if (!res.ok) throw new Error("Failed to perform global search");

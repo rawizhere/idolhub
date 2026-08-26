@@ -19,6 +19,7 @@ export const state = {
   targetPlatformFilter: "all",
 
   galleryMeta: null,
+  galleryFilterMeta: null,
   pswpGrid: null,
   pswpPosts: null,
   currentView: "grid",
