@@ -32,15 +32,42 @@ import (
 	"idolhub/internal/store"
 
 	"github.com/a-h/templ"
+	"golang.org/x/sync/singleflight"
 )
 
 //go:embed all:web/static
 var staticAssets embed.FS
 
+const maxBodyBytes = 1 << 20
+
+var segmentRe = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+func validSegment(s string) bool {
+	return s != "" && s != "." && !strings.Contains(s, "..") && segmentRe.MatchString(s)
+}
+
 type App struct {
 	orch       *orchestrator.Orchestrator
 	mediaIndex *gallery.Index
 	st         *store.Store
+	thumbs     singleflight.Group
+	thumbSem   chan struct{}
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https://img.youtube.com; media-src 'self'; connect-src 'self'")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	return json.NewDecoder(r.Body).Decode(v)
 }
 
 func main() {
@@ -80,6 +107,7 @@ func main() {
 		orch:       orchestrator.GlobalOrchestrator,
 		mediaIndex: gallery.GlobalIndex,
 		st:         st,
+		thumbSem:   make(chan struct{}, 2),
 	}
 
 	mux := http.NewServeMux()
@@ -107,7 +135,12 @@ func main() {
 		port = ":" + port
 	}
 
-	srv := &http.Server{Addr: port, Handler: mux}
+	srv := &http.Server{
+		Addr:              port,
+		Handler:           securityHeaders(mux),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -131,6 +164,9 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
+	sseCtx, sseCancel := context.WithTimeout(shutdownCtx, 5*time.Second)
+	defer sseCancel()
+	app.orch.ShutdownSSE(sseCtx)
 	app.orch.Shutdown()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -172,10 +208,6 @@ func (a *App) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Content-Type", "application/json")
-	if err := config.LoadConfig(a.st); err != nil {
-		slog.Warn("Failed to reload configuration", "error", err)
-	}
-	a.orch.SyncTargets(config.GetConfig().Accounts)
 	_ = json.NewEncoder(w).Encode(config.GetConfig())
 }
 
@@ -184,7 +216,7 @@ func (a *App) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Content-Type", "application/json")
 	var cfg config.Config
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+	if err := decodeJSON(w, r, &cfg); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -321,28 +353,20 @@ func (a *App) handleGallery(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleMedia(w http.ResponseWriter, r *http.Request) {
 	relPath := strings.TrimPrefix(r.URL.Path, "/media/")
-	cleaned := filepath.Clean(relPath)
-	if strings.HasPrefix(cleaned, "..") || filepath.IsAbs(cleaned) {
-		http.Error(w, "Forbidden", http.StatusForbidden)
-		return
-	}
-	filePath := filepath.Join("downloads", filepath.FromSlash(cleaned))
-
-	if strings.Contains(cleaned, "thumbnails"+string(filepath.Separator)) {
-		if _, err := os.Stat(filePath); os.IsNotExist(err) {
-			dir := filepath.Dir(filePath)
-			parentDir := filepath.Dir(dir)
-			base := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
-			candidates := []string{".mp4", ".mov", ".webm", ".jpg", ".jpeg", ".png", ".webp"}
-			for _, cExt := range candidates {
-				srcFile := filepath.Join(parentDir, base+cExt)
-				if _, serr := os.Stat(srcFile); serr == nil {
-					_ = os.MkdirAll(dir, 0755)
-					_ = download.GenerateThumbnail(srcFile, filePath)
-					break
-				}
-			}
+	for _, seg := range strings.Split(relPath, "/") {
+		if !validSegment(seg) {
+			http.NotFound(w, r)
+			return
 		}
+	}
+	filePath := filepath.Join("downloads", filepath.FromSlash(filepath.Clean(relPath)))
+
+	if info, err := os.Stat(filePath); err != nil || info.IsDir() {
+		if err == nil {
+			http.NotFound(w, r)
+			return
+		}
+		a.ensureThumbnail(filePath)
 	}
 
 	ext := strings.ToLower(filepath.Ext(filePath))
@@ -371,6 +395,38 @@ func (a *App) handleMedia(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filePath)
 }
 
+var thumbnailExts = []string{".mp4", ".mov", ".webm", ".jpg", ".jpeg", ".png", ".webp"}
+
+func (a *App) ensureThumbnail(thumbPath string) {
+	if !strings.Contains(thumbPath, "thumbnails"+string(filepath.Separator)) {
+		return
+	}
+	dir := filepath.Dir(thumbPath)
+	parentDir := filepath.Dir(dir)
+	base := strings.TrimSuffix(filepath.Base(thumbPath), filepath.Ext(thumbPath))
+	var srcFile string
+	for _, ext := range thumbnailExts {
+		candidate := filepath.Join(parentDir, base+ext)
+		if _, err := os.Stat(candidate); err == nil {
+			srcFile = candidate
+			break
+		}
+	}
+	if srcFile == "" {
+		return
+	}
+	_, _, _ = a.thumbs.Do(thumbPath, func() (any, error) {
+		a.thumbSem <- struct{}{}
+		defer func() { <-a.thumbSem }()
+		if _, err := os.Stat(thumbPath); err == nil {
+			return nil, nil
+		}
+		_ = os.MkdirAll(dir, 0755)
+		_ = download.GenerateThumbnail(srcFile, thumbPath)
+		return nil, nil
+	})
+}
+
 func (a *App) handleSSE(w http.ResponseWriter, r *http.Request) {
 	a.orch.SSEHandler().ServeHTTP(w, r)
 }
@@ -380,7 +436,7 @@ func (a *App) handleScrapeStart(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 
 	var req scrapeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -435,7 +491,7 @@ func (a *App) handleScrapeCancel(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 
 	var req scrapeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -459,13 +515,17 @@ func (a *App) handleScrapeClear(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 
 	var req clearRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if req.Username == "" || req.Platform == "" {
 		http.Error(w, "Missing platform or username", http.StatusBadRequest)
+		return
+	}
+	if !validSegment(req.Platform) || !validSegment(req.Username) {
+		http.Error(w, "Invalid platform or username", http.StatusBadRequest)
 		return
 	}
 

@@ -220,6 +220,15 @@ func (o *Orchestrator) SSEHandler() http.Handler {
 	return o.sseServer
 }
 
+func (o *Orchestrator) ShutdownSSE(ctx context.Context) {
+	if o.sseServer == nil {
+		return
+	}
+	if err := o.sseServer.Shutdown(ctx); err != nil {
+		slog.Warn("SSE shutdown failed", "error", err)
+	}
+}
+
 func (o *Orchestrator) broadcast(evt SSEEvent) {
 	if o.sseServer == nil {
 		return
@@ -358,6 +367,9 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 
 	lastSync := p.UpdatedAt
 	forceFullSync := forceFull
+	if forceFullSync {
+		lastSync = time.Time{}
+	}
 	if !forceFullSync && (saveText || platform == "tiktok") {
 		storedCount := 0
 		if o.posts != nil {
