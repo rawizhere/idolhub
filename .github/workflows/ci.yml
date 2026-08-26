@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   static-analysis:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -39,7 +39,7 @@ jobs:
           skip-cache: true
 
   css-reproducibility:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -64,7 +64,7 @@ jobs:
         run: diff cmd/parser/web/static/app.css /tmp/app.css
 
   vulnerability-scan:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -81,7 +81,7 @@ jobs:
           govulncheck ./...
 
   unit-tests:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -101,7 +101,7 @@ jobs:
           path: coverage.out
 
   build-and-push:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [static-analysis, vulnerability-scan, unit-tests, css-reproducibility]
     if: github.ref == 'refs/heads/main'
     env:
@@ -156,7 +156,7 @@ jobs:
           cache-from: type=gha
 
   cleanup:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [build-and-push]
     if: needs.build-and-push.result == 'success'
     steps:
