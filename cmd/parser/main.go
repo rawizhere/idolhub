@@ -909,7 +909,7 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 		for _, ytURL := range p.YoutubeURLs {
 			videoID := getYoutubeID(ytURL)
 			if videoID == "" {
-				videoID = ytURL
+				continue
 			}
 			youtubeURLs = append(youtubeURLs, templates.GalleryPostYoutubeURL{
 				URL:     ytURL,
