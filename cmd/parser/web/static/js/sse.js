@@ -1,7 +1,7 @@
 import { state } from "./state.js";
 import { fetchProgress } from "./api.js";
 import { updateAutoUpdateStatus, updateGlobalSyncBadge, renderOverviewDashboard } from "./overview.js";
-import { renderDashboardSidebar, updateDashboardDetails } from "./sidebar.js";
+import { renderDashboardSidebar, updateDashboardDetails, restorePersistedView } from "./sidebar.js";
 import { updateTerminal } from "./dock.js";
 import { toast } from "./utils.js";
 
@@ -127,6 +127,7 @@ export async function loadProgress() {
     updateAutoUpdateStatus();
     updateGlobalSyncBadge();
     renderDashboardSidebar();
+    restorePersistedView();
 
     if (!state.activeTerminalUser) {
       renderOverviewDashboard();
