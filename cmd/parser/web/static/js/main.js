@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { toast } from "./utils.js";
+import { toast, debounce } from "./utils.js";
 import { initSSE, pollProgress } from "./sse.js";
 import { startCountdownTicker, syncAll, renderOverviewDashboard, renderGlobalSearchResults } from "./overview.js";
 import {
@@ -34,7 +34,8 @@ import {
   initDensity,
   preloadPhotoSwipe,
   renderGalleryGrid,
-  renderGalleryPosts
+  renderGalleryPosts,
+  forceLoadMore
 } from "./gallery.js";
 import {
   toggleBottomConsole,
@@ -91,6 +92,8 @@ export function handleGlobalSearch(query) {
   }
 }
 
+const debouncedGlobalSearch = debounce(handleGlobalSearch, 180);
+
 export function clearGlobalSearch() {
   const input = document.getElementById("global-search-input");
   if (input) input.value = "";
@@ -120,8 +123,9 @@ export function scrollToTop() {
 }
 
 Object.assign(window, {
-  handleGlobalSearch,
+  handleGlobalSearch: debouncedGlobalSearch,
   clearGlobalSearch,
+  forceLoadMore,
   filterTargets,
   clearTargetSearch,
   setPlatformFilter,

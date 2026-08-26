@@ -1,6 +1,10 @@
-import { state } from "./state.js";
+import { state, saveUiState } from "./state.js";
 import { toast, debounce } from "./utils.js";
 import { fetchGalleryMeta, fetchGalleryFilterMeta } from "./api.js";
+
+let metaAbortController = null;
+let gridAbortController = null;
+let postsAbortController = null;
 
 const PSWP_VIDEO_W = 1920;
 const PSWP_VIDEO_H = 1080;
@@ -129,54 +133,50 @@ function pswpAddVideoControls(lb) {
   });
 }
 
-export async function initPhotoSwipeGrid() {
-  try {
-    ensurePhotoSwipeCss();
-    if (state.pswpGrid) {
-      try { state.pswpGrid.destroy(); } catch (_) {}
-      state.pswpGrid = null;
-    }
-    const Lightbox = pswpLightboxModule?.default || (await import("/static/vendor/photoswipe-lightbox.esm.min.js")).default;
-    state.pswpGrid = new Lightbox({
-      gallery: "#lg-container, #global-search-grid",
-      children: "a.pswp-item",
-      showHideAnimationType: "none",
-      showAnimationDuration: 0,
-      hideAnimationDuration: 0,
-      bgOpacity: 0.92,
-      pswpModule: () => pswpModule ? Promise.resolve(pswpModule) : import("/static/vendor/photoswipe.esm.min.js"),
-    });
-    pswpAddItemDataFilter(state.pswpGrid);
-    pswpAddVideoControls(state.pswpGrid);
-    state.pswpGrid.init();
-  } catch (err) {
-    console.error("PhotoSwipe grid init error:", err);
+let pswpGridInitPromise = null;
+let pswpPostsInitPromise = null;
+
+async function createPhotoSwipe(isPosts) {
+  ensurePhotoSwipeCss();
+  const key = isPosts ? "pswpPosts" : "pswpGrid";
+  if (state[key]) {
+    try { state[key].destroy(); } catch (_) {}
+    state[key] = null;
   }
+  const Lightbox = pswpLightboxModule?.default || (await import("/static/vendor/photoswipe-lightbox.esm.min.js")).default;
+  const lb = new Lightbox({
+    gallery: isPosts ? "#gallery-posts-list" : "#lg-container, #global-search-grid",
+    children: "a.pswp-item",
+    showHideAnimationType: "none",
+    showAnimationDuration: 0,
+    hideAnimationDuration: 0,
+    bgOpacity: 0.92,
+    pswpModule: () => pswpModule ? Promise.resolve(pswpModule) : import("/static/vendor/photoswipe.esm.min.js"),
+  });
+  pswpAddItemDataFilter(lb);
+  pswpAddVideoControls(lb);
+  lb.init();
+  state[key] = lb;
 }
 
-export async function initPhotoSwipePosts() {
-  try {
-    ensurePhotoSwipeCss();
-    if (state.pswpPosts) {
-      try { state.pswpPosts.destroy(); } catch (_) {}
-      state.pswpPosts = null;
-    }
-    const Lightbox = pswpLightboxModule?.default || (await import("/static/vendor/photoswipe-lightbox.esm.min.js")).default;
-    state.pswpPosts = new Lightbox({
-      gallery: "#gallery-posts-list",
-      children: "a.pswp-item",
-      showHideAnimationType: "none",
-      showAnimationDuration: 0,
-      hideAnimationDuration: 0,
-      bgOpacity: 0.92,
-      pswpModule: () => pswpModule ? Promise.resolve(pswpModule) : import("/static/vendor/photoswipe.esm.min.js"),
+export function initPhotoSwipeGrid() {
+  if (!pswpGridInitPromise) {
+    pswpGridInitPromise = createPhotoSwipe(false).catch(err => {
+      console.error("PhotoSwipe grid init error:", err);
+      pswpGridInitPromise = null;
     });
-    pswpAddItemDataFilter(state.pswpPosts);
-    pswpAddVideoControls(state.pswpPosts);
-    state.pswpPosts.init();
-  } catch (err) {
-    console.error("PhotoSwipe posts init error:", err);
   }
+  return pswpGridInitPromise;
+}
+
+export function initPhotoSwipePosts() {
+  if (!pswpPostsInitPromise) {
+    pswpPostsInitPromise = createPhotoSwipe(true).catch(err => {
+      console.error("PhotoSwipe posts init error:", err);
+      pswpPostsInitPromise = null;
+    });
+  }
+  return pswpPostsInitPromise;
 }
 
 // Global click protection to prevent direct file navigation on any platform
@@ -202,8 +202,8 @@ document.addEventListener("click", (e) => {
       lb.loadAndOpen(idx, { gallery: galleryEl });
     }
   } else {
-    const initFn = isPosts ? initPhotoSwipePosts : initPhotoSwipeGrid;
-    initFn().then(() => {
+    const pending = isPosts ? initPhotoSwipePosts() : initPhotoSwipeGrid();
+    pending.then(() => {
       const currentLb = isPosts ? state.pswpPosts : state.pswpGrid;
       if (currentLb) {
         const items = Array.from(galleryEl.querySelectorAll("a.pswp-item"));
@@ -235,39 +235,64 @@ export function initYoutubePreviews() {
   });
 }
 
+const hoverPreviews = new WeakMap();
+
+function stopHoverPreview(tile) {
+  const p = hoverPreviews.get(tile);
+  if (!p) return;
+  clearTimeout(p.hoverTimer);
+  if (!p.previewEl) return;
+  const el = p.previewEl;
+  p.previewEl = null;
+  el.pause();
+  el.classList.add("opacity-0");
+  clearTimeout(p.removeTimer);
+  p.removeTimer = setTimeout(() => el.remove(), 200);
+}
+
 export function initVideoHoverPreviews() {
-  document.querySelectorAll(".video-preview-tile[data-video-src]").forEach(tile => {
+  const tiles = document.querySelectorAll(".video-preview-tile[data-video-src]");
+  if (!tiles.length) return;
+
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) entry.target.dataset.inViewport = "1";
+      else stopHoverPreview(entry.target);
+    });
+  });
+
+  tiles.forEach(tile => {
     if (tile.dataset.hoverBound === "1") return;
     tile.dataset.hoverBound = "1";
-    const src = tile.dataset.videoSrc;
-    let previewEl = null;
-    let hoverTimer = null;
+    io.observe(tile);
+
+    const p = { previewEl: null, hoverTimer: null, removeTimer: null };
+    hoverPreviews.set(tile, p);
 
     tile.addEventListener("mouseenter", () => {
-      hoverTimer = setTimeout(() => {
-        if (!previewEl) {
-          previewEl = document.createElement("video");
-          previewEl.src = src;
-          previewEl.muted = true;
-          previewEl.loop = true;
-          previewEl.playsInline = true;
-          previewEl.className = "absolute inset-0 w-full h-full object-cover z-10 opacity-0 transition-opacity duration-200 pointer-events-none";
-          tile.appendChild(previewEl);
+      if (tile.dataset.inViewport !== "1") return;
+      clearTimeout(p.removeTimer);
+      p.hoverTimer = setTimeout(() => {
+        let el = p.previewEl;
+        if (!el) {
+          el = document.createElement("video");
+          el.src = tile.dataset.videoSrc;
+          el.muted = true;
+          el.loop = true;
+          el.playsInline = true;
+          el.preload = "metadata";
+          el.className = "absolute inset-0 w-full h-full object-cover z-10 opacity-0 transition-opacity duration-200 pointer-events-none";
+          tile.appendChild(el);
+          p.previewEl = el;
         }
-        previewEl.currentTime = 0;
-        previewEl.play().then(() => {
-          if (previewEl) previewEl.classList.remove("opacity-0");
+        el.currentTime = 0;
+        el.play().then(() => {
+          if (p.previewEl === el) el.classList.remove("opacity-0");
         }).catch(() => {});
       }, 200);
     });
 
-    tile.addEventListener("mouseleave", () => {
-      clearTimeout(hoverTimer);
-      if (previewEl) {
-        previewEl.pause();
-        previewEl.classList.add("opacity-0");
-      }
-    });
+    tile.addEventListener("mouseleave", () => stopHoverPreview(tile));
   });
 }
 
@@ -285,14 +310,18 @@ export async function selectGalleryTarget(platform, username) {
 
   showGalleryState("loading");
 
+  if (metaAbortController) metaAbortController.abort();
+  metaAbortController = new AbortController();
+
   try {
     const [meta, filterMeta] = await Promise.all([
-      fetchGalleryMeta(platform, username),
+      fetchGalleryMeta(platform, username, metaAbortController.signal),
       fetchGalleryFilterMeta(platform, username)
     ]);
     state.galleryMeta = meta;
     state.galleryFilterMeta = filterMeta;
   } catch (err) {
+    if (err.name === "AbortError") return;
     console.error("Gallery meta error:", err);
     state.galleryFilterMeta = null;
   }
@@ -336,12 +365,16 @@ export async function renderGalleryGrid() {
   const container = document.getElementById("lg-container");
   if (!container) return;
   container.innerHTML = "";
+  saveUiState();
+  if (gridAbortController) gridAbortController.abort();
+  gridAbortController = new AbortController();
+  const signal = gridAbortController.signal;
   const year = state.selectedYears.size > 0 ? Array.from(state.selectedYears).join(",") : "all";
   const month = state.selectedMonths.size > 0 ? Array.from(state.selectedMonths).join(",") : "all";
   const tags = state.selectedHashtags.size > 0 ? Array.from(state.selectedHashtags).join(",") : "all";
   const url = `/gallery/${encodeURIComponent(state.activeGalleryPlatform)}/${encodeURIComponent(state.activeGalleryUser)}?filter=${encodeURIComponent(state.currentFilter)}&q=${encodeURIComponent(state.gridSearchQuery)}&sort=${state.postsSortAsc ? "asc" : "desc"}&year=${encodeURIComponent(year)}&month=${encodeURIComponent(month)}&tags=${encodeURIComponent(tags)}`;
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const html = await res.text();
     container.innerHTML = html;
@@ -350,6 +383,7 @@ export async function renderGalleryGrid() {
     initVideoHoverPreviews();
     updateResetButtonVisibility();
   } catch (err) {
+    if (err.name === "AbortError") return;
     console.error("Grid render error:", err);
     container.innerHTML = `<div class="col-span-full text-center text-xs font-semibold text-slate-500 py-12">Failed to load gallery</div>`;
     toast(`Failed to load gallery: ${err.message}`, "error");
@@ -360,12 +394,16 @@ export async function renderGalleryPosts() {
   const container = document.getElementById("gallery-posts-list");
   if (!container) return;
   container.innerHTML = "";
+  saveUiState();
+  if (postsAbortController) postsAbortController.abort();
+  postsAbortController = new AbortController();
+  const signal = postsAbortController.signal;
   const year = state.selectedYears.size > 0 ? Array.from(state.selectedYears).join(",") : "all";
   const month = state.selectedMonths.size > 0 ? Array.from(state.selectedMonths).join(",") : "all";
   const tags = state.selectedHashtags.size > 0 ? Array.from(state.selectedHashtags).join(",") : "all";
   const url = `/gallery/${encodeURIComponent(state.activeGalleryPlatform)}/${encodeURIComponent(state.activeGalleryUser)}/posts/page/1?sort=${state.postsSortAsc ? "asc" : "desc"}&q=${encodeURIComponent(state.postsSearchQuery)}&year=${encodeURIComponent(year)}&month=${encodeURIComponent(month)}&tags=${encodeURIComponent(tags)}`;
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const html = await res.text();
     container.innerHTML = html;
@@ -374,6 +412,7 @@ export async function renderGalleryPosts() {
     initYoutubePreviews();
     updateResetButtonVisibility();
   } catch (err) {
+    if (err.name === "AbortError") return;
     console.error("Posts render error:", err);
     container.innerHTML = `<div class="text-center text-xs font-semibold text-slate-500 py-12">Failed to load posts</div>`;
     toast(`Failed to load posts: ${err.message}`, "error");
@@ -401,20 +440,23 @@ export function switchGalleryView(view) {
   else renderGalleryPosts();
 }
 
-export function applyGalleryFilter(filter) {
-  state.currentFilter = filter;
+export function syncMediaTypePills() {
   document.querySelectorAll("#media-type-pills .gallery-filter-btn").forEach(btn => {
-    const active = btn.dataset.filter === filter;
+    const active = btn.dataset.filter === state.currentFilter;
     btn.className = active
       ? "gallery-filter-btn text-xs px-2.5 py-1 rounded-lg transition-all cursor-pointer bg-[#ff9900] text-black dark:text-black font-bold shadow-2xs border border-[#ff9900]"
       : "gallery-filter-btn text-xs font-medium px-2.5 py-1 rounded-lg transition-all cursor-pointer text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800";
   });
+}
+
+export function applyGalleryFilter(filter) {
+  state.currentFilter = filter;
+  syncMediaTypePills();
   if (state.currentView === "grid") renderGalleryGrid();
   else renderGalleryPosts();
 }
 
-export function togglePostsSort() {
-  state.postsSortAsc = !state.postsSortAsc;
+export function renderPostsSortState() {
   const label = document.getElementById("sort-order-label");
   const icon = document.getElementById("sort-order-icon");
   const btn = document.getElementById("btn-sort-toggle");
@@ -429,6 +471,11 @@ export function togglePostsSort() {
       ? "text-xs font-bold bg-[#ff9900] text-black dark:text-black border border-[#ff9900] px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
       : "text-xs font-semibold bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white border border-slate-200 dark:border-zinc-800 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer";
   }
+}
+
+export function togglePostsSort() {
+  state.postsSortAsc = !state.postsSortAsc;
+  renderPostsSortState();
   if (state.currentView === "grid") renderGalleryGrid();
   else renderGalleryPosts();
 }
@@ -673,4 +720,17 @@ export function toggleDensity() {
   localStorage.setItem("idolhub-density", state.gridDensity);
   initDensity();
   toast(`Grid density: ${state.gridDensity}`, "info", 1200);
+}
+
+export function forceLoadMore(sentinel) {
+  if (!sentinel || sentinel.dataset.loading === "1") return;
+  if (sentinel.classList.contains("htmx-request")) return;
+  const url = sentinel.getAttribute("hx-get");
+  if (!url) return;
+  if (!window.htmx) {
+    toast("Cannot load more right now", "error");
+    return;
+  }
+  sentinel.dataset.loading = "1";
+  window.htmx.ajax("GET", url, { target: sentinel, swap: "outerHTML" });
 }

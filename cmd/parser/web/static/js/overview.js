@@ -3,6 +3,8 @@ import { toast, escapeHtml, platformBadgeClass, safeUrl } from "./utils.js";
 import { startSyncApi, fetchGlobalSearch } from "./api.js";
 import { initPhotoSwipeGrid, initVideoHoverPreviews } from "./gallery.js";
 
+let globalSearchAbortController = null;
+
 export function computeCountdown() {
   if (state.autoSyncInterval <= 0 || !state.lastSyncTime) return null;
   const next = new Date(state.lastSyncTime).getTime() + state.autoSyncInterval * 3600000;
@@ -81,8 +83,11 @@ export async function renderGlobalSearchResults(query) {
     </div>
   `;
 
+  if (globalSearchAbortController) globalSearchAbortController.abort();
+  globalSearchAbortController = new AbortController();
+
   try {
-    const data = await fetchGlobalSearch(q);
+    const data = await fetchGlobalSearch(q, globalSearchAbortController.signal);
     const files = data.files || [];
 
     if (files.length === 0) {
@@ -166,6 +171,7 @@ export async function renderGlobalSearchResults(query) {
     initPhotoSwipeGrid();
     initVideoHoverPreviews();
   } catch (err) {
+    if (err.name === "AbortError") return;
     console.error("Global search render error:", err);
     container.innerHTML = `<div class="py-12 text-center text-xs font-semibold text-rose-500">Failed to load search results: ${escapeHtml(err.message)}</div>`;
   }

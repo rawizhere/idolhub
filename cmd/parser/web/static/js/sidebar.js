@@ -3,7 +3,17 @@ import { timeAgo, toast, confirmDialog, escapeHtml, platformBadgeClass } from ".
 import { startSyncApi, cancelSyncApi, clearFolderApi, fetchConfig, postConfig } from "./api.js";
 import { updateTerminal } from "./dock.js";
 import { renderOverviewDashboard } from "./overview.js";
-import { selectGalleryTarget } from "./gallery.js";
+import { loadUiState, saveUiState } from "./state.js";
+import {
+  selectGalleryTarget,
+  switchGalleryView,
+  syncMediaTypePills,
+  populateDateDropdown,
+  populateHashtagDropdown,
+  updateDateFilterLabel,
+  updateHashtagLabel,
+  renderPostsSortState
+} from "./gallery.js";
 
 export function filterTargets() {
   const input = document.getElementById("target-search-input");
@@ -175,12 +185,47 @@ export function selectTerminalUser(username) {
 
   updateDashboardDetails();
   updateTerminal();
-  selectGalleryTarget(target.platform, target.username);
+  saveUiState();
+  return selectGalleryTarget(target.platform, target.username);
+}
+
+let uiRestored = false;
+
+export async function restorePersistedView() {
+  if (uiRestored) return;
+  uiRestored = true;
+  const saved = loadUiState();
+  if (!saved || !saved.activeTerminalUser) return;
+  const target = state.cachedProgress.find(t => t.username === saved.activeTerminalUser);
+  if (!target) return;
+
+  await selectTerminalUser(saved.activeTerminalUser);
+
+  state.currentView = saved.currentView === "posts" ? "posts" : "grid";
+  state.currentFilter = saved.currentFilter || "all";
+  state.gridSearchQuery = saved.gridSearchQuery || "";
+  state.postsSearchQuery = saved.postsSearchQuery || "";
+  state.targetPlatformFilter = saved.targetPlatformFilter || "all";
+  (Array.isArray(saved.selectedYears) ? saved.selectedYears : []).forEach(y => state.selectedYears.add(String(y)));
+  (Array.isArray(saved.selectedMonths) ? saved.selectedMonths : []).forEach(m => state.selectedMonths.add(String(m)));
+  (Array.isArray(saved.selectedHashtags) ? saved.selectedHashtags : []).forEach(t => state.selectedHashtags.add(String(t)));
+
+  populateDateDropdown();
+  populateHashtagDropdown();
+  updateDateFilterLabel();
+  updateHashtagLabel();
+  renderPostsSortState();
+  switchGalleryView(state.currentView);
+  syncMediaTypePills();
+
+  const galleryInput = document.getElementById("gallery-search-input");
+  if (galleryInput && state.gridSearchQuery) galleryInput.value = state.gridSearchQuery;
 }
 
 export function goToOverview() {
   state.activeTerminalUser = null;
   state.activeGalleryUser = null;
+  saveUiState();
   const breadcrumb = document.getElementById("header-breadcrumb-label");
   if (breadcrumb) breadcrumb.textContent = "Overview";
 

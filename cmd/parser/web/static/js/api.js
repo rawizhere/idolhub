@@ -53,8 +53,8 @@ export async function clearFolderApi(platform, username) {
   return res.json();
 }
 
-export async function fetchGalleryMeta(platform, username) {
-  const res = await fetch(`/api/gallery?platform=${encodeURIComponent(platform)}&username=${encodeURIComponent(username)}`);
+export async function fetchGalleryMeta(platform, username, signal) {
+  const res = await fetch(`/api/gallery?platform=${encodeURIComponent(platform)}&username=${encodeURIComponent(username)}`, { signal });
   if (!res.ok) throw new Error("Failed to fetch gallery metadata");
   return res.json();
 }
@@ -65,8 +65,8 @@ export async function fetchGalleryFilterMeta(platform, username) {
   return res.json();
 }
 
-export async function fetchGlobalSearch(query) {
-  const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+export async function fetchGlobalSearch(query, signal) {
+  const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`, { signal });
   if (!res.ok) throw new Error("Failed to perform global search");
   return res.json();
 }
