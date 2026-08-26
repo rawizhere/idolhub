@@ -178,7 +178,6 @@ Object.assign(window, {
   fullResyncTarget,
   toggleSettingsModal,
   openTokenSettings,
-  saveSettings,
   syncAll,
   toggleTheme,
   scrollToTop
@@ -220,6 +219,25 @@ window.addEventListener("open-edit-modal", (e) => {
   modal.focus();
 });
 
+document.addEventListener("click", (e) => {
+  const actionEl = e.target.closest("[data-sidebar-action],[data-overview-action]");
+  if (actionEl) {
+    e.preventDefault();
+    e.stopPropagation();
+    const action = actionEl.dataset.sidebarAction || actionEl.dataset.overviewAction;
+    if (action === "quick-sync") quickSyncTarget(actionEl.dataset.username);
+    else if (action === "open-token-settings") openTokenSettings(actionEl.dataset.platform);
+    else if (action === "sync") startSync(actionEl.dataset.username);
+    return;
+  }
+  const sel = e.target.closest("[data-select-target]");
+  if (sel) {
+    e.preventDefault();
+    e.stopPropagation();
+    selectTerminalUser(sel.dataset.selectTarget);
+  }
+}, true);
+
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
   initDensity();
@@ -255,21 +273,42 @@ document.addEventListener("DOMContentLoaded", () => {
 
   window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      let closed = false;
-      const cmdPalette = document.getElementById("cmd-palette-modal");
-      if (cmdPalette && cmdPalette.style.display === "flex") { cmdPalette.style.display = "none"; closed = true; }
-      const editModal = document.getElementById("edit-modal");
-      if (editModal && editModal.style.display === "flex") { editModal.style.display = "none"; closed = true; }
-      const settingsModal = document.getElementById("settings-modal");
-      if (settingsModal && settingsModal.style.display === "flex") { settingsModal.style.display = "none"; closed = true; }
-      const dateDropdown = document.getElementById("date-filter-dropdown");
-      if (dateDropdown && !dateDropdown.classList.contains("hidden")) { dateDropdown.classList.add("hidden"); closed = true; }
-      const hashtagDropdown = document.getElementById("hashtag-dropdown");
-      if (hashtagDropdown && !hashtagDropdown.classList.contains("hidden")) { hashtagDropdown.classList.add("hidden"); closed = true; }
-      if (state.dockConsoleOpen) { toggleBottomConsole(false); closed = true; }
-      if (state.pswpGrid && state.pswpGrid.pswp) { state.pswpGrid.pswp.close(); closed = true; }
-      if (state.pswpPosts && state.pswpPosts.pswp) { state.pswpPosts.pswp.close(); closed = true; }
-      if (closed) { e.preventDefault(); e.stopPropagation(); return; }
+      const confirmMount = document.getElementById("confirm-mount");
+      if (confirmMount && confirmMount.childElementCount > 0) return;
+
+      const pswp = (state.pswpGrid && state.pswpGrid.pswp) || (state.pswpPosts && state.pswpPosts.pswp);
+      if (pswp) {
+        e.preventDefault();
+        e.stopPropagation();
+        pswp.close();
+        return;
+      }
+
+      for (const id of ["cmd-palette-modal", "edit-modal", "settings-modal"]) {
+        const el = document.getElementById(id);
+        if (el && el.style.display === "flex") {
+          el.style.display = "none";
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+      }
+
+      for (const id of ["date-filter-dropdown", "hashtag-dropdown"]) {
+        const el = document.getElementById(id);
+        if (el && !el.classList.contains("hidden")) {
+          el.classList.add("hidden");
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+      }
+
+      if (state.dockConsoleOpen) {
+        toggleBottomConsole(false);
+        e.preventDefault();
+        e.stopPropagation();
+      }
     }
 
     if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {

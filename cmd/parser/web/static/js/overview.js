@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { toast, escapeHtml } from "./utils.js";
+import { toast, escapeHtml, platformBadgeClass, safeUrl } from "./utils.js";
 import { startSyncApi, fetchGlobalSearch } from "./api.js";
 import { initPhotoSwipeGrid, initVideoHoverPreviews } from "./gallery.js";
 
@@ -103,19 +103,19 @@ export async function renderGlobalSearchResults(query) {
 
     let cardsHtml = "";
     files.forEach(f => {
-      let platBadge = "bg-pink-50 dark:bg-pink-950/50 text-pink-700 dark:text-pink-400 border-pink-200 dark:border-pink-800";
-      if (f.platform === "twitter") platBadge = "bg-sky-50 dark:bg-sky-950/50 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800";
-      else if (f.platform === "tiktok") platBadge = "bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-300 dark:border-zinc-700";
+      const fileUrl = escapeHtml(safeUrl(f.url));
+      const thumbUrl = escapeHtml(safeUrl(f.thumbnail_url));
+      const platBadge = platformBadgeClass(f.platform);
 
       cardsHtml += `
         <div class="gallery-item group relative flex flex-col overflow-hidden rounded-xl border border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900 shadow-xs hover:border-[#ff9900]/50 transition-all duration-200">
-          <a class="pswp-item block w-full relative aspect-square overflow-hidden cursor-pointer bg-slate-100 dark:bg-zinc-950 video-preview-tile" href="${f.url}" title="${escapeHtml(f.filename)}" ${f.type === 'video' ? `data-pswp-type="video" data-video-src="${f.url}"` : ''}>
-            <img src="${f.thumbnail_url}" alt="${escapeHtml(f.filename)}" loading="lazy" class="w-full h-full object-cover group-hover:scale-103 transition-transform duration-200 block" />
+          <a class="pswp-item block w-full relative aspect-square overflow-hidden cursor-pointer bg-slate-100 dark:bg-zinc-950 video-preview-tile" href="${fileUrl}" title="${escapeHtml(f.filename)}" ${f.type === 'video' ? `data-pswp-type="video" data-video-src="${fileUrl}"` : ''}>
+            <img src="${thumbUrl}" alt="${escapeHtml(f.filename)}" loading="lazy" class="w-full h-full object-cover group-hover:scale-103 transition-transform duration-200 block" />
             
             <!-- Top Target & Date Badges -->
             <div class="absolute top-2 inset-x-2 flex items-center justify-between pointer-events-none z-20">
-              <span onclick="event.preventDefault(); event.stopPropagation(); window.selectTerminalUser('${f.username}')" class="pointer-events-auto text-[9px] font-bold px-1.5 py-0.5 rounded border backdrop-blur-xs shadow-xs cursor-pointer hover:scale-105 transition-transform ${platBadge}">
-                @${f.username}
+              <span data-select-target="${escapeHtml(f.username)}" class="pointer-events-auto text-[9px] font-bold px-1.5 py-0.5 rounded border backdrop-blur-xs shadow-xs cursor-pointer hover:scale-105 transition-transform ${platBadge}">
+                @${escapeHtml(f.username)}
               </span>
               ${f.date ? `<span class="text-[9px] font-mono font-bold bg-black/75 text-white px-1.5 py-0.5 rounded backdrop-blur-xs">${f.date}</span>` : ''}
             </div>
@@ -211,11 +211,11 @@ export function renderOverviewDashboard() {
       : "Never";
 
     tableRows += `
-      <tr class="hover:bg-slate-100/80 dark:hover:bg-zinc-800/80 transition-colors border-b border-slate-100 dark:border-zinc-800 cursor-pointer group" onclick="window.selectTerminalUser('${target.username}')">
+      <tr class="hover:bg-slate-100/80 dark:hover:bg-zinc-800/80 transition-colors border-b border-slate-100 dark:border-zinc-800 cursor-pointer group" data-select-target="${escapeHtml(target.username)}">
         <td class="px-5 py-3 whitespace-nowrap">
           <div class="flex items-center gap-2.5">
-            <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${target.platform === 'instagram' ? 'bg-pink-50 dark:bg-pink-950/40 text-pink-600 dark:text-pink-400 border-pink-200 dark:border-pink-800' : (target.platform === 'twitter' ? 'bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 border-sky-200 dark:border-sky-800' : 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-300 dark:border-zinc-700')}">${target.platform}</span>
-            <span class="text-xs font-bold text-slate-800 dark:text-zinc-100 group-hover:text-[#ff9900] transition-colors">@${target.username}</span>
+            <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${platformBadgeClass(target.platform)}">${escapeHtml(target.platform)}</span>
+            <span class="text-xs font-bold text-slate-800 dark:text-zinc-100 group-hover:text-[#ff9900] transition-colors">@${escapeHtml(target.username)}</span>
           </div>
         </td>
         <td class="px-5 py-3 whitespace-nowrap">
@@ -228,7 +228,7 @@ export function renderOverviewDashboard() {
           ${target.new_count > 0 ? `<span class="ml-1.5 inline-flex items-center text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800/80">+${target.new_count} new</span>` : ''}
         </td>
         <td class="px-5 py-3 whitespace-nowrap text-right">
-          <button onclick="event.stopPropagation(); window.startSync('${target.username}', false)" class="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 hover:text-slate-900 dark:text-zinc-200 dark:hover:text-white transition-colors cursor-pointer border border-transparent dark:border-zinc-700" ${isRunning ? 'disabled' : ''}>
+          <button data-overview-action="sync" data-username="${escapeHtml(target.username)}" class="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 hover:text-slate-900 dark:text-zinc-200 dark:hover:text-white transition-colors cursor-pointer border border-transparent dark:border-zinc-700" ${isRunning ? 'disabled' : ''}>
             ${isRunning ? 'Syncing...' : 'Sync'}
           </button>
         </td>

@@ -112,11 +112,17 @@ export function removeNewFilter(idx) {
 
 export function renderNewFilters() {
   const list = document.getElementById("new-filters-list");
+  const noLabel = document.getElementById("no-filters-label");
   if (!list) return;
-  list.innerHTML = "";
+  list.querySelectorAll(".new-filter-chip").forEach(e => e.remove());
+  if (state.newFilters.length === 0) {
+    if (noLabel) noLabel.style.display = "inline";
+    return;
+  }
+  if (noLabel) noLabel.style.display = "none";
   state.newFilters.forEach((tag, idx) => {
     const chip = document.createElement("span");
-    chip.className = "inline-flex items-center gap-1 bg-[#ff9900]/15 border border-[#ff9900]/40 text-[#ff9900] text-[10px] font-semibold px-2 py-0.5 rounded-full";
+    chip.className = "new-filter-chip inline-flex items-center gap-1 bg-[#ff9900]/15 border border-[#ff9900]/40 text-[#ff9900] text-[10px] font-semibold px-2 py-0.5 rounded-full";
     chip.innerHTML = `<span>${escapeHtml(tag)}</span><button type="button" class="hover:text-white font-bold cursor-pointer" onclick="window.removeNewFilter(${idx})">&times;</button>`;
     list.appendChild(chip);
   });
@@ -212,36 +218,39 @@ export function renderEditFilters() {
 }
 
 export async function saveEditChanges() {
-  const username = state.editConfig.username;
-  const platform = state.editConfig.platform;
-  const saveText = document.getElementById("edit-save-text").checked;
-  const skipRetweets = document.getElementById("edit-skip-retweets").checked;
-  const downloadPhotos = document.getElementById("edit-download-photos").checked;
-  const downloadVideos = document.getElementById("edit-download-videos").checked;
-  const filters = [...state.editConfig.filters];
+  const btn = document.getElementById("btn-save-edit");
+  await withLoading(btn, async () => {
+    const username = state.editConfig.username;
+    const platform = state.editConfig.platform;
+    const saveText = document.getElementById("edit-save-text").checked;
+    const skipRetweets = document.getElementById("edit-skip-retweets").checked;
+    const downloadPhotos = document.getElementById("edit-download-photos").checked;
+    const downloadVideos = document.getElementById("edit-download-videos").checked;
+    const filters = [...state.editConfig.filters];
 
-  try {
-    const current = await fetchConfig();
-    const idx = current.accounts.findIndex(acc => acc.username.toLowerCase() === username.toLowerCase());
-    if (idx !== -1) {
-      current.accounts[idx] = {
-        username,
-        platform,
-        save_text: saveText,
-        skip_retweets: skipRetweets,
-        download_photos: downloadPhotos,
-        download_videos: downloadVideos,
-        filters: filters
-      };
-      await postConfig(current);
-      toast(`Updated @${username}`, "success");
-      loadProgress();
-      selectTerminalUser(username);
+    try {
+      const current = await fetchConfig();
+      const idx = current.accounts.findIndex(acc => acc.username.toLowerCase() === username.toLowerCase());
+      if (idx !== -1) {
+        current.accounts[idx] = {
+          username,
+          platform,
+          save_text: saveText,
+          skip_retweets: skipRetweets,
+          download_photos: downloadPhotos,
+          download_videos: downloadVideos,
+          filters: filters
+        };
+        await postConfig(current);
+        toast(`Updated @${username}`, "success");
+        loadProgress();
+        selectTerminalUser(username);
+      }
+    } catch (err) {
+      toast(`Failed to update @${username}: ${err.message}`, "error");
     }
-  } catch (err) {
-    toast(`Failed to update @${username}: ${err.message}`, "error");
-  }
-  closeEditModal();
+    closeEditModal();
+  });
 }
 
 export async function fullResyncTarget() {
@@ -294,6 +303,7 @@ export async function loadConfig() {
     document.getElementById("auto-sync-interval").value = data.auto_sync_interval || 0;
   } catch (err) {
     console.error("Config load error:", err);
+    toast(`Failed to load settings: ${err.message}`, "error");
   }
 }
 

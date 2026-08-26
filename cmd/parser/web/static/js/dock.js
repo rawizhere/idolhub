@@ -76,6 +76,10 @@ export function copyTerminalLogs() {
     toast("No logs available to copy.", "info");
     return;
   }
+  if (!navigator.clipboard || !navigator.clipboard.writeText) {
+    toast("Clipboard is not available in this browser.", "error");
+    return;
+  }
   const text = lines.map(l => `[${new Date(l.timestamp).toLocaleTimeString()}] [${l.level}] ${l.message}`).join("\n");
   navigator.clipboard.writeText(text).then(
     () => toast("Logs copied to clipboard.", "success", 2000),

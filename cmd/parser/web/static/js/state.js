@@ -8,6 +8,7 @@ export const state = {
   countdownTicker: null,
   sseSource: null,
   sseConnected: false,
+  sseReconnectTimeout: null,
 
   terminalLevel: "all",
   globalLogs: [],

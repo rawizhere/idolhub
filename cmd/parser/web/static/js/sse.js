@@ -3,22 +3,35 @@ import { fetchProgress } from "./api.js";
 import { updateAutoUpdateStatus, updateGlobalSyncBadge, renderOverviewDashboard } from "./overview.js";
 import { renderDashboardSidebar, updateDashboardDetails } from "./sidebar.js";
 import { updateTerminal } from "./dock.js";
+import { toast } from "./utils.js";
 
 export async function pollProgress() {
   if (state.sseConnected) return;
+  if (state.progressPollTimeout) return;
   try {
     await loadProgress();
   } catch (err) {
     console.error("Error loading progress:", err);
   }
-  if (state.sseConnected) return;
+  if (state.sseConnected || state.progressPollTimeout) return;
   const isRunning = state.cachedProgress.some(t => t.status === "running" || t.status === "queued");
   const delay = isRunning ? 1500 : 5000;
-  state.progressPollTimeout = setTimeout(pollProgress, delay);
+  state.progressPollTimeout = setTimeout(() => {
+    state.progressPollTimeout = null;
+    pollProgress();
+  }, delay);
+}
+
+function scheduleSSEReconnect() {
+  if (state.sseReconnectTimeout) return;
+  state.sseReconnectTimeout = setTimeout(() => {
+    state.sseReconnectTimeout = null;
+    initSSE();
+  }, 10000);
 }
 
 export function initSSE() {
-  if (state.sseSource) return;
+  if (state.sseSource || state.sseReconnectTimeout) return;
   try {
     state.sseSource = new EventSource("/api/events");
   } catch (e) {
@@ -31,6 +44,10 @@ export function initSSE() {
     if (state.progressPollTimeout) {
       clearTimeout(state.progressPollTimeout);
       state.progressPollTimeout = null;
+    }
+    if (state.sseReconnectTimeout) {
+      clearTimeout(state.sseReconnectTimeout);
+      state.sseReconnectTimeout = null;
     }
     loadProgress();
   });
@@ -49,7 +66,7 @@ export function initSSE() {
     if (state.sseSource) state.sseSource.close();
     state.sseSource = null;
     if (!state.progressPollTimeout) pollProgress();
-    setTimeout(() => initSSE(), 10000);
+    scheduleSSEReconnect();
   };
 }
 
@@ -119,5 +136,6 @@ export async function loadProgress() {
     updateTerminal();
   } catch (err) {
     console.error("Progress fetch error:", err);
+    toast(`Failed to load progress: ${err.message}`, "error");
   }
 }

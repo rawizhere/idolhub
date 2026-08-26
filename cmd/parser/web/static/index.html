@@ -399,7 +399,7 @@
       </div>
       <div class="flex flex-col gap-2 pt-2 border-t border-slate-200 dark:border-zinc-800/80">
         <div class="flex gap-2">
-          <button class="flex-1 bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold text-xs py-2.5 rounded-lg transition-all cursor-pointer" onclick="saveEditChanges()" type="button">Save Changes</button>
+          <button class="flex-1 bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold text-xs py-2.5 rounded-lg transition-all cursor-pointer" id="btn-save-edit" onclick="saveEditChanges()" type="button">Save Changes</button>
           <button class="bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-semibold text-xs px-4 py-2.5 rounded-lg transition-all cursor-pointer" onclick="closeEditModal()" type="button">Cancel</button>
         </div>
         <button class="w-full border border-red-300 dark:border-red-500/40 hover:bg-red-50 dark:hover:bg-red-500/10 text-red-600 dark:text-red-400 font-semibold text-xs py-2 rounded-lg transition-all cursor-pointer" onclick="fullResyncTarget()" type="button">Force Full Resync</button>
@@ -473,7 +473,7 @@
       </div>
 
       <div class="flex gap-3 pt-3 border-t border-slate-200 dark:border-zinc-800/80">
-        <button class="flex-1 bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold text-xs py-3 rounded-lg transition-all cursor-pointer flex items-center justify-center shadow-xs" id="btn-save-settings" onclick="saveSettings()" type="submit">
+        <button class="flex-1 bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold text-xs py-3 rounded-lg transition-all cursor-pointer flex items-center justify-center shadow-xs" id="btn-save-settings" type="submit">
           Save Settings
         </button>
         <button class="bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-semibold text-xs px-6 py-3 rounded-lg transition-all cursor-pointer" onclick="document.getElementById('settings-modal').style.display='none'" type="button">
