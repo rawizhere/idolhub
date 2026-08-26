@@ -79,6 +79,7 @@ type Orchestrator struct {
 	mediaIndex     *gallery.Index
 	accounts       *store.AccountStore
 	posts          *store.PostStore
+	twitterMu      sync.Mutex
 	jobCh          chan scrapeJob
 	logEvents      chan logEvent
 }
@@ -482,6 +483,10 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	if !ok {
 		err = fmt.Errorf("unknown platform: %s", platform)
 	} else {
+		if platform == "twitter" {
+			o.twitterMu.Lock()
+			defer o.twitterMu.Unlock()
+		}
 		err = s.Scrape(timeoutCtx, target, opts)
 	}
 
