@@ -1,7 +1,8 @@
 # ---- Tailwind CSS ----
 FROM node:22-alpine AS tailwind
 WORKDIR /app
-RUN npm init -y && npm install tailwindcss @tailwindcss/cli
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY cmd/parser/web/ cmd/parser/web/
 RUN for f in cmd/parser/web/templates/*.templ; do \
       [ -f "$f" ] && cp "$f" "${f}.html"; \
