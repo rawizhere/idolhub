@@ -29,6 +29,14 @@ function pswpUpdateVideoSize(content, video) {
 let pswpLightboxModule = null;
 let pswpModule = null;
 
+function ensurePhotoSwipeCss() {
+  if (document.querySelector('link[href="/static/vendor/photoswipe.min.css"]')) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = "/static/vendor/photoswipe.min.css";
+  document.head.appendChild(link);
+}
+
 export async function preloadPhotoSwipe() {
   if (pswpLightboxModule && pswpModule) return;
   try {
@@ -123,6 +131,7 @@ function pswpAddVideoControls(lb) {
 
 export async function initPhotoSwipeGrid() {
   try {
+    ensurePhotoSwipeCss();
     if (state.pswpGrid) {
       try { state.pswpGrid.destroy(); } catch (_) {}
       state.pswpGrid = null;
@@ -147,6 +156,7 @@ export async function initPhotoSwipeGrid() {
 
 export async function initPhotoSwipePosts() {
   try {
+    ensurePhotoSwipeCss();
     if (state.pswpPosts) {
       try { state.pswpPosts.destroy(); } catch (_) {}
       state.pswpPosts = null;

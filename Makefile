@@ -9,11 +9,8 @@ templ:
 	$(GO) tool templ generate -path ./cmd/parser/web/templates/
 
 css:
-	rm -rf node_modules package.json package-lock.json
-	npm init -y > /dev/null
-	npm install -q tailwindcss @tailwindcss/cli
+	npm ci --silent
 	npx @tailwindcss/cli -i cmd/parser/web/static/input.css -o cmd/parser/web/static/app.css --minify
-	rm -rf node_modules package.json package-lock.json
 
 build: templ css
 	CGO_ENABLED=0 $(GO) build -ldflags="-s -w" -o $(BIN) ./cmd/parser
