@@ -15,6 +15,23 @@ export function escapeHtml(text) {
     .replace(/\n/g, "<br>");
 }
 
+const PLATFORM_BADGE_CLASSES = {
+  instagram: "bg-pink-50 dark:bg-pink-950/40 text-pink-700 dark:text-pink-400 border-pink-200 dark:border-pink-800",
+  twitter: "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800",
+  tiktok: "bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-300 dark:border-zinc-700"
+};
+
+export function platformBadgeClass(platform) {
+  return PLATFORM_BADGE_CLASSES[platform] || PLATFORM_BADGE_CLASSES.tiktok;
+}
+
+export function safeUrl(url) {
+  const val = String(url || "");
+  if (/^https?:\/\//i.test(val)) return val;
+  if (val.startsWith("/")) return val;
+  return "#";
+}
+
 export function withLoading(btn, fn) {
   if (!btn) return fn();
   if (btn.dataset.loading === "1") return Promise.resolve();

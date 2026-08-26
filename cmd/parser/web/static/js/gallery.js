@@ -307,6 +307,7 @@ export async function renderGalleryGrid() {
   const url = `/gallery/${encodeURIComponent(state.activeGalleryPlatform)}/${encodeURIComponent(state.activeGalleryUser)}?filter=${encodeURIComponent(state.currentFilter)}&q=${encodeURIComponent(state.gridSearchQuery)}&sort=${state.postsSortAsc ? "asc" : "desc"}&year=${encodeURIComponent(year)}&month=${encodeURIComponent(month)}&tags=${encodeURIComponent(tags)}`;
   try {
     const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const html = await res.text();
     container.innerHTML = html;
     if (window.htmx) window.htmx.process(container);
@@ -316,6 +317,7 @@ export async function renderGalleryGrid() {
   } catch (err) {
     console.error("Grid render error:", err);
     container.innerHTML = `<div class="col-span-full text-center text-xs font-semibold text-slate-500 py-12">Failed to load gallery</div>`;
+    toast(`Failed to load gallery: ${err.message}`, "error");
   }
 }
 
@@ -329,6 +331,7 @@ export async function renderGalleryPosts() {
   const url = `/gallery/${encodeURIComponent(state.activeGalleryPlatform)}/${encodeURIComponent(state.activeGalleryUser)}/posts/page/1?sort=${state.postsSortAsc ? "asc" : "desc"}&q=${encodeURIComponent(state.postsSearchQuery)}&year=${encodeURIComponent(year)}&month=${encodeURIComponent(month)}&tags=${encodeURIComponent(tags)}`;
   try {
     const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const html = await res.text();
     container.innerHTML = html;
     if (window.htmx) window.htmx.process(container);
@@ -337,6 +340,7 @@ export async function renderGalleryPosts() {
   } catch (err) {
     console.error("Posts render error:", err);
     container.innerHTML = `<div class="text-center text-xs font-semibold text-slate-500 py-12">Failed to load posts</div>`;
+    toast(`Failed to load posts: ${err.message}`, "error");
   }
 }
 
@@ -449,15 +453,13 @@ export function resetAllFilters() {
 export function updateResetButtonVisibility() {
   const resetBtn = document.getElementById("btn-reset-filters");
   if (!resetBtn) return;
-  const isDirty = state.currentFilter !== "all" || state.gridSearchQuery !== "" || state.selectedYears.size > 0 || state.selectedMonths.size > 0 || state.selectedHashtags.size > 0 || state.postsSortAsc;
+  const isDirty = state.currentFilter !== "all" || state.gridSearchQuery !== "" || state.postsSearchQuery !== "" || state.selectedYears.size > 0 || state.selectedMonths.size > 0 || state.selectedHashtags.size > 0 || state.postsSortAsc;
   resetBtn.classList.toggle("hidden", !isDirty);
 }
 
 export function toggleDropdown(id) {
   const el = document.getElementById(id);
-  if (!el) return;
-  if (window.event) window.event.stopPropagation();
-  el.classList.toggle("hidden");
+  if (el) el.classList.toggle("hidden");
 }
 
 export function populateDateDropdown() {

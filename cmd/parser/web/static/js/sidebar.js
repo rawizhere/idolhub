@@ -1,5 +1,5 @@
 import { state } from "./state.js";
-import { timeAgo, toast, confirmDialog } from "./utils.js";
+import { timeAgo, toast, confirmDialog, escapeHtml, platformBadgeClass } from "./utils.js";
 import { startSyncApi, cancelSyncApi, clearFolderApi, fetchConfig, postConfig } from "./api.js";
 import { updateTerminal } from "./dock.js";
 import { renderOverviewDashboard } from "./overview.js";
@@ -58,13 +58,6 @@ export function renderDashboardSidebar() {
       ? "bg-[#ff9900]/15 border-[#ff9900]/50 text-slate-900 dark:text-white font-semibold shadow-xs"
       : "bg-white hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800 border-slate-200 dark:border-zinc-800 text-slate-700 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white";
 
-    let platformBadgeClass = "bg-pink-50 dark:bg-pink-950/40 text-pink-700 dark:text-pink-400 border-pink-200 dark:border-pink-800";
-    if (target.platform === "twitter") {
-      platformBadgeClass = "bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800";
-    } else if (target.platform === "tiktok") {
-      platformBadgeClass = "bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-300 dark:border-zinc-700";
-    }
-
     let statusDotClass = "bg-slate-400";
     if (target.status === "running") statusDotClass = "bg-[#ff9900] animate-pulse";
     else if (target.status === "queued") statusDotClass = "bg-amber-500 animate-pulse";
@@ -75,24 +68,24 @@ export function renderDashboardSidebar() {
 
     const syncButtonHTML = isRunning
       ? `<div class="w-6 h-6 rounded-md bg-amber-500/10 flex items-center justify-center text-[#ff9900]"><svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg></div>`
-      : `<button onclick="window.quickSyncTarget(event, '${target.username}')" class="opacity-0 group-hover:opacity-100 hover:bg-slate-200 dark:hover:bg-zinc-700 p-1 rounded-md text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer" title="Quick Sync (@${target.username})">
+      : `<button data-sidebar-action="quick-sync" data-username="${escapeHtml(target.username)}" class="opacity-0 group-hover:opacity-100 hover:bg-slate-200 dark:hover:bg-zinc-700 p-1 rounded-md text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer" title="Quick Sync (@${escapeHtml(target.username)})">
            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
          </button>`;
 
     const authErrorShortcut = target.auth_error
-      ? `<button onclick="event.stopPropagation(); window.openTokenSettings('${target.platform}')" class="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/80 px-1.5 py-0.5 rounded hover:bg-rose-100 cursor-pointer" title="Authentication error - click to fix token">
+      ? `<button data-sidebar-action="open-token-settings" data-platform="${escapeHtml(target.platform)}" class="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/80 px-1.5 py-0.5 rounded hover:bg-rose-100 cursor-pointer" title="Authentication error - click to fix token">
            ⚠️ Fix Token
          </button>`
       : "";
 
     html += `
-      <div class="group flex items-center justify-between p-2.5 rounded-xl border transition-all duration-150 cursor-pointer ${cardClass}" onclick="window.selectTerminalUser('${target.username}')">
+      <div class="group flex items-center justify-between p-2.5 rounded-xl border transition-all duration-150 cursor-pointer ${cardClass}" data-select-target="${escapeHtml(target.username)}">
         <div class="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
           <span class="w-2 h-2 rounded-full ${statusDotClass} flex-shrink-0"></span>
           <div class="flex flex-col gap-0.5 min-w-0">
             <div class="flex items-center gap-1.5 min-w-0">
-              <span class="text-xs font-bold tracking-tight truncate select-none">@${target.username}</span>
-              <span class="text-[9px] font-bold uppercase px-1 py-0.2 rounded border flex-shrink-0 ${platformBadgeClass}">${target.platform}</span>
+              <span class="text-xs font-bold tracking-tight truncate select-none">@${escapeHtml(target.username)}</span>
+              <span class="text-[9px] font-bold uppercase px-1 py-0.2 rounded border flex-shrink-0 ${platformBadgeClass(target.platform)}">${escapeHtml(target.platform)}</span>
             </div>
             <div class="flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-zinc-500 font-mono">
               <span>${mediaCount} files</span>
@@ -131,17 +124,7 @@ export function selectTerminalUser(username) {
 
   const platformBadge = document.getElementById("dashboard-platform-badge");
   platformBadge.textContent = target.platform.toUpperCase();
-  switch (target.platform) {
-    case "instagram":
-      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-pink-50 dark:bg-pink-950/40 text-pink-700 dark:text-pink-400 border-pink-200 dark:border-pink-800";
-      break;
-    case "twitter":
-      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800";
-      break;
-    case "tiktok":
-      platformBadge.className = "text-[10px] font-bold uppercase px-2 py-0.5 rounded border bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-300 dark:border-zinc-700";
-      break;
-  }
+  platformBadge.className = `text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${platformBadgeClass(target.platform)}`;
 
   const syncBtn = document.getElementById("dashboard-btn-sync");
   syncBtn.onclick = () => startSync(target.username, true);
@@ -162,7 +145,7 @@ export function selectTerminalUser(username) {
           }
         }));
       }
-    });
+    }).catch(err => toast(`Failed to load config: ${err.message}`, "error"));
   };
 
   document.getElementById("dashboard-btn-delete").onclick = async () => {
@@ -227,8 +210,7 @@ export function updateDashboardDetails() {
   }
 }
 
-export async function quickSyncTarget(e, username) {
-  if (e) e.stopPropagation();
+export async function quickSyncTarget(username) {
   try {
     await startSyncApi(username);
     toast(`Sync started for @${username}`, "success", 2000);
