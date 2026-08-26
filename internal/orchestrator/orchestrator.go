@@ -371,6 +371,9 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 			lastSync = time.Time{}
 		}
 	}
+	if forceFullSync {
+		lastSync = time.Time{}
+	}
 
 	beforeCount := o.countDownloadedMedia(platform, username)
 	p.Status = "queued"
@@ -425,6 +428,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	}
 	p.Status = "running"
 	p.Progress = 5
+	prevUpdated := p.UpdatedAt
 	persistUser := p.Username
 	persistStatus := p.Status
 	persistUpdated := p.UpdatedAt
@@ -491,6 +495,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 			p.Status = "failed"
 			p.Progress = 100
 		}
+		p.UpdatedAt = prevUpdated
 		p.AuthError = errors.Is(err, scraper.ErrAuthExpired)
 	} else {
 		p.Status = "completed"
