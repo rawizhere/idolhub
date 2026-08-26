@@ -1,6 +1,6 @@
 import { state } from "./state.js";
-import { toast, escapeHtml, withLoading } from "./utils.js";
-import { fetchConfig, postConfig } from "./api.js";
+import { toast, escapeHtml, withLoading, confirmDialog } from "./utils.js";
+import { fetchConfig, postConfig, startSyncApi } from "./api.js";
 import { loadProgress } from "./sse.js";
 import { selectTerminalUser } from "./sidebar.js";
 
@@ -240,6 +240,26 @@ export async function saveEditChanges() {
     }
   } catch (err) {
     toast(`Failed to update @${username}: ${err.message}`, "error");
+  }
+  closeEditModal();
+}
+
+export async function fullResyncTarget() {
+  const username = state.editConfig.username;
+  const ok = await confirmDialog({
+    title: "Force Full Resync",
+    message: `Fully rescan @${username} from the beginning of its feed? Existing files will be preserved.`,
+    confirmText: "Start Full Resync",
+    tone: "primary",
+  });
+  if (!ok) return;
+
+  try {
+    await startSyncApi(username, true);
+    toast(`Full resync started for @${username}.`, "success", 2500);
+    loadProgress();
+  } catch (err) {
+    toast(`Failed to start full resync: ${err.message}`, "error");
   }
   closeEditModal();
 }
