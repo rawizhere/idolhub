@@ -30,6 +30,24 @@ func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
 	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync, opts.ForceFull, opts.InstagramSessionID, opts.Posts, opts.OnProgress)
 }
 
+// igFeedItem is one media node from the graphql user timeline response.
+type igFeedItem struct {
+	ID      string `json:"pk"`
+	Caption *struct {
+		Text string `json:"text"`
+	} `json:"caption"`
+	TakenAt       int64            `json:"taken_at"`
+	MediaType     int              `json:"media_type"`
+	ImageVersions *igImageVersions `json:"image_versions2,omitempty"`
+	CarouselMedia []struct {
+		ID            string           `json:"pk"`
+		MediaType     int              `json:"media_type"`
+		ImageVersions *igImageVersions `json:"image_versions2,omitempty"`
+		VideoVersions []igVideoVersion `json:"video_versions,omitempty"`
+	} `json:"carousel_media,omitempty"`
+	VideoVersions []igVideoVersion `json:"video_versions,omitempty"`
+}
+
 type igDirectItem struct {
 	URL     string
 	Date    time.Time
@@ -103,6 +121,9 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	}
 
 	client := newIGClient(sessionID)
+	if err := client.bootstrap(ctx); err != nil {
+		slog.Warn("Instagram client bootstrap failed, graphql requests may be rejected", "user", username, "error", err)
+	}
 	userID, err := client.resolveUserID(ctx, username)
 	if err != nil {
 		return err
@@ -137,14 +158,9 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		}
 		page++
 
-		apiURL := fmt.Sprintf("https://www.instagram.com/api/v1/feed/user/%s/?count=50", userID)
-		if nextMaxID != "" {
-			apiURL += "&max_id=" + nextMaxID
-		}
+		slog.Info("Fetching Instagram media feed page via graphql", "user", username, "page", page)
 
-		slog.Info("Fetching Instagram media feed page", "user", username, "page", page, "url", apiURL)
-
-		feedBytes, ferr := client.doGet(ctx, apiURL, username)
+		feedBytes, ferr := client.doGraphQL(ctx, username, userID, nextMaxID, 33)
 		if ferr != nil {
 			if errors.Is(ferr, download.ErrRateLimited) || errors.Is(ferr, ErrAuthExpired) {
 				close(jobs)
@@ -160,24 +176,17 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		}
 
 		var feed struct {
-			Items []struct {
-				ID      string `json:"pk"`
-				Caption *struct {
-					Text string `json:"text"`
-				} `json:"caption"`
-				TakenAt       int64            `json:"taken_at"`
-				MediaType     int              `json:"media_type"`
-				ImageVersions *igImageVersions `json:"image_versions2,omitempty"`
-				CarouselMedia []struct {
-					ID            string           `json:"pk"`
-					MediaType     int              `json:"media_type"`
-					ImageVersions *igImageVersions `json:"image_versions2,omitempty"`
-					VideoVersions []igVideoVersion `json:"video_versions,omitempty"`
-				} `json:"carousel_media,omitempty"`
-				VideoVersions []igVideoVersion `json:"video_versions,omitempty"`
-			} `json:"items"`
-			MoreAvailable bool   `json:"more_available"`
-			NextMaxID     string `json:"next_max_id"`
+			Data struct {
+				Feed struct {
+					Edges []struct {
+						Node igFeedItem `json:"node"`
+					} `json:"edges"`
+					PageInfo struct {
+						EndCursor   string `json:"end_cursor"`
+						HasNextPage bool   `json:"has_next_page"`
+					} `json:"page_info"`
+				} `json:"xdt_api__v1__feed__user_timeline_graphql_connection"`
+			} `json:"data"`
 		}
 
 		if err := json.Unmarshal(feedBytes, &feed); err != nil {
@@ -185,10 +194,11 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 			break
 		}
 
-		slog.Info("Instagram feed page parsed", "user", username, "page", page, "items", len(feed.Items), "more_available", feed.MoreAvailable)
+		slog.Info("Instagram feed page parsed", "user", username, "page", page, "items", len(feed.Data.Feed.Edges), "has_next_page", feed.Data.Feed.PageInfo.HasNextPage)
 		report(50, "feed parsed")
 
-		for _, item := range feed.Items {
+		for _, edge := range feed.Data.Feed.Edges {
+			item := edge.Node
 			itemTime := time.Unix(item.TakenAt, 0).UTC()
 			caption := ""
 			if item.Caption != nil {
@@ -284,11 +294,12 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 			break
 		}
 
-		if !feed.MoreAvailable || feed.NextMaxID == "" {
+		pageInfo := feed.Data.Feed.PageInfo
+		if !pageInfo.HasNextPage || pageInfo.EndCursor == "" {
 			slog.Info("Reached end of Instagram media feed", "user", username)
 			break
 		}
-		nextMaxID = feed.NextMaxID
+		nextMaxID = pageInfo.EndCursor
 
 		// Rate-limit with jitter between pages
 		if err := igLimiter.Wait(ctx); err != nil {
@@ -311,10 +322,8 @@ func (c *igClient) resolveUserID(ctx context.Context, username string) (string, 
 	profileAPI := fmt.Sprintf("https://www.instagram.com/api/v1/users/web_profile_info/?username=%s", url.PathEscape(username))
 	profileBytes, err := c.doGet(ctx, profileAPI, username)
 	if err != nil {
-		if errors.Is(err, download.ErrRateLimited) {
-			// The search fallback would hit the same limit and deepen it.
-			return "", err
-		}
+		// web_profile_info is heavily throttled by Instagram; topsearch
+		// still works with the ds_user_id cookie, so always try it.
 		slog.Warn("Instagram web_profile_info returned error, falling back to search", "username", username, "error", err)
 	} else {
 		var profile struct {
