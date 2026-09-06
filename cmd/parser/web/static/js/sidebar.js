@@ -72,7 +72,7 @@ export function renderDashboardSidebar() {
     if (target.status === "running") statusDotClass = "bg-[#ff9900] animate-pulse";
     else if (target.status === "queued") statusDotClass = "bg-amber-500 animate-pulse";
     else if (target.status === "completed") statusDotClass = "bg-emerald-500";
-    else if (target.status === "failed") statusDotClass = "bg-rose-500";
+    else if (target.status === "failed" || target.auth_error) statusDotClass = "bg-rose-500";
 
     const lastSync = timeAgo(target.updated_at);
 
@@ -83,9 +83,7 @@ export function renderDashboardSidebar() {
          </button>`;
 
     const authErrorShortcut = target.auth_error
-      ? `<button data-sidebar-action="open-token-settings" data-platform="${escapeHtml(target.platform)}" class="inline-flex items-center gap-1 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/80 px-1.5 py-0.5 rounded hover:bg-rose-100 cursor-pointer" title="Authentication error - click to fix token">
-           ⚠️ Fix Token
-         </button>`
+      ? `<button data-sidebar-action="open-token-settings" data-platform="${escapeHtml(target.platform)}" class="inline-flex items-center gap-1 flex-shrink-0 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/80 px-1.5 py-1 rounded-md hover:bg-rose-100 dark:hover:bg-rose-950 transition-all cursor-pointer" title="Authentication error - click to fix token">Fix Token</button>`
       : "";
 
     html += `
@@ -95,17 +93,17 @@ export function renderDashboardSidebar() {
           <div class="flex flex-col gap-0.5 min-w-0">
             <div class="flex items-center gap-1.5 min-w-0">
               <span class="text-xs font-bold tracking-tight truncate select-none">@${escapeHtml(target.username)}</span>
-              <span class="text-[9px] font-bold uppercase px-1 py-0.2 rounded border flex-shrink-0 ${platformBadgeClass(target.platform)}">${escapeHtml(target.platform)}</span>
+              <span class="text-[9px] font-bold uppercase px-1 py-0.5 rounded border flex-shrink-0 leading-none ${platformBadgeClass(target.platform)}">${escapeHtml(target.platform)}</span>
             </div>
             <div class="flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-zinc-500 font-mono">
               <span>${mediaCount} files</span>
-              ${target.new_count > 0 ? `<span class="text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-1 py-0.2 rounded border border-emerald-200 dark:border-emerald-800/80">+${target.new_count}</span>` : ""}
+              ${target.new_count > 0 ? `<span class="text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-1 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/80">+${target.new_count}</span>` : ""}
               ${lastSync ? `<span>· ${lastSync}</span>` : ""}
-              ${authErrorShortcut}
             </div>
           </div>
         </div>
-        <div class="flex items-center gap-1 flex-shrink-0">
+        <div class="flex items-center gap-1.5 flex-shrink-0">
+          ${authErrorShortcut}
           ${syncButtonHTML}
         </div>
       </div>

@@ -4,12 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/caarlos0/env/v11"
 
 	"idolhub/internal/store"
 )
@@ -42,9 +39,9 @@ func (a Account) ShouldDownloadVideos() bool {
 
 type Config struct {
 	Accounts           []Account `json:"accounts"`
-	TwitterAuthToken   string    `json:"twitter_auth_token" env:"TWITTER_AUTH_TOKEN"`
-	InstagramSessionID string    `json:"instagram_session_id" env:"INSTAGRAM_SESSION_ID"`
-	TikTokCookies      string    `json:"tiktok_cookies" env:"TIKTOK_COOKIES"`
+	TwitterAuthToken   string    `json:"twitter_auth_token"`
+	InstagramSessionID string    `json:"instagram_session_id"`
+	TikTokCookies      string    `json:"tiktok_cookies"`
 	AutoSyncInterval   int       `json:"auto_sync_interval"` // In hours
 }
 
@@ -53,10 +50,7 @@ var (
 	globalConfig Config
 )
 
-const configPath = "configs/config.json"
-
-// LoadConfig loads accounts and secrets from the store DB when it has accounts,
-// falling back to configs/config.json so first boot keeps working.
+// LoadConfig loads accounts and secrets from the store DB, the single source of truth.
 func LoadConfig(st *store.Store) error {
 	configMu.Lock()
 	defer configMu.Unlock()
@@ -64,59 +58,19 @@ func LoadConfig(st *store.Store) error {
 	globalConfig = Config{
 		Accounts: []Account{},
 	}
-
-	if st != nil && loadFromStore(st) {
-		applyEnvSecrets()
+	if st == nil {
 		return nil
 	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return saveConfigLocked()
-		}
-		if fi, statErr := os.Stat(configPath); statErr == nil && fi.IsDir() {
-			return nil
-		}
-		return err
-	}
-
-	if err := json.Unmarshal(data, &globalConfig); err != nil {
-		return err
-	}
-
-	applyEnvSecrets()
-
+	loadFromStoreLocked(st)
 	return nil
 }
 
-// applyEnvSecrets fills secrets from environment if they are missing in config.
-func applyEnvSecrets() {
-	var envCfg Config
-	if err := env.Parse(&envCfg); err != nil {
-		slog.Warn("failed to parse env secrets", "error", err)
-		return
-	}
-	if globalConfig.TwitterAuthToken == "" && envCfg.TwitterAuthToken != "" {
-		globalConfig.TwitterAuthToken = envCfg.TwitterAuthToken
-	}
-	if globalConfig.InstagramSessionID == "" && envCfg.InstagramSessionID != "" {
-		globalConfig.InstagramSessionID = envCfg.InstagramSessionID
-	}
-	if globalConfig.TikTokCookies == "" && envCfg.TikTokCookies != "" {
-		globalConfig.TikTokCookies = envCfg.TikTokCookies
-	}
-}
-
-func loadFromStore(st *store.Store) bool {
+func loadFromStoreLocked(st *store.Store) {
 	ctx := context.Background()
 	rows, err := st.Accounts.List(ctx)
 	if err != nil {
 		slog.Warn("Failed to read accounts from store", "error", err)
-		return false
-	}
-	if len(rows) == 0 {
-		return false
+		return
 	}
 	accounts := make([]Account, 0, len(rows))
 	for _, row := range rows {
@@ -143,7 +97,6 @@ func loadFromStore(st *store.Store) bool {
 		TikTokCookies:      settingString(st, ctx, "tiktok_cookies"),
 		AutoSyncInterval:   settingInt(st, ctx, "auto_sync_interval"),
 	}
-	return true
 }
 
 func settingString(st *store.Store, ctx context.Context, key string) string {
@@ -170,21 +123,16 @@ func settingInt(st *store.Store, ctx context.Context, key string) int {
 	return value
 }
 
-// SaveConfig updates the in-memory config and persists it to the store when
-// the store already has accounts, otherwise to configs/config.json.
+// SaveConfig updates the in-memory config (hot reload) and persists it to
+// the store DB.
 func SaveConfig(st *store.Store, cfg Config) error {
 	configMu.Lock()
 	defer configMu.Unlock()
 	globalConfig = cfg
-	if st != nil && storeHasAccounts(st) {
-		return saveToStore(st)
+	if st == nil {
+		return nil
 	}
-	return saveConfigLocked()
-}
-
-func storeHasAccounts(st *store.Store) bool {
-	rows, err := st.Accounts.List(context.Background())
-	return err == nil && len(rows) > 0
+	return saveToStore(st)
 }
 
 func saveToStore(st *store.Store) error {
@@ -233,17 +181,6 @@ func saveToStore(st *store.Store) error {
 		}
 	}
 	return nil
-}
-
-func saveConfigLocked() error {
-	if globalConfig.Accounts == nil {
-		globalConfig.Accounts = []Account{}
-	}
-	data, err := json.MarshalIndent(globalConfig, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(configPath, data, 0644)
 }
 
 func GetConfig() Config {

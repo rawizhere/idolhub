@@ -48,18 +48,6 @@ func runExportJSON(args []string) error {
 	}
 	cfg := config.GetConfig()
 
-	cfgPath := filepath.Join(*out, "configs", "config.json")
-	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(cfgPath, data, 0o644); err != nil {
-		return err
-	}
-
 	ctx := context.Background()
 	for _, acc := range cfg.Accounts {
 		posts, err := st.Posts.ListByAccount(ctx, acc.Platform, acc.Username, postExportLimit)
@@ -95,7 +83,7 @@ func runExportJSON(args []string) error {
 		slog.Info("Exported posts", "platform", acc.Platform, "user", acc.Username, "count", len(entries))
 	}
 
-	slog.Info("Export complete", "accounts", len(cfg.Accounts), "config", cfgPath)
+	slog.Info("Export complete", "accounts", len(cfg.Accounts))
 	return nil
 }
 

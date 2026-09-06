@@ -155,14 +155,7 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 func main() {
 	logging.Init()
 
-	switch {
-	case len(os.Args) > 1 && os.Args[1] == "import-json":
-		if err := runImportJSON(os.Args[2:]); err != nil {
-			slog.Error("import-json failed", "error", err)
-			os.Exit(1)
-		}
-		return
-	case len(os.Args) > 1 && os.Args[1] == "export-json":
+	if len(os.Args) > 1 && os.Args[1] == "export-json" {
 		if err := runExportJSON(os.Args[2:]); err != nil {
 			slog.Error("export-json failed", "error", err)
 			os.Exit(1)

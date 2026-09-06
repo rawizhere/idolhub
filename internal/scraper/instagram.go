@@ -311,6 +311,10 @@ func (c *igClient) resolveUserID(ctx context.Context, username string) (string, 
 	profileAPI := fmt.Sprintf("https://www.instagram.com/api/v1/users/web_profile_info/?username=%s", url.PathEscape(username))
 	profileBytes, err := c.doGet(ctx, profileAPI, username)
 	if err != nil {
+		if errors.Is(err, download.ErrRateLimited) {
+			// The search fallback would hit the same limit and deepen it.
+			return "", err
+		}
 		slog.Warn("Instagram web_profile_info returned error, falling back to search", "username", username, "error", err)
 	} else {
 		var profile struct {
