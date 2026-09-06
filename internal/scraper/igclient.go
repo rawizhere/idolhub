@@ -25,10 +25,18 @@ import (
 
 const igAppID = "936619743392459"
 
-// igGraphQLDocID is the Relay doc_id of PolarisProfilePostsTabContentQuery_connection.
-// Instagram rotates it with frontend deploys; if requests start failing, grab a
-// fresh one from any logged-in profile page request in the browser network tab.
-const igGraphQLDocID = "39535953862670189"
+// defaultIGGraphQLDocID is the Relay doc_id of PolarisProfilePostsTabContentQuery_connection.
+// Instagram rotates it with frontend deploys; override it in settings when
+// graphql starts answering with HTML instead of JSON.
+const defaultIGGraphQLDocID = "39535953862670189"
+
+// resolveIGDocID falls back to the built-in doc_id when the setting is empty.
+func resolveIGDocID(docID string) string {
+	if docID != "" {
+		return docID
+	}
+	return defaultIGGraphQLDocID
+}
 
 // igLimiter paces Instagram requests to avoid rate limits.
 var igLimiter = rate.NewLimiter(rate.Every(2*time.Second), 1)
@@ -58,6 +66,7 @@ type igClient struct {
 	ua      string
 	csrf    string
 	userID  string
+	docID   string
 }
 
 func newIGClient(sessionID string) *igClient {
@@ -238,7 +247,7 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 	form.Set("fb_api_req_friendly_name", "PolarisProfilePostsTabContentQuery_connection")
 	form.Set("server_timestamps", "true")
 	form.Set("variables", string(varsJSON))
-	form.Set("doc_id", igGraphQLDocID)
+	form.Set("doc_id", resolveIGDocID(c.docID))
 
 	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodPost, "https://www.instagram.com/graphql/query", strings.NewReader(form.Encode()))
 	if err != nil {

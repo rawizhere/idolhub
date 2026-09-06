@@ -27,7 +27,7 @@ func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
 	if opts.Posts == nil {
 		return fmt.Errorf("post store is not configured")
 	}
-	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync, opts.ForceFull, opts.InstagramSessionID, opts.Posts, opts.OnProgress)
+	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync, opts.ForceFull, opts.InstagramSessionID, opts.InstagramGraphQLDocID, opts.Posts, opts.OnProgress)
 }
 
 // igFeedItem is one media node from the graphql user timeline response.
@@ -99,7 +99,7 @@ func bestVideoURL(vs []igVideoVersion) string {
 }
 
 // scrapeInstagramDirect pulls timeline media via the private Instagram web API
-func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, forceFull bool, sessionID string, posts *store.PostStore, onProgress func(pct int, msg string)) error {
+func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, forceFull bool, sessionID, docID string, posts *store.PostStore, onProgress func(pct int, msg string)) error {
 	if sessionID == "" {
 		return fmt.Errorf("instagram session ID is not set")
 	}
@@ -121,6 +121,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	}
 
 	client := newIGClient(sessionID)
+	client.docID = resolveIGDocID(docID)
 	if err := client.bootstrap(ctx); err != nil {
 		slog.Warn("Instagram client bootstrap failed, graphql requests may be rejected", "user", username, "error", err)
 	}

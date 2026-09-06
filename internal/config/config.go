@@ -38,11 +38,12 @@ func (a Account) ShouldDownloadVideos() bool {
 }
 
 type Config struct {
-	Accounts           []Account `json:"accounts"`
-	TwitterAuthToken   string    `json:"twitter_auth_token"`
-	InstagramSessionID string    `json:"instagram_session_id"`
-	TikTokCookies      string    `json:"tiktok_cookies"`
-	AutoSyncInterval   int       `json:"auto_sync_interval"` // In hours
+	Accounts              []Account `json:"accounts"`
+	TwitterAuthToken      string    `json:"twitter_auth_token"`
+	InstagramSessionID    string    `json:"instagram_session_id"`
+	InstagramGraphQLDocID string    `json:"instagram_graphql_doc_id,omitempty"`
+	TikTokCookies         string    `json:"tiktok_cookies"`
+	AutoSyncInterval      int       `json:"auto_sync_interval"` // In hours
 }
 
 var (
@@ -91,11 +92,12 @@ func loadFromStoreLocked(st *store.Store) {
 		})
 	}
 	globalConfig = Config{
-		Accounts:           accounts,
-		TwitterAuthToken:   settingString(st, ctx, "twitter_auth_token"),
-		InstagramSessionID: settingString(st, ctx, "instagram_session_id"),
-		TikTokCookies:      settingString(st, ctx, "tiktok_cookies"),
-		AutoSyncInterval:   settingInt(st, ctx, "auto_sync_interval"),
+		Accounts:              accounts,
+		TwitterAuthToken:      settingString(st, ctx, "twitter_auth_token"),
+		InstagramSessionID:    settingString(st, ctx, "instagram_session_id"),
+		InstagramGraphQLDocID: settingString(st, ctx, "instagram_graphql_doc_id"),
+		TikTokCookies:         settingString(st, ctx, "tiktok_cookies"),
+		AutoSyncInterval:      settingInt(st, ctx, "auto_sync_interval"),
 	}
 }
 
@@ -166,10 +168,11 @@ func saveToStore(st *store.Store) error {
 		}
 	}
 	settings := map[string]any{
-		"twitter_auth_token":   globalConfig.TwitterAuthToken,
-		"instagram_session_id": globalConfig.InstagramSessionID,
-		"tiktok_cookies":       globalConfig.TikTokCookies,
-		"auto_sync_interval":   globalConfig.AutoSyncInterval,
+		"twitter_auth_token":       globalConfig.TwitterAuthToken,
+		"instagram_session_id":     globalConfig.InstagramSessionID,
+		"instagram_graphql_doc_id": globalConfig.InstagramGraphQLDocID,
+		"tiktok_cookies":           globalConfig.TikTokCookies,
+		"auto_sync_interval":       globalConfig.AutoSyncInterval,
 	}
 	for key, value := range settings {
 		b, err := json.Marshal(value)

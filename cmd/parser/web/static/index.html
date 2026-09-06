@@ -445,6 +445,15 @@
       </div>
 
       <div class="flex flex-col gap-1.5 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
+        <label class="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center justify-between" for="instagram-doc-id">
+          <span>Instagram GraphQL Doc ID</span>
+          <span class="text-[10px] text-slate-400 font-mono font-normal">advanced, leave empty for default</span>
+        </label>
+        <input class="w-full bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3.5 py-2.5 text-xs outline-none focus:border-[#ff9900] font-mono transition-colors" id="instagram-doc-id" placeholder="39535953862670189" type="text" autocomplete="off"/>
+        <p class="text-[10px] text-slate-400 dark:text-zinc-500">Only if Instagram sync fails with "HTML instead of JSON": DevTools → Network → filter <code class="font-mono text-[#ff9900]">graphql/query</code> on any profile page → Payload → copy <code class="font-mono text-[#ff9900]">doc_id</code>.</p>
+      </div>
+
+      <div class="flex flex-col gap-1.5 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
         <label class="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center justify-between" for="tiktok-cookies">
           <span>TikTok Netscape Cookies</span>
           <span class="text-[10px] text-slate-400 font-mono font-normal">Netscape cookie format</span>

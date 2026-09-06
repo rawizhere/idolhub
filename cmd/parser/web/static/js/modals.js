@@ -299,6 +299,7 @@ export async function loadConfig() {
     const data = await fetchConfig();
     document.getElementById("twitter-auth-token").value = data.twitter_auth_token || "";
     document.getElementById("instagram-session-id").value = data.instagram_session_id || "";
+    document.getElementById("instagram-doc-id").value = data.instagram_graphql_doc_id || "";
     document.getElementById("tiktok-cookies").value = data.tiktok_cookies || "";
     document.getElementById("auto-sync-interval").value = data.auto_sync_interval || 0;
   } catch (err) {
@@ -314,6 +315,7 @@ export async function saveSettings() {
       const current = await fetchConfig();
       current.twitter_auth_token = document.getElementById("twitter-auth-token").value.trim();
       current.instagram_session_id = document.getElementById("instagram-session-id").value.trim();
+      current.instagram_graphql_doc_id = document.getElementById("instagram-doc-id").value.trim();
       current.tiktok_cookies = document.getElementById("tiktok-cookies").value.trim();
       current.auto_sync_interval = parseInt(document.getElementById("auto-sync-interval").value) || 0;
       await postConfig(current);
