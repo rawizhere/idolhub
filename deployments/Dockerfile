@@ -1,8 +1,10 @@
+# syntax=docker/dockerfile:1
+
 # ---- Tailwind CSS ----
 FROM node:22-alpine AS tailwind
 WORKDIR /app
 COPY cmd/parser/web/package.json cmd/parser/web/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm     npm ci
 COPY cmd/parser/web/ cmd/parser/web/
 RUN for f in cmd/parser/web/templates/*.templ; do \
       [ -f "$f" ] && cp "$f" "${f}.html"; \
@@ -11,23 +13,27 @@ RUN for f in cmd/parser/web/templates/*.templ; do \
 
 # ---- Templ ----
 FROM golang:1.27-alpine AS templ
-ARG TEMPL_VERSION=v0.3.1020
-RUN go install github.com/a-h/templ/cmd/templ@${TEMPL_VERSION}
 WORKDIR /app
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 COPY cmd/parser/web/templates/ cmd/parser/web/templates/
-RUN templ generate -path ./cmd/parser/web/templates/
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go tool templ generate -path ./cmd/parser/web/templates/
 
 # ---- Build ----
 FROM golang:1.27-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 COPY . .
 COPY --from=tailwind /app/app.css cmd/parser/web/static/app.css
 COPY --from=templ /app/cmd/parser/web/templates/*_templ.go cmd/parser/web/templates/
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/idolhub ./cmd/parser
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/idolhub ./cmd/parser
 
 # ---- Runtime ----
 FROM alpine:3.21
@@ -43,7 +49,7 @@ RUN apk add --no-cache \
     tzdata \
     curl \
     su-exec \
-    && pip install --no-cache-dir --break-system-packages curl_cffi \
+    && pip install --break-system-packages curl_cffi \
     && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/yt-dlp -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp \
     && rm -rf /var/cache/apk/*
@@ -63,7 +69,7 @@ VOLUME ["/app/downloads"]
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD curl -f http://localhost:8080/api/config || exit 1
+    CMD curl -f http://localhost:8080/api/config || exit 1
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["./idolhub"]

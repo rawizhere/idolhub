@@ -134,8 +134,8 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: idolhub-ci:scan
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=local,src=~/idolhub-buildcache
+          cache-to: type=local,dest=~/idolhub-buildcache,mode=max,ignore-error=true
       - name: scan image for vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -153,7 +153,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
+          cache-from: type=local,src=~/idolhub-buildcache
 
   cleanup:
     runs-on: self-hosted
