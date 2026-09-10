@@ -1,8 +1,10 @@
 package xscraper
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 )
@@ -112,26 +114,19 @@ func (r *result) parse() *Tweet {
 	return tw
 }
 
-func bestVariant(variants []struct {
-	Bitrate     int    `json:"bitrate"`
-	ContentType string `json:"content_type"`
-	URL         string `json:"url"`
-}, gif bool) string {
-	best := ""
-	maxBitrate := 0
+// bestVariant picks the highest-bitrate mp4 URL (or any type for gifs).
+func bestVariant(variants []videoVariant, gif bool) string {
+	var eligible []videoVariant
 	for _, v := range variants {
-		if !gif && v.ContentType != "video/mp4" {
-			continue
-		}
-		if gif && v.Bitrate < maxBitrate {
-			continue
-		}
-		if v.Bitrate >= maxBitrate && v.URL != "" {
-			best = strings.TrimSuffix(v.URL, "?tag=10")
-			maxBitrate = v.Bitrate
+		if v.URL != "" && (gif || v.ContentType == "video/mp4") {
+			eligible = append(eligible, v)
 		}
 	}
-	return best
+	if len(eligible) == 0 {
+		return ""
+	}
+	best := slices.MaxFunc(eligible, func(a, b videoVariant) int { return cmp.Compare(a.Bitrate, b.Bitrate) })
+	return strings.TrimSuffix(best.URL, "?tag=10")
 }
 
 func parseUserID(body []byte) (string, error) {

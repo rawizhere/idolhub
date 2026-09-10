@@ -75,10 +75,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	jobs := make(chan TwitterDownloadItem, 10000)
 	client := &http.Client{Timeout: 45 * time.Second}
 	pool := download.Start(ctx, jobs, numWorkers, func(ctx context.Context, item TwitterDownloadItem) bool {
-		if item.IsVideo {
-			return downloadTwitterVideo(ctx, item, outputDir, client, username)
-		}
-		return downloadTwitterImage(ctx, item, outputDir, client, username)
+		return downloadTwitterMedia(ctx, item, outputDir, client, username)
 	})
 
 	s, err := xscraper.New(opts.TwitterAuthToken)
@@ -226,53 +223,38 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	return nil
 }
 
-func downloadTwitterImage(ctx context.Context, item TwitterDownloadItem, outputDir string, client *http.Client, username string) bool {
-	parsedURL, err := url.Parse(item.URL)
-	if err != nil {
-		return false
+func downloadTwitterMedia(ctx context.Context, item TwitterDownloadItem, outputDir string, client *http.Client, username string) bool {
+	var filename string
+	if item.IsVideo {
+		filename = fmt.Sprintf("%s_%s_video.mp4", item.DateStr, item.TweetID)
+	} else {
+		parsedURL, err := url.Parse(item.URL)
+		if err != nil {
+			return false
+		}
+		parts := strings.Split(parsedURL.Path, "/")
+		filename = fmt.Sprintf("%s_%s", item.DateStr, parts[len(parts)-1])
 	}
-
-	parts := strings.Split(parsedURL.Path, "/")
-	originalName := parts[len(parts)-1]
-
-	filename := fmt.Sprintf("%s_%s", item.DateStr, originalName)
 	filePath := filepath.Join(outputDir, filename)
 
+	kind := "image"
+	if item.IsVideo {
+		kind = "video"
+	}
+	slog.Info("Starting Twitter media download", "user", username, "kind", kind, "tweet_id", item.TweetID)
 	downloaded, err := download.File(ctx, client, item.URL, filePath, download.FileOpts{
 		Header: http.Header{"User-Agent": []string{desktopUA}},
 		Jitter: 2 * time.Second,
 	})
 	if err != nil {
-		slog.Warn("Failed to download image", "user", username, "filename", filename, "error", err)
+		slog.Warn("Failed to download media", "user", username, "kind", kind, "tweet_id", item.TweetID, "filename", filename, "error", err)
 		return false
 	}
 	if !downloaded {
 		return false
 	}
 
-	slog.Info("Twitter image downloaded", "user", username, "filename", filename)
-	download.ThumbnailAsync(filePath)
-	return true
-}
-
-func downloadTwitterVideo(ctx context.Context, item TwitterDownloadItem, outputDir string, client *http.Client, username string) bool {
-	filename := fmt.Sprintf("%s_%s_video.mp4", item.DateStr, item.TweetID)
-	filePath := filepath.Join(outputDir, filename)
-
-	slog.Info("Starting Twitter video download", "user", username, "tweet_id", item.TweetID)
-	downloaded, err := download.File(ctx, client, item.URL, filePath, download.FileOpts{
-		Header: http.Header{"User-Agent": []string{desktopUA}},
-		Jitter: 2 * time.Second,
-	})
-	if err != nil {
-		slog.Warn("Failed to download video", "user", username, "tweet_id", item.TweetID, "error", err)
-		return false
-	}
-	if !downloaded {
-		return false
-	}
-
-	slog.Info("Twitter video downloaded successfully", "user", username, "filename", filename)
+	slog.Info("Twitter media downloaded successfully", "user", username, "kind", kind, "filename", filename)
 	download.ThumbnailAsync(filePath)
 	return true
 }

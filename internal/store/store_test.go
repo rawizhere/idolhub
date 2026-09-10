@@ -234,18 +234,7 @@ func TestSettingsStore(t *testing.T) {
 	if err != nil || value != `{"after":"abc"}` {
 		t.Fatalf("get = %q, %v", value, err)
 	}
-	all, err := s.Settings.All(ctx)
-	if err != nil || all["cursor"] != value {
-		t.Fatalf("all = %v, %v", all, err)
-	}
-	if err := s.Settings.Delete(ctx, "cursor"); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-	if _, err := s.Settings.Get(ctx, "cursor"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("expected ErrNotFound after delete, got %v", err)
-	}
 }
-
 func TestSearchFullText(t *testing.T) {
 	ctx := context.Background()
 	s := openTestStore(t)

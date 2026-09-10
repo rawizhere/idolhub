@@ -125,14 +125,6 @@ func (idx *Index) Invalidate(platform, username string) {
 	idx.fileTexts.Remove(key)
 }
 
-// InvalidateAll clears all cached entries
-func (idx *Index) InvalidateAll() {
-	idx.files.Purge()
-	idx.posts.Purge()
-	idx.urlFiles.Purge()
-	idx.fileTexts.Purge()
-}
-
 // URLFiles returns a cached map of post media URLs to local filenames for a target.
 func (idx *Index) URLFiles(platform, username string) map[string]string {
 	key := keyOf(platform, username)

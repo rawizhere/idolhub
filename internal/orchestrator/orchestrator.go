@@ -15,10 +15,9 @@ import (
 
 	"github.com/tmaxmax/go-sse"
 
-	"github.com/robfig/cron/v3"
-
 	"idolhub/internal/config"
 	"idolhub/internal/gallery"
+	"idolhub/internal/logging"
 	"idolhub/internal/scraper"
 	"idolhub/internal/store"
 )
@@ -127,10 +126,8 @@ func InitOrchestrator(mediaIndex *gallery.Index, st *store.Store) {
 	}()
 
 	slog.SetDefault(slog.New(&taskLogHandler{
-		Handler: slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
-			Level: slog.LevelInfo,
-		}),
-		orch: orch,
+		Handler: logging.NewHandler(),
+		orch:    orch,
 	}))
 
 	for i := 0; i < numScrapeWorkers; i++ {
@@ -500,7 +497,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 			o.twitterMu.Lock()
 			defer o.twitterMu.Unlock()
 		}
-		err = s.Scrape(timeoutCtx, target, opts)
+		err = s(timeoutCtx, target, opts)
 	}
 
 	o.mu.Lock()
@@ -673,7 +670,8 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 		interval := config.GetConfig().AutoSyncInterval
 		wait := time.Minute
 		if interval > 0 {
-			wait = time.Until(cron.Every(time.Duration(interval) * time.Hour).Next(time.Now()))
+			d := time.Duration(interval) * time.Hour
+			wait = time.Until(time.Now().Truncate(d).Add(d))
 			if wait <= 0 {
 				wait = time.Minute
 			}

@@ -10,8 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/avast/retry-go/v4"
 )
 
 // File downloads url to dstPath unless the file already exists.
@@ -34,20 +32,32 @@ func File(ctx context.Context, client *http.Client, rawURL, dstPath string, o Fi
 	req.Header = o.Header
 
 	var resp *http.Response
-	err = retry.Do(func() error {
+	var lastErr error
+	for attempt := 0; attempt < 3 && resp == nil; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return false, ctx.Err()
+			case <-time.After(time.Duration(1<<(attempt-1)) * time.Second):
+			}
+		}
 		r, doErr := client.Do(req)
 		if doErr != nil {
-			return doErr
+			lastErr = doErr
+			continue
 		}
 		if r.StatusCode != http.StatusOK {
 			_ = r.Body.Close()
-			return StatusError(r.StatusCode)
+			lastErr = StatusError(r.StatusCode)
+			if !isRetryable(lastErr) {
+				return false, lastErr
+			}
+			continue
 		}
 		resp = r
-		return nil
-	}, append(retryOpts(ctx), retry.RetryIf(isRetryable))...)
-	if err != nil {
-		return false, err
+	}
+	if resp == nil {
+		return false, lastErr
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -75,16 +85,6 @@ func isRetryable(err error) bool {
 		return se.code >= 500
 	}
 	return true
-}
-
-func retryOpts(ctx context.Context) []retry.Option {
-	return []retry.Option{
-		retry.Attempts(3),
-		retry.Delay(time.Second),
-		retry.DelayType(retry.BackOffDelay),
-		retry.LastErrorOnly(true),
-		retry.Context(ctx),
-	}
 }
 
 // ThumbnailAsync regenerates the thumbnail of path in background.

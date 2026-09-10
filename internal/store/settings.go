@@ -36,28 +36,3 @@ ON CONFLICT (key) DO UPDATE SET value = excluded.value`
 	}
 	return nil
 }
-
-func (s *SettingsStore) Delete(ctx context.Context, key string) error {
-	if err := execContext(ctx, s.db, `DELETE FROM settings WHERE key = ?`, key); err != nil {
-		return fmt.Errorf("store: settings delete: %w", err)
-	}
-	return nil
-}
-
-// All returns every setting keyed by its key.
-func (s *SettingsStore) All(ctx context.Context) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM settings ORDER BY key`)
-	if err != nil {
-		return nil, fmt.Errorf("store: settings all: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	out := make(map[string]string)
-	for rows.Next() {
-		var k, v string
-		if err := rows.Scan(&k, &v); err != nil {
-			return nil, fmt.Errorf("store: settings scan: %w", err)
-		}
-		out[k] = v
-	}
-	return out, rows.Err()
-}

@@ -196,7 +196,7 @@ func main() {
 	mux.HandleFunc("GET /api/gallery", app.handleGallery)
 	mux.HandleFunc("GET /api/gallery/meta", app.handleGalleryMeta)
 	mux.HandleFunc("GET /api/search", app.handleGlobalSearchAPI)
-	mux.HandleFunc("GET /api/events", app.handleSSE)
+	mux.Handle("GET /api/events", app.orch.SSEHandler())
 	mux.HandleFunc("GET /gallery/{platform}/{username}", app.handleGalleryPage)
 	mux.HandleFunc("GET /gallery/{platform}/{username}/page/{page}", app.handleGalleryPage)
 	mux.HandleFunc("GET /gallery/{platform}/{username}/posts", app.handleGalleryPage)
@@ -429,21 +429,13 @@ func (a *App) handleGallery(w http.ResponseWriter, r *http.Request) {
 	byName := fileMap(files)
 
 	for i, p := range posts {
-		var localFiles []gallery.PostMediaFile
-		for _, mediaURL := range p.MediaURLs {
-			gf := a.findLocalFile(mediaURL, platform, username, byName)
-			if gf == nil && p.TweetID != "" {
-				gf = byName[p.TweetID+"_video.mp4"]
-			}
-			if gf != nil {
-				localFiles = append(localFiles, gallery.PostMediaFile{
-					Filename:     gf.Filename,
-					URL:          gf.URL,
-					ThumbnailURL: gf.ThumbnailURL,
-				})
-			}
+		for _, gf := range a.postLocalFiles(p, platform, username, byName) {
+			posts[i].LocalFiles = append(posts[i].LocalFiles, gallery.PostMediaFile{
+				Filename:     gf.Filename,
+				URL:          gf.URL,
+				ThumbnailURL: gf.ThumbnailURL,
+			})
 		}
-		posts[i].LocalFiles = localFiles
 	}
 	slices.SortFunc(posts, func(a, b gallery.Post) int {
 		return cmp.Compare(b.Date, a.Date)
@@ -481,28 +473,9 @@ func (a *App) handleMedia(w http.ResponseWriter, r *http.Request) {
 		a.ensureThumbnail(filePath)
 	}
 
-	ext := strings.ToLower(filepath.Ext(filePath))
-	switch ext {
-	case ".mp4", ".m4v":
-		w.Header().Set("Content-Type", "video/mp4")
-	case ".webm":
-		w.Header().Set("Content-Type", "video/webm")
-	case ".mov":
-		w.Header().Set("Content-Type", "video/quicktime")
-	case ".jpg", ".jpeg":
-		w.Header().Set("Content-Type", "image/jpeg")
-	case ".png":
-		w.Header().Set("Content-Type", "image/png")
-	case ".webp":
-		w.Header().Set("Content-Type", "image/webp")
-	case ".gif":
-		w.Header().Set("Content-Type", "image/gif")
-	default:
-		if ct := mime.TypeByExtension(ext); ct != "" {
-			w.Header().Set("Content-Type", ct)
-		}
+	if ct := mime.TypeByExtension(strings.ToLower(filepath.Ext(filePath))); ct != "" {
+		w.Header().Set("Content-Type", ct)
 	}
-	w.Header().Set("Accept-Ranges", "bytes")
 
 	http.ServeFile(w, r, filePath)
 }
@@ -537,10 +510,6 @@ func (a *App) ensureThumbnail(thumbPath string) {
 		_ = download.GenerateThumbnail(srcFile, thumbPath)
 		return nil, nil
 	})
-}
-
-func (a *App) handleSSE(w http.ResponseWriter, r *http.Request) {
-	a.orch.SSEHandler().ServeHTTP(w, r)
 }
 
 func (a *App) handleScrapeStart(w http.ResponseWriter, r *http.Request) {
@@ -685,6 +654,22 @@ func (a *App) findLocalFile(mediaURL, platform, username string, byName map[stri
 	return byName[name]
 }
 
+// postLocalFiles resolves a post's media URLs to local files, with the
+// TweetID video fallback.
+func (a *App) postLocalFiles(p gallery.Post, platform, username string, byName map[string]*gallery.File) []*gallery.File {
+	var out []*gallery.File
+	for _, mediaURL := range p.MediaURLs {
+		gf := a.findLocalFile(mediaURL, platform, username, byName)
+		if gf == nil && p.TweetID != "" {
+			gf = byName[p.TweetID+"_video.mp4"]
+		}
+		if gf != nil {
+			out = append(out, gf)
+		}
+	}
+	return out
+}
+
 func fuzzyContains(haystack, needle string) bool {
 	if needle == "" {
 		return true
@@ -796,28 +781,16 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 	filePostText := gallery.GlobalIndex.FilePostText(platform, username)
 
 	if filter != "all" {
-		filtered := allFiles[:0]
-		for _, f := range allFiles {
-			if f.Type == filter {
-				filtered = append(filtered, f)
-			}
-		}
-		allFiles = filtered
+		allFiles = gallery.Keep(allFiles, func(f templates.GalleryFileData) bool { return f.Type == filter })
 	}
 
 	if search != "" {
 		search = strings.ToLower(strings.TrimSpace(search))
-		filtered := allFiles[:0]
-		for _, f := range allFiles {
-			matchesFilename := strings.Contains(strings.ToLower(f.Filename), search)
-			matchesDate := strings.Contains(f.Date, search)
-			postText := strings.ToLower(filePostText[f.Filename])
-			matchesPost := fuzzyContains(postText, search)
-			if matchesFilename || matchesDate || matchesPost {
-				filtered = append(filtered, f)
-			}
-		}
-		allFiles = filtered
+		allFiles = gallery.Keep(allFiles, func(f templates.GalleryFileData) bool {
+			return strings.Contains(strings.ToLower(f.Filename), search) ||
+				strings.Contains(f.Date, search) ||
+				fuzzyContains(strings.ToLower(filePostText[f.Filename]), search)
+		})
 	}
 
 	allFiles = gallery.FilterByYearMonth(allFiles, func(f templates.GalleryFileData) string { return f.Date }, gallery.SplitList(year), gallery.SplitList(month))
@@ -834,22 +807,11 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 			if !gallery.TagSelected(gallery.SplitList(p.Tags), gallery.Hashtags(rp.Text)) {
 				continue
 			}
-			for _, mu := range rp.MediaURLs {
-				if gf := a.findLocalFile(mu, platform, username, byName); gf != nil {
-					matchingFilenames[gf.Filename] = true
-				}
-			}
-			if gf := byName[rp.TweetID+"_video.mp4"]; gf != nil {
+			for _, gf := range a.postLocalFiles(rp, platform, username, byName) {
 				matchingFilenames[gf.Filename] = true
 			}
 		}
-		filtered := allFiles[:0]
-		for _, f := range allFiles {
-			if matchingFilenames[f.Filename] {
-				filtered = append(filtered, f)
-			}
-		}
-		allFiles = filtered
+		allFiles = gallery.Keep(allFiles, func(f templates.GalleryFileData) bool { return matchingFilenames[f.Filename] })
 	}
 
 	pageFiles, totalPages := gallery.Page(allFiles, page, galleryPageSize)
@@ -883,19 +845,13 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 		}
 
 		var localFiles []templates.GalleryPostMediaFile
-		for _, mediaURL := range p.MediaURLs {
-			gf := a.findLocalFile(mediaURL, gp.Platform, gp.Username, byName)
-			if gf == nil && p.TweetID != "" {
-				gf = byName[p.TweetID+"_video.mp4"]
-			}
-			if gf != nil {
-				localFiles = append(localFiles, templates.GalleryPostMediaFile{
-					Filename:     gf.Filename,
-					URL:          gf.URL,
-					ThumbnailURL: gf.ThumbnailURL,
-					IsVideo:      gf.Type == "video",
-				})
-			}
+		for _, gf := range a.postLocalFiles(p, gp.Platform, gp.Username, byName) {
+			localFiles = append(localFiles, templates.GalleryPostMediaFile{
+				Filename:     gf.Filename,
+				URL:          gf.URL,
+				ThumbnailURL: gf.ThumbnailURL,
+				IsVideo:      gf.Type == "video",
+			})
 		}
 
 		var youtubeURLs []templates.GalleryPostYoutubeURL
@@ -931,25 +887,17 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 
 	if gp.Search != "" {
 		searchLower := strings.ToLower(gp.Search)
-		filtered := allPosts[:0]
-		for _, p := range allPosts {
-			if strings.Contains(strings.ToLower(p.CleanText), searchLower) ||
+		allPosts = gallery.Keep(allPosts, func(p templates.GalleryPostData) bool {
+			return strings.Contains(strings.ToLower(p.CleanText), searchLower) ||
 				strings.Contains(strings.ToLower(p.TweetID), searchLower) ||
-				strings.Contains(p.DateLabel, gp.Search) {
-				filtered = append(filtered, p)
-			}
-		}
-		allPosts = filtered
+				strings.Contains(p.DateLabel, gp.Search)
+		})
 	}
 
 	if gp.Tags != "" && gp.Tags != "all" {
-		filtered := allPosts[:0]
-		for _, p := range allPosts {
-			if gallery.TagSelected(gallery.SplitList(gp.Tags), gallery.Hashtags(p.CleanText)) {
-				filtered = append(filtered, p)
-			}
-		}
-		allPosts = filtered
+		allPosts = gallery.Keep(allPosts, func(p templates.GalleryPostData) bool {
+			return gallery.TagSelected(gallery.SplitList(gp.Tags), gallery.Hashtags(p.CleanText))
+		})
 	}
 
 	allPosts = gallery.FilterByYearMonth(allPosts, func(p templates.GalleryPostData) string { return p.DateLabel }, gallery.SplitList(gp.Year), gallery.SplitList(gp.Month))

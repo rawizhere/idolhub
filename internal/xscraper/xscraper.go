@@ -25,10 +25,8 @@ const (
 
 // Scraper fetches user timelines from the x.com frontend GraphQL API.
 type Scraper struct {
-	client     *xClient
-	limiter    *rate.Limiter
-	authToken  string
-	delayEvery time.Duration
+	client  *xClient
+	limiter *rate.Limiter
 }
 
 // New creates a scraper bound to an auth_token cookie.
@@ -42,10 +40,8 @@ func New(authToken string) (*Scraper, error) {
 		return nil, err
 	}
 	return &Scraper{
-		client:     client,
-		limiter:    rate.NewLimiter(rate.Every(5*time.Second), 1),
-		authToken:  authToken,
-		delayEvery: 5 * time.Second,
+		client:  client,
+		limiter: rate.NewLimiter(rate.Every(5*time.Second), 1),
 	}, nil
 }
 
