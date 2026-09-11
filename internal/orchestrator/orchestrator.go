@@ -306,7 +306,10 @@ func (o *Orchestrator) AppendTaskLog(username string, t time.Time, level, msg st
 	p, exists := o.progress[username]
 	if exists {
 		p.Logs = pushLog(p.Logs, t, level, msg)
-		p.UpdatedAt = time.Now()
+		// don't clobber the last_sync watermark after the task stops running
+		if p.Status == "running" {
+			p.UpdatedAt = time.Now()
+		}
 	}
 
 	o.globalLogs = pushLog(o.globalLogs, t, level, fmt.Sprintf("[@%s] %s", username, msg))
@@ -489,6 +492,8 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	opts.TikTokCookies = c.TikTokCookies
 	opts.Posts = o.posts
 
+	// watermark = start time: posts during a long scrape must not be skipped next run
+	scrapeStart := time.Now()
 	s, ok := scraper.Get(platform)
 	if !ok {
 		err = fmt.Errorf("unknown platform: %s", platform)
@@ -516,7 +521,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 		p.Status = "completed"
 		p.Progress = 100
 		p.AuthError = false
-		p.UpdatedAt = time.Now()
+		p.UpdatedAt = scrapeStart
 	}
 	p.mediaCountCachedAt = time.Time{}
 	if o.mediaIndex != nil {

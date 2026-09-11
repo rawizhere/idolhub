@@ -81,6 +81,12 @@ func newIGClient(sessionID string) *igClient {
 	}
 }
 
+// sessionRedirectErr: a 3xx instead of content means Instagram does not accept
+// our session cookie and is bouncing us to the login page.
+func sessionRedirectErr(code int) error {
+	return fmt.Errorf("unexpected status %d: instagram session cookie (sessionid) is invalid or expired", code)
+}
+
 // bootstrap fetches the csrf token and own user id cookies Instagram now
 // requires for its web graphql endpoints.
 func (c *igClient) bootstrap(ctx context.Context) error {
@@ -132,6 +138,9 @@ func (c *igClient) fetchPage(ctx context.Context, pageURL string) ([]byte, error
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != fhttp.StatusOK {
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			return nil, sessionRedirectErr(resp.StatusCode)
+		}
 		return nil, download.StatusError(resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
@@ -184,6 +193,9 @@ func (c *igClient) doGet(ctx context.Context, apiURL, username string) ([]byte, 
 	case fhttp.StatusTooManyRequests:
 		return nil, fmt.Errorf("%w: instagram returned 429", download.ErrRateLimited)
 	default:
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			return nil, sessionRedirectErr(resp.StatusCode)
+		}
 		return nil, download.StatusError(resp.StatusCode)
 	}
 }
@@ -273,6 +285,9 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 	case fhttp.StatusTooManyRequests:
 		return nil, fmt.Errorf("%w: instagram returned 429", download.ErrRateLimited)
 	default:
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			return nil, sessionRedirectErr(resp.StatusCode)
+		}
 		return nil, download.StatusError(resp.StatusCode)
 	}
 }
