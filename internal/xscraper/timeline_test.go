@@ -93,11 +93,7 @@ func TestParseTimelineGolden(t *testing.T) {
 }
 
 func TestBestVariant(t *testing.T) {
-	variants := []struct {
-		Bitrate     int    `json:"bitrate"`
-		ContentType string `json:"content_type"`
-		URL         string `json:"url"`
-	}{
+	variants := []videoVariant{
 		{632000, "video/mp4", "https://video.twimg.com/small.mp4?tag=10"},
 		{2176000, "video/mp4", "https://video.twimg.com/big.mp4?tag=10"},
 		{256000, "application/x-mpegURL", "https://video.twimg.com/pl.m3u8"},
@@ -112,11 +108,7 @@ func TestBestVariant(t *testing.T) {
 	if got := bestVariant(nil, true); got != "" {
 		t.Errorf("bestVariant(empty) = %q", got)
 	}
-	gifVariants := []struct {
-		Bitrate     int    `json:"bitrate"`
-		ContentType string `json:"content_type"`
-		URL         string `json:"url"`
-	}{
+	gifVariants := []videoVariant{
 		{0, "image/gif", "https://video.twimg.com/g.gif"},
 		{1000000, "video/mp4", "https://video.twimg.com/g.mp4"},
 	}

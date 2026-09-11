@@ -28,25 +28,16 @@ type Options struct {
 	Posts                 *store.PostStore
 }
 
-// Scraper is a scrape function for a platform.
-type Scraper func(ctx context.Context, t Target, opts Options) error
+// scrapeFunc is a scrape function for a platform.
+type scrapeFunc func(ctx context.Context, t Target, opts Options) error
 
-// Scrape runs the scrape function.
-func (s Scraper) Scrape(ctx context.Context, t Target, opts Options) error {
-	return s(ctx, t, opts)
-}
-
-var registry = map[string]Scraper{
+var registry = map[string]scrapeFunc{
 	"twitter":   ScrapeTwitterUser,
 	"instagram": ScrapeInstagramUser,
 	"tiktok":    ScrapeYTDLP,
 }
 
-func Register(platform string, s Scraper) {
-	registry[platform] = s
-}
-
-func Get(platform string) (Scraper, bool) {
+func Get(platform string) (scrapeFunc, bool) {
 	s, ok := registry[platform]
 	return s, ok
 }

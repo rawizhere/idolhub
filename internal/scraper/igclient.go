@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"math/rand"
 	"net/url"
 	"regexp"
 	"strings"
@@ -16,8 +15,8 @@ import (
 
 	fhttp "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
-	"github.com/bogdanfinn/tls-client/profiles"
 
+	"idolhub/internal/browser"
 	"idolhub/internal/download"
 
 	"golang.org/x/time/rate"
@@ -44,22 +43,6 @@ var igLimiter = rate.NewLimiter(rate.Every(2*time.Second), 1)
 // igPkRe extracts the logged-in user id from the accounts/edit page HTML.
 var igPkRe = regexp.MustCompile(`"pk":"(\d+)"|"id":"(\d{6,})"`)
 
-// igTLSProfile pairs a tls fingerprint with a matching User-Agent so the
-// client looks like one coherent browser build.
-type igTLSProfile struct {
-	profile profiles.ClientProfile
-	ua      string
-}
-
-var igTLSProfiles = []igTLSProfile{
-	{profiles.Chrome_131, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},
-	{profiles.Chrome_133, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"},
-	{profiles.Chrome_146, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"},
-	{profiles.Chrome_152, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36"},
-	{profiles.Firefox_135, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:135.0) Gecko/20100101 Firefox/135.0"},
-	{profiles.Firefox_148, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:148.0) Gecko/20100101 Firefox/148.0"},
-}
-
 type igClient struct {
 	client  tls_client.HttpClient
 	limiter *rate.Limiter
@@ -70,7 +53,7 @@ type igClient struct {
 }
 
 func newIGClient(sessionID string) *igClient {
-	tp := igTLSProfiles[rand.Intn(len(igTLSProfiles))]
+	tp := browser.Random()
 	jar, _ := fcookiejar.New(nil)
 	u := &url.URL{Scheme: "https", Host: "www.instagram.com", Path: "/"}
 	jar.SetCookies(u, []*fhttp.Cookie{{
@@ -83,19 +66,25 @@ func newIGClient(sessionID string) *igClient {
 	}})
 	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
 		tls_client.WithTimeoutSeconds(30),
-		tls_client.WithClientProfile(tp.profile),
+		tls_client.WithClientProfile(tp.Profile),
 		tls_client.WithCookieJar(jar),
 		tls_client.WithNotFollowRedirects(),
 	)
 	if err != nil {
 		slog.Error("Failed to create tls client, check profiles", "error", err)
 	}
-	slog.Info("Instagram client using rotated TLS profile", "tls_fingerprint", tp.profile.GetClientHelloStr())
+	slog.Info("Instagram client using rotated TLS profile", "tls_fingerprint", tp.Profile.GetClientHelloStr())
 	return &igClient{
 		client:  client,
 		limiter: igLimiter,
-		ua:      tp.ua,
+		ua:      tp.UA,
 	}
+}
+
+// sessionRedirectErr: a 3xx instead of content means Instagram does not accept
+// our session cookie and is bouncing us to the login page.
+func sessionRedirectErr(code int) error {
+	return fmt.Errorf("unexpected status %d: instagram session cookie (sessionid) is invalid or expired", code)
 }
 
 // bootstrap fetches the csrf token and own user id cookies Instagram now
@@ -149,6 +138,9 @@ func (c *igClient) fetchPage(ctx context.Context, pageURL string) ([]byte, error
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != fhttp.StatusOK {
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			return nil, sessionRedirectErr(resp.StatusCode)
+		}
 		return nil, download.StatusError(resp.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
@@ -201,6 +193,9 @@ func (c *igClient) doGet(ctx context.Context, apiURL, username string) ([]byte, 
 	case fhttp.StatusTooManyRequests:
 		return nil, fmt.Errorf("%w: instagram returned 429", download.ErrRateLimited)
 	default:
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			return nil, sessionRedirectErr(resp.StatusCode)
+		}
 		return nil, download.StatusError(resp.StatusCode)
 	}
 }
@@ -290,6 +285,9 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 	case fhttp.StatusTooManyRequests:
 		return nil, fmt.Errorf("%w: instagram returned 429", download.ErrRateLimited)
 	default:
+		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+			return nil, sessionRedirectErr(resp.StatusCode)
+		}
 		return nil, download.StatusError(resp.StatusCode)
 	}
 }

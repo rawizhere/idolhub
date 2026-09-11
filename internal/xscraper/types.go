@@ -135,15 +135,17 @@ type legacyTweet struct {
 	} `json:"extended_entities"`
 }
 
+type videoVariant struct {
+	Bitrate     int    `json:"bitrate"`
+	ContentType string `json:"content_type"`
+	URL         string `json:"url"`
+}
+
 type extendedMedia struct {
 	IDStr         string `json:"id_str"`
 	Type          string `json:"type"`
 	MediaURLHTTPS string `json:"media_url_https"`
 	VideoInfo     struct {
-		Variants []struct {
-			Bitrate     int    `json:"bitrate"`
-			ContentType string `json:"content_type"`
-			URL         string `json:"url"`
-		} `json:"variants"`
+		Variants []videoVariant `json:"variants"`
 	} `json:"video_info"`
 }

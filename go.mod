@@ -5,15 +5,12 @@ go 1.27.0
 require (
 	github.com/a-h/templ v0.3.1020
 	github.com/agnivade/levenshtein v1.2.1
-	github.com/avast/retry-go/v4 v4.7.0
 	github.com/bogdanfinn/fhttp v0.6.9
 	github.com/bogdanfinn/tls-client v1.16.0
 	github.com/disintegration/imaging v1.6.2
-	github.com/dustin/go-humanize v1.0.1
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/lrstanley/go-ytdlp v1.3.6
 	github.com/pressly/goose/v3 v3.28.0
-	github.com/robfig/cron/v3 v3.0.1
 	github.com/tmaxmax/go-sse v0.11.0
 	golang.org/x/image v0.45.0
 	golang.org/x/sync v0.23.0
@@ -33,6 +30,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cli/browser v1.3.0 // indirect
 	github.com/cloudflare/circl v1.6.5 // indirect
+	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fatih/color v1.16.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect

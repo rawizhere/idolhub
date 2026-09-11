@@ -16,18 +16,23 @@ func SplitList(v string) []string {
 	return strings.Split(v, ",")
 }
 
+// Keep returns items matching pred, in place.
+func Keep[T any](items []T, pred func(T) bool) []T {
+	filtered := items[:0]
+	for _, item := range items {
+		if pred(item) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
 // FilterByYearMonth keeps items whose date prefix matches the selected years and months.
 func FilterByYearMonth[T any](items []T, date func(T) string, years, months []string) []T {
 	if len(years) == 0 && len(months) == 0 {
 		return items
 	}
-	filtered := items[:0]
-	for _, item := range items {
-		if matchYearMonth(date(item), years, months) {
-			filtered = append(filtered, item)
-		}
-	}
-	return filtered
+	return Keep(items, func(item T) bool { return matchYearMonth(date(item), years, months) })
 }
 
 func matchYearMonth(date string, years, months []string) bool {
@@ -52,11 +57,8 @@ func Hashtags(text string) []string {
 // TagSelected reports whether any selected tag appears among post tags.
 func TagSelected(selected, postTags []string) bool {
 	for _, st := range selected {
-		st = strings.ToLower(strings.TrimSpace(st))
-		for _, pt := range postTags {
-			if pt == st {
-				return true
-			}
+		if slices.Contains(postTags, strings.ToLower(strings.TrimSpace(st))) {
+			return true
 		}
 	}
 	return false
