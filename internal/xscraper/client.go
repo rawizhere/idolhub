@@ -36,7 +36,7 @@ type xClient struct {
 }
 
 func newXClient(authToken, csrfToken string) (*xClient, error) {
-	tp := browser.Random()
+	tp := browser.FirefoxProfile
 	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), []tls_client.HttpClientOption{
 		tls_client.WithTimeoutSeconds(30),
 		tls_client.WithClientProfile(tp.Profile),
@@ -56,8 +56,12 @@ func (c *xClient) get(ctx context.Context, rawURL string) ([]byte, error) {
 	req.Header = fhttp.Header{
 		"user-agent":                []string{c.ua},
 		"accept":                    []string{"*/*"},
+		"accept-language":           []string{"en-US,en;q=0.9"},
 		"authorization":             []string{"Bearer " + bearer},
 		"cookie":                    []string{"auth_token=" + c.authToken + "; ct0=" + c.csrfToken},
+		"sec-fetch-dest":            []string{"empty"},
+		"sec-fetch-mode":            []string{"cors"},
+		"sec-fetch-site":            []string{"same-origin"},
 		"x-csrf-token":              []string{c.csrfToken},
 		"x-twitter-active-user":     []string{"yes"},
 		"x-twitter-client-language": []string{"en"},
@@ -71,6 +75,9 @@ func (c *xClient) get(ctx context.Context, rawURL string) ([]byte, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
+	}
+	if len(body) == 0 {
+		return nil, fmt.Errorf("x.com returned an empty body with status %d", resp.StatusCode)
 	}
 	if resp.StatusCode == fhttp.StatusTooManyRequests {
 		return nil, &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}

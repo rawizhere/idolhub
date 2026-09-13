@@ -23,8 +23,7 @@ type Pool[T any] struct {
 	s atomic.Int32
 }
 
-// Start launches workers consuming jobs immediately, so the caller can keep
-// producing into jobs concurrently. Call Wait after closing jobs.
+// Start launches workers right away; close jobs, then call Wait.
 func Start[T any](ctx context.Context, jobs <-chan T, numWorkers int, fn func(ctx context.Context, item T) bool) *Pool[T] {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(numWorkers)

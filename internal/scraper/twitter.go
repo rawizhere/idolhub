@@ -55,7 +55,8 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	}
 	slog.Info("Scraping Twitter target user", "user", username, "platform", "twitter", "save_text", saveText, "skip_retweets", skipRetweets, "filters", filters, "download_photos", downloadPhotos, "download_videos", downloadVideos, "last_sync", lastSync)
 
-	if opts.TwitterAuthToken == "" {
+	authToken := opts.TwitterAuthToken
+	if authToken == "" {
 		err := fmt.Errorf("twitter auth token is not set in settings")
 		slog.Error("Scraper aborted", "error", err)
 		return err
@@ -78,7 +79,8 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 		return downloadTwitterMedia(ctx, item, outputDir, client, username)
 	})
 
-	s, err := xscraper.New(opts.TwitterAuthToken)
+	// xscraper generates the csrf token and falls back to built-in defaults.
+	s, err := xscraper.New(xscraper.Session{AuthToken: authToken})
 	if err != nil {
 		return fmt.Errorf("failed to init twitter client: %w", err)
 	}

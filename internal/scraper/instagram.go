@@ -21,13 +21,14 @@ import (
 )
 
 func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
-	if opts.InstagramSessionID == "" {
+	sessionID := opts.InstagramSessionID
+	if sessionID == "" {
 		return fmt.Errorf("instagram session ID is not configured")
 	}
 	if opts.Posts == nil {
 		return fmt.Errorf("post store is not configured")
 	}
-	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync, opts.ForceFull, opts.InstagramSessionID, opts.InstagramGraphQLDocID, opts.Posts, opts.OnProgress)
+	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync, opts.ForceFull, sessionID, opts.Posts, opts.OnProgress)
 }
 
 // igFeedItem is one media node from the graphql user timeline response.
@@ -99,7 +100,7 @@ func bestVideoURL(vs []igVideoVersion) string {
 }
 
 // scrapeInstagramDirect pulls timeline media via the private Instagram web API
-func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, forceFull bool, sessionID, docID string, posts *store.PostStore, onProgress func(pct int, msg string)) error {
+func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, forceFull bool, sessionID string, posts *store.PostStore, onProgress func(pct int, msg string)) error {
 	if sessionID == "" {
 		return fmt.Errorf("instagram session ID is not set")
 	}
@@ -121,9 +122,10 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	}
 
 	client := newIGClient(sessionID)
-	client.docID = resolveIGDocID(docID)
-	if err := client.bootstrap(ctx); err != nil {
-		slog.Warn("Instagram client bootstrap failed, graphql requests may be rejected", "user", username, "error", err)
+	if client.csrf == "" || client.userID == "" {
+		if err := client.bootstrap(ctx); err != nil {
+			slog.Warn("Instagram client bootstrap failed, graphql requests may be rejected", "user", username, "error", err)
+		}
 	}
 	userID, err := client.resolveUserID(ctx, username)
 	if err != nil {
@@ -319,14 +321,17 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 }
 
 // resolveUserID resolves the numeric user ID from username, doubling as a session check.
+// topsearch goes first: web_profile_info is heavily throttled.
 func (c *igClient) resolveUserID(ctx context.Context, username string) (string, error) {
+	if id, err := c.resolveUserIDTopsearch(ctx, username); err == nil {
+		return id, nil
+	} else {
+		slog.Debug("Instagram topsearch failed, trying web_profile_info", "username", username, "error", err)
+	}
+
 	profileAPI := fmt.Sprintf("https://www.instagram.com/api/v1/users/web_profile_info/?username=%s", url.PathEscape(username))
 	profileBytes, err := c.doGet(ctx, profileAPI, username)
-	if err != nil {
-		// web_profile_info is heavily throttled by Instagram; topsearch
-		// still works with the ds_user_id cookie, so always try it.
-		slog.Warn("Instagram web_profile_info returned error, falling back to search", "username", username, "error", err)
-	} else {
+	if err == nil {
 		var profile struct {
 			Data struct {
 				User struct {
@@ -339,12 +344,15 @@ func (c *igClient) resolveUserID(ctx context.Context, username string) (string, 
 		}
 	}
 
+	return "", fmt.Errorf("%w: could not resolve Instagram user ID for @%s (session may be expired or rate-limited)", ErrAuthExpired, username)
+}
+
+func (c *igClient) resolveUserIDTopsearch(ctx context.Context, username string) (string, error) {
 	searchAPI := fmt.Sprintf("https://www.instagram.com/api/v1/web/search/topsearch/?query=%s", url.PathEscape(username))
 	searchBytes, err := c.doGet(ctx, searchAPI, username)
 	if err != nil {
 		return "", fmt.Errorf("failed to query Instagram search API: %w", err)
 	}
-
 	var search struct {
 		Users []struct {
 			User struct {
@@ -353,15 +361,15 @@ func (c *igClient) resolveUserID(ctx context.Context, username string) (string, 
 			} `json:"user"`
 		} `json:"users"`
 	}
-	if err := json.Unmarshal(searchBytes, &search); err == nil {
-		for _, u := range search.Users {
-			if strings.EqualFold(u.User.Username, username) {
-				return u.User.ID, nil
-			}
+	if err := json.Unmarshal(searchBytes, &search); err != nil {
+		return "", err
+	}
+	for _, u := range search.Users {
+		if strings.EqualFold(u.User.Username, username) {
+			return u.User.ID, nil
 		}
 	}
-
-	return "", fmt.Errorf("%w: could not resolve Instagram user ID for @%s (session may be expired or rate-limited)", ErrAuthExpired, username)
+	return "", fmt.Errorf("username %s not found in topsearch results", username)
 }
 
 type igFileIndex struct {

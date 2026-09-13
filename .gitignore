@@ -36,6 +36,10 @@ bin/
 *.swo
 *~
 
+# --- Agent artifacts ---
+research/
+session_state.json
+
 # --- Config ---
 configs/config.json
 configs/idolhub.db

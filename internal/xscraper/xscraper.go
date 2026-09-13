@@ -6,42 +6,79 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	mrand "math/rand"
 	"net/url"
+	"strings"
 	"time"
 
 	"golang.org/x/time/rate"
 )
 
 const (
-	gqlURL    = "https://x.com/i/api/graphql"
-	bearer    = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
-	userAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+	gqlURL = "https://x.com/i/api/graphql"
+	bearer = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
 
-	opUserByScreenName = "Gb-d6r0vxPOADdG62OEBpQ/UserByScreenName"
-	opUserTweets       = "eoJ5zbv51Z_KVl81v9PmLQ/UserTweets"
-	opUserMedia        = "2tLOJWwGuCTytDrGBg8VwQ/UserMedia"
+	opUserByScreenName = "UserByScreenName"
+	opUserTweets       = "UserTweets"
+	opUserMedia        = "UserMedia"
 )
+
+// defaultQueryIDs are the built-in queryId fallbacks.
+var defaultQueryIDs = map[string]string{
+	opUserByScreenName: "Gb-d6r0vxPOADdG62OEBpQ",
+	opUserTweets:       "eoJ5zbv51Z_KVl81v9PmLQ",
+	opUserMedia:        "2tLOJWwGuCTytDrGBg8VwQ",
+}
+
+// Session carries X credentials and metadata; zero values use built-ins.
+type Session struct {
+	AuthToken string
+	CSRFToken string            // ct0; generated when empty
+	QueryIDs  map[string]string // operation name -> queryId
+	Features  map[string]any    // graphql features dictionary
+}
 
 // Scraper fetches user timelines from the x.com frontend GraphQL API.
 type Scraper struct {
-	client  *xClient
-	limiter *rate.Limiter
+	client      *xClient
+	limiter     *rate.Limiter
+	queryIDs    map[string]string
+	features    map[string]any
+	lastHarvest time.Time
 }
 
-// New creates a scraper bound to an auth_token cookie.
-func New(authToken string) (*Scraper, error) {
-	csrf := make([]byte, 16)
-	if _, err := rand.Read(csrf); err != nil {
-		return nil, err
+// New creates a scraper bound to an X session.
+func New(sess Session) (*Scraper, error) {
+	if sess.AuthToken == "" {
+		return nil, errors.New("twitter auth token is empty")
 	}
-	client, err := newXClient(authToken, hex.EncodeToString(csrf))
+	csrf := sess.CSRFToken
+	if csrf == "" {
+		b := make([]byte, 16)
+		if _, err := rand.Read(b); err != nil {
+			return nil, err
+		}
+		csrf = hex.EncodeToString(b)
+	}
+	queryIDs := sess.QueryIDs
+	if queryIDs == nil {
+		queryIDs = defaultQueryIDs
+	}
+	features := sess.Features
+	if features == nil {
+		features = timelineFeatures()
+	}
+	client, err := newXClient(sess.AuthToken, csrf)
 	if err != nil {
 		return nil, err
 	}
 	return &Scraper{
-		client:  client,
-		limiter: rate.NewLimiter(rate.Every(5*time.Second), 1),
+		client:   client,
+		limiter:  rate.NewLimiter(rate.Every(5*time.Second), 1),
+		queryIDs: queryIDs,
+		features: features,
 	}, nil
 }
 
@@ -143,7 +180,7 @@ func (s *Scraper) userTimeline(ctx context.Context, op, screenName string, max i
 
 func (s *Scraper) userID(ctx context.Context, screenName string) (string, error) {
 	vars := map[string]interface{}{"screen_name": screenName}
-	body, err := s.doGet(ctx, gqlURL+"/"+opUserByScreenName, vars)
+	body, err := s.doGet(ctx, opUserByScreenName, vars)
 	if err != nil {
 		return "", err
 	}
@@ -152,22 +189,45 @@ func (s *Scraper) userID(ctx context.Context, screenName string) (string, error)
 
 const maxRateLimitRetries = 5
 
-func (s *Scraper) doGet(ctx context.Context, endpoint string, vars map[string]interface{}) ([]byte, error) {
+func (s *Scraper) doGet(ctx context.Context, op string, vars map[string]interface{}) ([]byte, error) {
+	body, err := s.doGetOnce(ctx, op, vars)
+	// Deploy rotated the hashes: re-harvest once and retry.
+	if err != nil && isUnknownQueryErr(err) && s.harvestDue() {
+		if _, herr := s.refreshQueryIDs(ctx); herr == nil {
+			body, err = s.doGetOnce(ctx, op, vars)
+		} else {
+			slog.Warn("Twitter queryId harvest failed", "operation", op, "error", herr)
+		}
+	}
+	return body, err
+}
+
+func (s *Scraper) doGetOnce(ctx context.Context, op string, vars map[string]interface{}) ([]byte, error) {
 	if err := s.limiter.Wait(ctx); err != nil {
 		return nil, err
 	}
+	// Random extra pause: fixed intervals are a clean automation signal.
+	time.Sleep(time.Duration(mrand.Int63n(2500)) * time.Millisecond)
+	qid := s.queryIDs[op]
+	if qid == "" {
+		return nil, fmt.Errorf("no queryId known for operation %s", op)
+	}
 	varsJSON, _ := json.Marshal(vars)
-	featsJSON, _ := json.Marshal(timelineFeatures())
-	u := endpoint + "?variables=" + url.QueryEscape(string(varsJSON)) + "&features=" + url.QueryEscape(string(featsJSON))
+	featsJSON, _ := json.Marshal(s.features)
+	u := gqlURL + "/" + qid + "/" + op + "?variables=" + url.QueryEscape(string(varsJSON)) + "&features=" + url.QueryEscape(string(featsJSON))
 	return s.client.get(ctx, u)
 }
 
-// doTimelinePage fetches one timeline page and retries while x.com reports a rate limit,
-// either as HTTP 429 or as a graphql error payload with HTTP 200.
+// isUnknownQueryErr reports whether X rejected the queryId hash.
+func isUnknownQueryErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "Cannot find query with id")
+}
+
+// doTimelinePage fetches one timeline page, retrying on graphql rate limits.
 func (s *Scraper) doTimelinePage(ctx context.Context, op string, vars map[string]interface{}) ([]*Tweet, string, error) {
 	backoff := 15 * time.Second
 	for attempt := 0; ; attempt++ {
-		body, err := s.doGet(ctx, gqlURL+"/"+op, vars)
+		body, err := s.doGet(ctx, op, vars)
 		if err == nil {
 			var tweets []*Tweet
 			var next string

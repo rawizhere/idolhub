@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -273,7 +275,7 @@ func (o *Orchestrator) SyncTargets(accounts []config.Account) {
 		current[acc.Username] = true
 		if _, exists := o.progress[acc.Username]; !exists {
 			status, updatedAt := o.loadPersistedSyncInfo(acc.Platform, acc.Username)
-			// Stale "running" or "queued" status from a previous instance — reset to idle
+			// Stale "running" or "queued" status from a previous instance; reset to idle
 			if status == "running" || status == "queued" {
 				status = "idle"
 				o.SavePersistedSyncInfo(acc.Platform, acc.Username, "idle", updatedAt)
@@ -488,7 +490,6 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 
 	opts.TwitterAuthToken = c.TwitterAuthToken
 	opts.InstagramSessionID = c.InstagramSessionID
-	opts.InstagramGraphQLDocID = c.InstagramGraphQLDocID
 	opts.TikTokCookies = c.TikTokCookies
 	opts.Posts = o.posts
 
@@ -503,6 +504,10 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 			defer o.twitterMu.Unlock()
 		}
 		err = s(timeoutCtx, target, opts)
+	}
+
+	if err != nil {
+		hintSessionRefresh(err)
 	}
 
 	o.mu.Lock()
@@ -680,6 +685,9 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 			if wait <= 0 {
 				wait = time.Minute
 			}
+			// Wake a random 0-20 min off the exact boundary; fixed wall-clock
+			// times twice a day are a signature.
+			wait += time.Duration(rand.Int63n(int64(20 * time.Minute)))
 		}
 		select {
 		case <-ctx.Done():
@@ -701,7 +709,11 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 		}
 		o.mu.RUnlock()
 
-		for _, acc := range c.Accounts {
+		// Random order and uneven gaps: a fixed sequence at fixed gaps
+		// reads as a batch job.
+		accs := slices.Clone(c.Accounts)
+		rand.Shuffle(len(accs), func(i, j int) { accs[i], accs[j] = accs[j], accs[i] })
+		for _, acc := range accs {
 			if runningSet[acc.Username] {
 				slog.Debug("Skipping auto-sync, task already running or queued", "user", acc.Username)
 				continue
@@ -710,11 +722,21 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(10 * time.Second):
+			case <-time.After(15*time.Second + time.Duration(rand.Int63n(int64(75*time.Second)))):
 			}
 		}
 		o.mu.Lock()
 		o.LastSync = time.Now()
 		o.mu.Unlock()
+	}
+}
+
+// hintSessionRefresh tells the operator how to restore a stale scraping session.
+func hintSessionRefresh(err error) {
+	switch {
+	case errors.Is(err, scraper.ErrAuthExpired):
+		slog.Warn("Scraping session rejected by Instagram; the sessionid cookie expired, paste a fresh one in settings", "error", err)
+	case err != nil && strings.Contains(err.Error(), "Cannot find query with id"):
+		slog.Warn("Twitter rejected the queryId even after the bundle harvest; paste a fresh queryId in settings", "error", err)
 	}
 }

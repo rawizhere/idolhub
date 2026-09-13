@@ -18,14 +18,13 @@ type Target struct {
 }
 
 type Options struct {
-	LastSync              time.Time
-	ForceFull             bool
-	OnProgress            func(pct int, msg string)
-	TwitterAuthToken      string
-	InstagramSessionID    string
-	InstagramGraphQLDocID string
-	TikTokCookies         string
-	Posts                 *store.PostStore
+	LastSync           time.Time
+	ForceFull          bool
+	OnProgress         func(pct int, msg string)
+	TwitterAuthToken   string
+	InstagramSessionID string
+	TikTokCookies      string
+	Posts              *store.PostStore
 }
 
 // scrapeFunc is a scrape function for a platform.

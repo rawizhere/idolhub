@@ -24,7 +24,7 @@ Pinned frontend vendor files. Update together with the sha256 checksums.
 
 Variable woff2, latin subset, served from Google Fonts at fetch time:
 
-- `cmd/parser/web/static/fonts/inter-latin.woff2` — Inter, weight 300–700
+- `cmd/parser/web/static/fonts/inter-latin.woff2`: Inter, weight 300-700
 - sha256: `c940764593d0fe5d596be327ca7558855e018039fb78509aa21921fd3644c3e4`
-- `cmd/parser/web/static/fonts/jetbrains-mono-latin.woff2` — JetBrains Mono, weight 400–600
+- `cmd/parser/web/static/fonts/jetbrains-mono-latin.woff2`: JetBrains Mono, weight 400-600
 - sha256: `2c32b9b3ee358c119e210f6f5195f9bd34894d78a785ff2e95d60e718e400af4`

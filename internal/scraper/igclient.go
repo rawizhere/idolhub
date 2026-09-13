@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,36 +26,77 @@ import (
 
 const igAppID = "936619743392459"
 
-// defaultIGGraphQLDocID is the Relay doc_id of PolarisProfilePostsTabContentQuery_connection.
-// Instagram rotates it with frontend deploys; override it in settings when
-// graphql starts answering with HTML instead of JSON.
-const defaultIGGraphQLDocID = "39535953862670189"
+// Built-in graphql doc_id and frontend build revision. The doc_id refreshes
+// itself from the js bundles when instagram starts answering with HTML.
+const (
+	defaultIGGraphQLDocID = "39535953862670189"
+	defaultIGSpinR        = "1046911589"
+)
 
-// resolveIGDocID falls back to the built-in doc_id when the setting is empty.
-func resolveIGDocID(docID string) string {
-	if docID != "" {
-		return docID
+// igSrcRe extracts script bundle urls from an instagram page.
+var igSrcRe = regexp.MustCompile(`src="([^"]+\.js)"`)
+
+// igOpDocIDRe extracts the profile-posts doc_id from the Relay operation
+// definition inside a JS bundle. Instagram stopped embedding doc_id in the
+// page HTML; the mapping now lives in a bundle next to the query name.
+var igOpDocIDRe = regexp.MustCompile(
+	`PolarisProfilePostsTabContentQuery_connection_instagramRelayOperation",\[\],\(function\([^)]*\)\{[a-z]\.exports="([0-9]{10,21})"`)
+
+// refreshDocID harvests the current doc_id from the JS bundles referenced
+// by the profile page.
+func (c *igClient) refreshDocID(ctx context.Context, username string) error {
+	page, err := c.fetchPage(ctx, "https://www.instagram.com/"+username+"/")
+	if err != nil {
+		return fmt.Errorf("fetch profile page: %w", err)
 	}
-	return defaultIGGraphQLDocID
+	bundles := 0
+	for _, m := range igSrcRe.FindAllStringSubmatch(string(page), -1) {
+		src := m[1]
+		if !strings.HasPrefix(src, "http") {
+			src = "https://www.instagram.com" + src
+		}
+		bundle, err := c.fetchPage(ctx, src)
+		if err != nil {
+			continue
+		}
+		bundles++
+		if dm := igOpDocIDRe.FindStringSubmatch(string(bundle)); dm != nil {
+			c.docID = dm[1]
+			slog.Info("Refreshed Instagram doc_id from js bundle", "doc_id", c.docID, "bundles", bundles)
+			return nil
+		}
+	}
+	return fmt.Errorf("doc_id not found in %d js bundles", bundles)
 }
 
 // igLimiter paces Instagram requests to avoid rate limits.
 var igLimiter = rate.NewLimiter(rate.Every(2*time.Second), 1)
 
+// igPace waits for the limiter, then pauses a random extra 0.3-2.7s.
+func igPace(ctx context.Context) error {
+	if err := igLimiter.Wait(ctx); err != nil {
+		return err
+	}
+	time.Sleep(time.Duration(300+rand.Int63n(2400)) * time.Millisecond)
+	return nil
+}
+
 // igPkRe extracts the logged-in user id from the accounts/edit page HTML.
 var igPkRe = regexp.MustCompile(`"pk":"(\d+)"|"id":"(\d{6,})"`)
 
 type igClient struct {
-	client  tls_client.HttpClient
-	limiter *rate.Limiter
-	ua      string
-	csrf    string
-	userID  string
-	docID   string
+	client tls_client.HttpClient
+	ua     string
+	csrf   string
+	userID string
+	docID  string
+	spinR  string
+
+	docIDRefreshed bool
 }
 
 func newIGClient(sessionID string) *igClient {
-	tp := browser.Random()
+	tp := browser.FirefoxProfile
 	jar, _ := fcookiejar.New(nil)
 	u := &url.URL{Scheme: "https", Host: "www.instagram.com", Path: "/"}
 	jar.SetCookies(u, []*fhttp.Cookie{{
@@ -73,22 +116,33 @@ func newIGClient(sessionID string) *igClient {
 	if err != nil {
 		slog.Error("Failed to create tls client, check profiles", "error", err)
 	}
-	slog.Info("Instagram client using rotated TLS profile", "tls_fingerprint", tp.Profile.GetClientHelloStr())
+	slog.Info("Instagram client TLS profile", "tls_fingerprint", tp.Profile.GetClientHelloStr())
 	return &igClient{
-		client:  client,
-		limiter: igLimiter,
-		ua:      tp.UA,
+		client: client,
+		ua:     tp.UA,
+		docID:  defaultIGGraphQLDocID,
 	}
 }
 
-// sessionRedirectErr: a 3xx instead of content means Instagram does not accept
-// our session cookie and is bouncing us to the login page.
+// csrfFromJar refreshes c.csrf from the cookie jar. resp.Cookies() does not
+// see instagram Set-Cookie headers through the tls-client fork, the jar does.
+func (c *igClient) csrfFromJar() {
+	if jar := c.client.GetCookieJar(); jar != nil {
+		u, _ := url.Parse("https://www.instagram.com")
+		for _, ck := range jar.Cookies(u) {
+			if ck.Name == "csrftoken" && ck.Value != "" {
+				c.csrf = ck.Value
+			}
+		}
+	}
+}
+
+// sessionRedirectErr: a 3xx means the session cookie was rejected.
 func sessionRedirectErr(code int) error {
 	return fmt.Errorf("unexpected status %d: instagram session cookie (sessionid) is invalid or expired", code)
 }
 
-// bootstrap fetches the csrf token and own user id cookies Instagram now
-// requires for its web graphql endpoints.
+// bootstrap fetches the csrf token and own user id via regular pages.
 func (c *igClient) bootstrap(ctx context.Context) error {
 	if _, err := c.fetchPage(ctx, "https://www.instagram.com/"); err != nil {
 		return fmt.Errorf("fetch instagram home: %w", err)
@@ -123,15 +177,18 @@ func (c *igClient) setCookie(name, value string) {
 }
 
 func (c *igClient) fetchPage(ctx context.Context, pageURL string) ([]byte, error) {
-	if err := c.limiter.Wait(ctx); err != nil {
+	if err := igPace(ctx); err != nil {
 		return nil, err
 	}
 	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodGet, pageURL, nil)
 	if err != nil {
 		return nil, err
 	}
+	// Minimal headers on purpose: the Sec-Fetch navigation trio makes
+	// instagram serve a degraded page variant without the doc_id bundles.
 	req.Header.Set("User-Agent", c.ua)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -147,16 +204,12 @@ func (c *igClient) fetchPage(ctx context.Context, pageURL string) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	for _, ck := range resp.Cookies() {
-		if ck.Name == "csrftoken" {
-			c.csrf = ck.Value
-		}
-	}
+	c.csrfFromJar()
 	return body, nil
 }
 
 func (c *igClient) doGet(ctx context.Context, apiURL, username string) ([]byte, error) {
-	if err := c.limiter.Wait(ctx); err != nil {
+	if err := igPace(ctx); err != nil {
 		return nil, err
 	}
 	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodGet, apiURL, nil)
@@ -165,8 +218,12 @@ func (c *igClient) doGet(ctx context.Context, apiURL, username string) ([]byte, 
 	}
 	req.Header.Set("User-Agent", c.ua)
 	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("X-IG-App-ID", igAppID)
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Sec-Fetch-Dest", "empty")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	req.Header.Set("Referer", "https://www.instagram.com/"+username+"/")
 
 	resp, err := c.client.Do(req)
@@ -202,7 +259,7 @@ func (c *igClient) doGet(ctx context.Context, apiURL, username string) ([]byte, 
 
 // doGraphQL fetches one page of the profile posts timeline via the web graphql endpoint.
 func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string, count int) ([]byte, error) {
-	if err := c.limiter.Wait(ctx); err != nil {
+	if err := igPace(ctx); err != nil {
 		return nil, err
 	}
 	vars := map[string]any{
@@ -227,31 +284,48 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 	if err != nil {
 		return nil, err
 	}
+	user := c.userID
+	if user == "" {
+		user = "0"
+	}
+	spinR := c.spinR
+	if spinR == "" {
+		spinR = defaultIGSpinR
+	}
 	form := url.Values{}
-	form.Set("av", "0")
+	form.Set("av", user)
 	form.Set("__d", "www")
-	form.Set("__user", "0")
+	form.Set("__user", user)
 	form.Set("__a", "1")
 	form.Set("__ccg", "EXCELLENT")
 	form.Set("__comet_req", "7")
-	form.Set("__spin_r", "1046911589")
+	form.Set("__spin_r", spinR)
 	form.Set("__spin_b", "trunk")
-	form.Set("__spin_t", "1788682161")
+	form.Set("__spin_t", strconv.FormatInt(time.Now().Unix(), 10))
 	form.Set("__crn", "comet.igweb.PolarisProfilePostsTabRoute")
 	form.Set("fb_api_caller_class", "RelayModern")
 	form.Set("fb_api_req_friendly_name", "PolarisProfilePostsTabContentQuery_connection")
 	form.Set("server_timestamps", "true")
 	form.Set("variables", string(varsJSON))
-	form.Set("doc_id", resolveIGDocID(c.docID))
+	if c.csrf == "" {
+		c.csrfFromJar()
+	}
+	form.Set("doc_id", c.docID)
 
 	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodPost, "https://www.instagram.com/graphql/query", strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", c.ua)
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("X-CSRFToken", c.csrf)
 	req.Header.Set("X-IG-App-ID", igAppID)
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Sec-Fetch-Dest", "empty")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	req.Header.Set("Origin", "https://www.instagram.com")
 	req.Header.Set("Referer", "https://www.instagram.com/"+username+"/")
 
@@ -268,6 +342,15 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 	switch resp.StatusCode {
 	case fhttp.StatusOK:
 		if len(body) > 0 && body[0] == '<' {
+			// Stale doc_id or rejected session: re-read doc_id once.
+			if !c.docIDRefreshed {
+				c.docIDRefreshed = true
+				if rerr := c.refreshDocID(ctx, username); rerr == nil {
+					return c.doGraphQL(ctx, username, userID, after, count)
+				} else {
+					slog.Warn("Instagram doc_id refresh failed", "error", rerr)
+				}
+			}
 			return nil, fmt.Errorf("%w: instagram returned HTML instead of JSON (session rejected or doc_id outdated)", ErrAuthExpired)
 		}
 		return body, nil
@@ -275,6 +358,16 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 		if isRateLimitBody(string(body)) {
 			slog.Warn("Instagram graphql response is rate limiting", "status", resp.StatusCode, "body", strings.TrimSpace(string(body)))
 			return nil, fmt.Errorf("%w: instagram returned %d (rate limited)", download.ErrRateLimited, resp.StatusCode)
+		}
+		// A 403 with a logged-in "Page Not Found" page means an unknown
+		// doc_id, not a dead session; re-read it once before giving up.
+		if len(body) > 0 && body[0] == '<' && !c.docIDRefreshed {
+			c.docIDRefreshed = true
+			if rerr := c.refreshDocID(ctx, username); rerr == nil {
+				return c.doGraphQL(ctx, username, userID, after, count)
+			} else {
+				slog.Warn("Instagram doc_id refresh failed", "error", rerr)
+			}
 		}
 		snippet := strings.TrimSpace(string(body))
 		if len(snippet) > 300 {

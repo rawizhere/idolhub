@@ -1,2 +1,2 @@
-// IdolHub — Application Entrypoint
+// IdolHub application entrypoint
 import "./js/main.js";

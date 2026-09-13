@@ -654,8 +654,7 @@ func (a *App) findLocalFile(mediaURL, platform, username string, byName map[stri
 	return byName[name]
 }
 
-// postLocalFiles resolves a post's media URLs to local files, with the
-// TweetID video fallback.
+// postLocalFiles resolves media URLs to local files, with the TweetID video fallback.
 func (a *App) postLocalFiles(p gallery.Post, platform, username string, byName map[string]*gallery.File) []*gallery.File {
 	var out []*gallery.File
 	for _, mediaURL := range p.MediaURLs {
