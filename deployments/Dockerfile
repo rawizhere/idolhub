@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/idolhub ./cmd/parser
 
 # ---- Runtime ----
-FROM alpine:3.21
+FROM alpine:3.24
 
 ARG YT_DLP_VERSION=2026.08.19
 
