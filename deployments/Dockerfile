@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- Tailwind CSS ----
-FROM node:22-alpine AS tailwind
+FROM node:26-alpine AS tailwind
 WORKDIR /app
 COPY cmd/parser/web/package.json cmd/parser/web/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm     npm ci
