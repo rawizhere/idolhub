@@ -97,7 +97,6 @@ type igClient struct {
 	csrf   string
 	userID string
 	docID  string
-	spinR  string
 
 	docIDRefreshed bool
 	bootMu         sync.Mutex
@@ -346,55 +345,8 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 	if err := igPace(ctx); err != nil {
 		return nil, err
 	}
-	vars := map[string]any{
-		"username":               username,
-		"first":                  count,
-		"after":                  after,
-		"before":                 nil,
-		"last":                   nil,
-		"include_multi_captions": true,
-		"data": map[string]any{
-			"count":                             count,
-			"include_reel_media_seen_timestamp": true,
-			"include_relationship_info":         true,
-			"latest_besties_reel_media":         true,
-			"latest_reel_media":                 true,
-		},
-		"__relay_internal__pv__PolarisMultiCaptionCarouselEnabledrelayprovider":  true,
-		"__relay_internal__pv__PolarisShortDramaEnabledrelayprovider":            false,
-		"__relay_internal__pv__PolarisReelsRecoDebugOverlayEnabledrelayprovider": false,
-	}
-	varsJSON, err := json.Marshal(vars)
-	if err != nil {
-		return nil, err
-	}
-	user := c.userID
-	if user == "" {
-		user = "0"
-	}
-	spinR := c.spinR
-	if spinR == "" {
-		spinR = defaultIGSpinR
-	}
-	form := url.Values{}
-	form.Set("av", user)
-	form.Set("__d", "www")
-	form.Set("__user", user)
-	form.Set("__a", "1")
-	form.Set("__ccg", "EXCELLENT")
-	form.Set("__comet_req", "7")
-	form.Set("__spin_r", spinR)
-	form.Set("__spin_b", "trunk")
+	form := buildGraphQLForm(username, userID, after, count, c.userID, c.csrf, c.docID)
 	form.Set("__spin_t", strconv.FormatInt(time.Now().Unix(), 10))
-	form.Set("__crn", "comet.igweb.PolarisProfilePostsTabRoute")
-	form.Set("fb_api_caller_class", "RelayModern")
-	form.Set("fb_api_req_friendly_name", "PolarisProfilePostsTabContentQuery_connection")
-	form.Set("server_timestamps", "true")
-	form.Set("variables", string(varsJSON))
-	if c.csrf == "" {
-		c.csrfFromJar()
-	}
-	form.Set("doc_id", c.docID)
 
 	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodPost, "https://www.instagram.com/graphql/query", strings.NewReader(form.Encode()))
 	if err != nil {
@@ -485,4 +437,51 @@ func isRateLimitBody(body string) bool {
 		}
 	}
 	return false
+}
+
+// buildGraphQLForm builds the PolarisProfilePostsTabContentQuery form shared
+// by the tls-client and browser fetch paths.
+func buildGraphQLForm(username, userID, after string, count int, ownUserID, csrf, docID string) *url.Values {
+	v := url.Values{}
+	vars := map[string]any{
+		"username":               username,
+		"first":                  count,
+		"after":                  after,
+		"before":                 nil,
+		"last":                   nil,
+		"include_multi_captions": true,
+		"data": map[string]any{
+			"count":                             count,
+			"include_reel_media_seen_timestamp": true,
+			"include_relationship_info":         true,
+			"latest_besties_reel_media":         true,
+			"latest_reel_media":                 true,
+		},
+		"__relay_internal__pv__PolarisMultiCaptionCarouselEnabledrelayprovider":  true,
+		"__relay_internal__pv__PolarisShortDramaEnabledrelayprovider":            false,
+		"__relay_internal__pv__PolarisReelsRecoDebugOverlayEnabledrelayprovider": false,
+	}
+	varsJSON, err := json.Marshal(vars)
+	if err != nil {
+		return &v
+	}
+	user := ownUserID
+	if user == "" {
+		user = "0"
+	}
+	v.Set("av", user)
+	v.Set("__d", "www")
+	v.Set("__user", user)
+	v.Set("__a", "1")
+	v.Set("__ccg", "EXCELLENT")
+	v.Set("__comet_req", "7")
+	v.Set("__spin_r", defaultIGSpinR)
+	v.Set("__spin_b", "trunk")
+	v.Set("__crn", "comet.igweb.PolarisProfilePostsTabRoute")
+	v.Set("fb_api_caller_class", "RelayModern")
+	v.Set("fb_api_req_friendly_name", "PolarisProfilePostsTabContentQuery_connection")
+	v.Set("server_timestamps", "true")
+	v.Set("variables", string(varsJSON))
+	v.Set("doc_id", docID)
+	return &v
 }
