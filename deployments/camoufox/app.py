@@ -151,10 +151,19 @@ async def fetch(req: FetchReq) -> dict:
         try:
             result = await page.evaluate(
                 """async ({url, method, body}) => {
+                    const csrf = document.cookie.split("; ").find(c => c.startsWith("csrftoken="))?.split("=")[1] || "";
+                    const headers = {};
+                    if (body) {
+                        headers["Content-Type"] = "application/x-www-form-urlencoded";
+                        headers["X-CSRFToken"] = csrf;
+                        headers["X-IG-App-ID"] = "936619743392459";
+                        headers["X-Requested-With"] = "XMLHttpRequest";
+                        headers["X-ASBD-ID"] = "198387";
+                    }
                     const r = await fetch(url, {
                         method: method,
                         credentials: "include",
-                        headers: body ? {"Content-Type": "application/x-www-form-urlencoded"} : {},
+                        headers: headers,
                         body: body || undefined,
                     });
                     const text = await r.text();
