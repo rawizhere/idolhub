@@ -436,6 +436,15 @@
       </div>
 
       <div class="flex flex-col gap-1.5 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
+        <label class="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center justify-between" for="twitter-cookies">
+          <span>Twitter / X Cookies (recommended)</span>
+          <span class="text-[10px] text-slate-400 font-mono font-normal">Netscape cookie format</span>
+        </label>
+        <textarea class="w-full bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg p-3 text-xs outline-none focus:border-[#ff9900] font-mono resize-y min-h-[120px] transition-colors leading-relaxed" id="twitter-cookies" placeholder="# Netscape HTTP Cookie File&#10;#HttpOnly_.x.com&#9;TRUE&#9;/&#9;TRUE&#9;1800000000&#9;auth_token&#9;..." rows="6"></textarea>
+        <p class="text-[10px] text-slate-400 dark:text-zinc-500">Full Netscape export (Cookie-Editor extension) of x.com cookies. The real <code class="font-mono text-[#ff9900]">ct0</code> replaces the generated one and device cookies (<code class="font-mono text-[#ff9900]">kdt</code>, <code class="font-mono text-[#ff9900]">twid</code>) keep the session looking like its browser.</p>
+      </div>
+
+      <div class="flex flex-col gap-1.5 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
         <label class="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center justify-between" for="instagram-session-id">
           <span>Instagram Session ID</span>
           <span class="text-[10px] text-slate-400 font-mono font-normal">cookie: sessionid</span>

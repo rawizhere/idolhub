@@ -1,18 +1,18 @@
-package scraper
+package cookies
 
 import (
 	"strings"
 	"testing"
 )
 
-func TestParseNetscapeCookies(t *testing.T) {
+func TestParseNetscape(t *testing.T) {
 	raw := "# Netscape HTTP Cookie File\n" +
 		"#HttpOnly_.instagram.com\tTRUE\t/\tTRUE\t1804283143\tdatr\tFAKE-DATR-VALUE-0000\n" +
 		".instagram.com\tTRUE\t/\tTRUE\t1797416177\tds_user_id\t98765432100\n" +
 		"#HttpOnly_.instagram.com\tTRUE\t/\tTRUE\t1821176162\tsessionid\tabc%3Ad ef\n" +
 		".example.com\tTRUE\t/\tTRUE\t1797416177\tother\tx\n" +
 		"\n"
-	cookies, err := parseNetscapeCookies(raw)
+	cookies, err := ParseNetscape(raw, "instagram.com")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -33,12 +33,12 @@ func TestParseNetscapeCookies(t *testing.T) {
 		t.Errorf("sessionid must keep url encoding, got %q", byName["sessionid"])
 	}
 	if _, ok := byName["other"]; ok {
-		t.Errorf("non-instagram cookie must be filtered out")
+		t.Errorf("non-matching domain cookie must be filtered out")
 	}
 }
 
-func TestParseNetscapeCookiesEmpty(t *testing.T) {
-	if _, err := parseNetscapeCookies("# just a comment\n\n"); err == nil {
+func TestParseNetscapeEmpty(t *testing.T) {
+	if _, err := ParseNetscape("# just a comment\n\n", "instagram.com"); err == nil {
 		t.Fatal("want error for empty cookie set")
 	}
 }

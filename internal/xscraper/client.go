@@ -2,6 +2,7 @@ package xscraper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	tls_client "github.com/bogdanfinn/tls-client"
 
 	"idolhub/internal/browser"
+	"idolhub/internal/cookies"
 )
 
 // RateLimitError is returned on HTTP 429 with the server-provided delay.
@@ -27,15 +29,18 @@ func (e *RateLimitError) Error() string {
 	return "rate limited"
 }
 
-// xClient issues requests with a rotated browser TLS fingerprint.
+// xClient issues requests with a stable browser TLS fingerprint.
 type xClient struct {
 	http      tls_client.HttpClient
 	ua        string
-	authToken string
+	cookieHdr string
 	csrfToken string
 }
 
-func newXClient(authToken, csrfToken string) (*xClient, error) {
+// newXClient builds the client. When a Netscape cookie export is provided it
+// carries the full device context (auth_token, ct0, kdt, twid, guest_id);
+// a bare auth_token with a fabricated ct0 is a weak bot signature.
+func newXClient(authToken, csrfToken, cookiesRaw string) (*xClient, error) {
 	tp := browser.FirefoxProfile
 	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), []tls_client.HttpClientOption{
 		tls_client.WithTimeoutSeconds(30),
@@ -44,8 +49,33 @@ func newXClient(authToken, csrfToken string) (*xClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	slog.Info("Twitter client using rotated TLS profile", "tls_fingerprint", tp.Profile.GetClientHelloStr())
-	return &xClient{http: client, ua: tp.UA, authToken: authToken, csrfToken: csrfToken}, nil
+	pairs := make([]string, 0, 8)
+	if cookiesRaw != "" {
+		parsed, err := cookies.ParseNetscape(cookiesRaw, "x.com")
+		if err != nil {
+			slog.Warn("Ignoring invalid twitter cookie export, falling back to auth_token only", "error", err)
+		} else {
+			slog.Info("Loaded twitter cookie export into client", "cookies", len(parsed))
+			for _, ck := range parsed {
+				pairs = append(pairs, ck.Name+"="+ck.Value)
+				if ck.Name == "auth_token" && authToken == "" {
+					authToken = ck.Value
+				}
+				if ck.Name == "ct0" {
+					csrfToken = ck.Value
+				}
+			}
+		}
+	}
+	if authToken == "" {
+		return nil, errors.New("no x.com auth_token in cookie export")
+	}
+	pairs = append(pairs, "auth_token="+authToken)
+	if csrfToken != "" {
+		pairs = append(pairs, "ct0="+csrfToken)
+	}
+	slog.Info("Twitter client TLS profile", "tls_fingerprint", tp.Profile.GetClientHelloStr())
+	return &xClient{http: client, ua: tp.UA, cookieHdr: strings.Join(pairs, "; "), csrfToken: csrfToken}, nil
 }
 
 func (c *xClient) get(ctx context.Context, rawURL string) ([]byte, error) {
@@ -58,7 +88,7 @@ func (c *xClient) get(ctx context.Context, rawURL string) ([]byte, error) {
 		"accept":                    []string{"*/*"},
 		"accept-language":           []string{"en-US,en;q=0.9"},
 		"authorization":             []string{"Bearer " + bearer},
-		"cookie":                    []string{"auth_token=" + c.authToken + "; ct0=" + c.csrfToken},
+		"cookie":                    []string{c.cookieHdr},
 		"sec-fetch-dest":            []string{"empty"},
 		"sec-fetch-mode":            []string{"cors"},
 		"sec-fetch-site":            []string{"same-origin"},

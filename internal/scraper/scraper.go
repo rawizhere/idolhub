@@ -22,6 +22,7 @@ type Options struct {
 	ForceFull          bool
 	OnProgress         func(pct int, msg string)
 	TwitterAuthToken   string
+	TwitterCookies     string
 	InstagramSessionID string
 	InstagramCookies   string
 	TikTokCookies      string

@@ -3,6 +3,7 @@ package xscraper
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	mrand "math/rand"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -36,6 +38,7 @@ var defaultQueryIDs = map[string]string{
 type Session struct {
 	AuthToken string
 	CSRFToken string            // ct0; generated when empty
+	Cookies   string            // full Netscape cookie export from the logged-in browser; preferred
 	QueryIDs  map[string]string // operation name -> queryId
 	Features  map[string]any    // graphql features dictionary
 }
@@ -49,9 +52,34 @@ type Scraper struct {
 	lastHarvest time.Time
 }
 
-// New creates a scraper bound to an X session.
+// xSharedMu guards the process-level twitter scraper. Like the instagram
+// client, it is reused across targets and sync windows so the account keeps
+// one stable client identity; it is rebuilt only when credentials change.
+var (
+	xSharedMu  sync.Mutex
+	xShared    *Scraper
+	xSharedKey string
+)
+
+// New creates a scraper bound to an X session. Repeated calls with the same
+// credentials return the shared instance.
 func New(sess Session) (*Scraper, error) {
-	if sess.AuthToken == "" {
+	key := fmt.Sprintf("%x", sha256.Sum256([]byte(sess.AuthToken + "\x00" + sess.Cookies + "\x00" + sess.CSRFToken)))
+	xSharedMu.Lock()
+	defer xSharedMu.Unlock()
+	if xShared != nil && xSharedKey == key {
+		return xShared, nil
+	}
+	s, err := newScraper(sess)
+	if err != nil {
+		return nil, err
+	}
+	xShared, xSharedKey = s, key
+	return s, nil
+}
+
+func newScraper(sess Session) (*Scraper, error) {
+	if sess.AuthToken == "" && sess.Cookies == "" {
 		return nil, errors.New("twitter auth token is empty")
 	}
 	csrf := sess.CSRFToken
@@ -70,7 +98,7 @@ func New(sess Session) (*Scraper, error) {
 	if features == nil {
 		features = timelineFeatures()
 	}
-	client, err := newXClient(sess.AuthToken, csrf)
+	client, err := newXClient(sess.AuthToken, csrf, sess.Cookies)
 	if err != nil {
 		return nil, err
 	}

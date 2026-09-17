@@ -100,8 +100,8 @@ func bestVideoURL(vs []igVideoVersion) string {
 }
 
 // scrapeInstagramDirect pulls timeline media via the private Instagram web API
-func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, forceFull bool, sessionID, cookies string, posts *store.PostStore, onProgress func(pct int, msg string)) error {
-	if sessionID == "" && cookies == "" {
+func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, forceFull bool, sessionID, cookieExport string, posts *store.PostStore, onProgress func(pct int, msg string)) error {
+	if sessionID == "" && cookieExport == "" {
 		return fmt.Errorf("instagram session ID is not set")
 	}
 
@@ -121,7 +121,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		return err
 	}
 
-	client := getIGClient(sessionID, cookies)
+	client := getIGClient(sessionID, cookieExport)
 	if client.csrf == "" || client.userID == "" {
 		if err := client.bootstrap(ctx); err != nil {
 			slog.Warn("Instagram client bootstrap failed, graphql requests may be rejected", "user", username, "error", err)

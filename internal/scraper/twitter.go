@@ -79,8 +79,9 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 		return downloadTwitterMedia(ctx, item, outputDir, client, username)
 	})
 
-	// xscraper generates the csrf token and falls back to built-in defaults.
-	s, err := xscraper.New(xscraper.Session{AuthToken: authToken})
+	// xscraper generates the csrf token and falls back to built-in defaults;
+	// a full cookie export (twitter_cookies) is preferred when configured.
+	s, err := xscraper.New(xscraper.Session{AuthToken: authToken, Cookies: opts.TwitterCookies})
 	if err != nil {
 		return fmt.Errorf("failed to init twitter client: %w", err)
 	}

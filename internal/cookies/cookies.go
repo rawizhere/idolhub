@@ -1,4 +1,4 @@
-package scraper
+package cookies
 
 import (
 	"fmt"
@@ -15,8 +15,14 @@ import (
 //
 //	#HttpOnly_.instagram.com	TRUE	/	TRUE	1801259143	ig_did	9C49...
 //
-// Only instagram.com cookies are returned; everything else is ignored.
-func parseNetscapeCookies(raw string) ([]*fhttp.Cookie, error) {
+// ParseNetscape parses a Netscape HTTP Cookie File (the format produced by
+// the Cookie-Editor browser extension) into fhttp cookies. Lines look like:
+//
+//	#HttpOnly_.instagram.com\tTRUE\t/\tTRUE\t1801259143\tig_did\t9C49...
+//
+// Only cookies whose domain contains domainSuffix are returned; everything
+// else is ignored.
+func ParseNetscape(raw, domainSuffix string) ([]*fhttp.Cookie, error) {
 	var cookies []*fhttp.Cookie
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimRight(line, "\n")
@@ -40,7 +46,7 @@ func parseNetscapeCookies(raw string) ([]*fhttp.Cookie, error) {
 		expires := parts[4]
 		name := parts[5]
 		value := strings.Join(parts[6:], "\t")
-		if !strings.Contains(domain, "instagram.com") {
+		if !strings.Contains(domain, domainSuffix) {
 			continue
 		}
 		exp, err := strconv.ParseInt(expires, 10, 64)
@@ -58,7 +64,7 @@ func parseNetscapeCookies(raw string) ([]*fhttp.Cookie, error) {
 		})
 	}
 	if len(cookies) == 0 {
-		return nil, fmt.Errorf("no instagram.com cookies found in the netscape file")
+		return nil, fmt.Errorf("no %s cookies found in the netscape file", domainSuffix)
 	}
 	return cookies, nil
 }

@@ -21,6 +21,7 @@ import (
 	tls_client "github.com/bogdanfinn/tls-client"
 
 	"idolhub/internal/browser"
+	"idolhub/internal/cookies"
 	"idolhub/internal/download"
 
 	"golang.org/x/time/rate"
@@ -116,14 +117,14 @@ var (
 
 // getIGClient returns the shared instagram client, rebuilding it only when
 // the configured credentials change (e.g. the user pasted a new cookie export).
-func getIGClient(sessionID, cookies string) *igClient {
-	key := fmt.Sprintf("%d|%x", len(sessionID), sha256.Sum256([]byte(cookies)))
+func getIGClient(sessionID, cookieExport string) *igClient {
+	key := fmt.Sprintf("%d|%x", len(sessionID), sha256.Sum256([]byte(cookieExport)))
 	igSharedClientMu.Lock()
 	defer igSharedClientMu.Unlock()
 	if igSharedClient != nil && igSharedClient.key == key {
 		return igSharedClient
 	}
-	c := newIGClient(sessionID, cookies)
+	c := newIGClient(sessionID, cookieExport)
 	c.key = key
 	igSharedClient = c
 	return c
@@ -133,12 +134,12 @@ func getIGClient(sessionID, cookies string) *igClient {
 // cookie export (Netscape format) when one is configured. Device cookies
 // (mid, ig_did, datr) are what makes the session look like the browser it
 // was created in; a bare sessionid is a strong automation signal.
-func newIGClient(sessionID, cookies string) *igClient {
+func newIGClient(sessionID, cookieExport string) *igClient {
 	tp := browser.FirefoxProfile
 	jar, _ := fcookiejar.New(nil)
 	u := &url.URL{Scheme: "https", Host: "www.instagram.com", Path: "/"}
-	if cookies != "" {
-		parsed, err := parseNetscapeCookies(cookies)
+	if cookieExport != "" {
+		parsed, err := cookies.ParseNetscape(cookieExport, "instagram.com")
 		if err != nil {
 			slog.Warn("Ignoring invalid instagram cookie export, falling back to sessionid only", "error", err)
 		} else {

@@ -298,6 +298,7 @@ export async function loadConfig() {
   try {
     const data = await fetchConfig();
     document.getElementById("twitter-auth-token").value = data.twitter_auth_token || "";
+    document.getElementById("twitter-cookies").value = data.twitter_cookies || "";
     document.getElementById("instagram-session-id").value = data.instagram_session_id || "";
     document.getElementById("instagram-cookies").value = data.instagram_cookies || "";
     document.getElementById("tiktok-cookies").value = data.tiktok_cookies || "";
@@ -314,6 +315,7 @@ export async function saveSettings() {
     try {
       const current = await fetchConfig();
       current.twitter_auth_token = document.getElementById("twitter-auth-token").value.trim();
+      current.twitter_cookies = document.getElementById("twitter-cookies").value.trim();
       current.instagram_session_id = document.getElementById("instagram-session-id").value.trim();
       current.instagram_cookies = document.getElementById("instagram-cookies").value.trim();
       current.tiktok_cookies = document.getElementById("tiktok-cookies").value.trim();
