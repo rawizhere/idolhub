@@ -41,6 +41,7 @@ type Config struct {
 	Accounts           []Account `json:"accounts"`
 	TwitterAuthToken   string    `json:"twitter_auth_token"`
 	InstagramSessionID string    `json:"instagram_session_id"`
+	InstagramCookies   string    `json:"instagram_cookies"`
 	TikTokCookies      string    `json:"tiktok_cookies"`
 	AutoSyncInterval   int       `json:"auto_sync_interval"` // In hours
 }
@@ -94,6 +95,7 @@ func loadFromStoreLocked(st *store.Store) {
 		Accounts:           accounts,
 		TwitterAuthToken:   settingString(st, ctx, "twitter_auth_token"),
 		InstagramSessionID: settingString(st, ctx, "instagram_session_id"),
+		InstagramCookies:   settingString(st, ctx, "instagram_cookies"),
 		TikTokCookies:      settingString(st, ctx, "tiktok_cookies"),
 		AutoSyncInterval:   settingInt(st, ctx, "auto_sync_interval"),
 	}
@@ -167,6 +169,7 @@ func saveToStore(st *store.Store) error {
 	settings := map[string]any{
 		"twitter_auth_token":   globalConfig.TwitterAuthToken,
 		"instagram_session_id": globalConfig.InstagramSessionID,
+		"instagram_cookies":    globalConfig.InstagramCookies,
 		"tiktok_cookies":       globalConfig.TikTokCookies,
 		"auto_sync_interval":   globalConfig.AutoSyncInterval,
 	}

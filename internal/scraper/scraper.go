@@ -23,6 +23,7 @@ type Options struct {
 	OnProgress         func(pct int, msg string)
 	TwitterAuthToken   string
 	InstagramSessionID string
+	InstagramCookies   string
 	TikTokCookies      string
 	Posts              *store.PostStore
 }

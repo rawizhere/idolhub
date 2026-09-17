@@ -444,6 +444,15 @@
         <p class="text-[10px] text-slate-400 dark:text-zinc-500">DevTools → Application → Cookies → copy <code class="font-mono text-[#ff9900]">sessionid</code> value.</p>
       </div>
 
+      <div class="flex flex-col gap-1.5 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
+        <label class="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center justify-between" for="instagram-cookies">
+          <span>Instagram Cookies (recommended)</span>
+          <span class="text-[10px] text-slate-400 font-mono font-normal">Netscape cookie format</span>
+        </label>
+        <textarea class="w-full bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg p-3 text-xs outline-none focus:border-[#ff9900] font-mono resize-y min-h-[120px] transition-colors leading-relaxed" id="instagram-cookies" placeholder="# Netscape HTTP Cookie File&#10;#HttpOnly_.instagram.com&#9;TRUE&#9;/&#9;TRUE&#9;1801259143&#9;ig_did&#9;..." rows="6"></textarea>
+        <p class="text-[10px] text-slate-400 dark:text-zinc-500">Full Netscape export (Cookie-Editor extension) of instagram.com cookies. Device cookies (<code class="font-mono text-[#ff9900]">mid</code>, <code class="font-mono text-[#ff9900]">ig_did</code>, <code class="font-mono text-[#ff9900]">datr</code>) make the scraper look like the browser the session was created in and prevent automation flags.</p>
+      </div>
+
 
       <div class="flex flex-col gap-1.5 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
         <label class="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center justify-between" for="tiktok-cookies">

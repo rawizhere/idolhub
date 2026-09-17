@@ -13,6 +13,6 @@ type Profile struct {
 
 // FirefoxProfile is the one fixed Firefox profile used by every scraper.
 var FirefoxProfile = Profile{
-	Profile: profiles.Firefox_135,
-	UA:      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:135.0) Gecko/20100101 Firefox/135.0",
+	Profile: profiles.Firefox_148,
+	UA:      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:148.0) Gecko/20100101 Firefox/148.0",
 }

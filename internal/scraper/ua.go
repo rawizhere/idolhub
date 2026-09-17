@@ -1,3 +1,5 @@
 package scraper
 
-const desktopUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+// desktopUA matches internal/browser.FirefoxProfile.UA: CDN media
+// downloads must come from the same browser identity as the API calls.
+const desktopUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:148.0) Gecko/20100101 Firefox/148.0"

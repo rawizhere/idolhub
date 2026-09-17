@@ -2,6 +2,7 @@ package scraper
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	fcookiejar "github.com/bogdanfinn/fhttp/cookiejar"
@@ -25,6 +27,10 @@ import (
 )
 
 const igAppID = "936619743392459"
+
+// igASBD-ID is the anti-abuse header value instagram's web frontend sends on
+// every XHR. Any plausible numeric value works; it must simply be present.
+const igASBDID = "129477"
 
 // Built-in graphql doc_id and frontend build revision. The doc_id refreshes
 // itself from the js bundles when instagram starts answering with HTML.
@@ -93,20 +99,65 @@ type igClient struct {
 	spinR  string
 
 	docIDRefreshed bool
+	bootMu         sync.Mutex
+
+	// key identifies the credential set (sessionid + exported cookies) this
+	// client was built from; the shared client is rebuilt only when it changes.
+	key string
 }
 
-func newIGClient(sessionID string) *igClient {
+// igSharedClientMu guards the process-level instagram client. One long-lived
+// client (and cookie jar) is reused across targets and sync windows: a real
+// browser does not grow a fresh device identity every twelve hours.
+var (
+	igSharedClientMu sync.Mutex
+	igSharedClient   *igClient
+)
+
+// getIGClient returns the shared instagram client, rebuilding it only when
+// the configured credentials change (e.g. the user pasted a new cookie export).
+func getIGClient(sessionID, cookies string) *igClient {
+	key := fmt.Sprintf("%d|%x", len(sessionID), sha256.Sum256([]byte(cookies)))
+	igSharedClientMu.Lock()
+	defer igSharedClientMu.Unlock()
+	if igSharedClient != nil && igSharedClient.key == key {
+		return igSharedClient
+	}
+	c := newIGClient(sessionID, cookies)
+	c.key = key
+	igSharedClient = c
+	return c
+}
+
+// newIGClient builds a client whose cookie jar starts from a full browser
+// cookie export (Netscape format) when one is configured. Device cookies
+// (mid, ig_did, datr) are what makes the session look like the browser it
+// was created in; a bare sessionid is a strong automation signal.
+func newIGClient(sessionID, cookies string) *igClient {
 	tp := browser.FirefoxProfile
 	jar, _ := fcookiejar.New(nil)
 	u := &url.URL{Scheme: "https", Host: "www.instagram.com", Path: "/"}
-	jar.SetCookies(u, []*fhttp.Cookie{{
-		Name:     "sessionid",
-		Value:    sessionID,
-		Domain:   ".instagram.com",
-		Path:     "/",
-		Secure:   true,
-		HttpOnly: true,
-	}})
+	if cookies != "" {
+		parsed, err := parseNetscapeCookies(cookies)
+		if err != nil {
+			slog.Warn("Ignoring invalid instagram cookie export, falling back to sessionid only", "error", err)
+		} else {
+			jar.SetCookies(u, parsed)
+			slog.Info("Loaded instagram cookie export into client jar", "cookies", len(parsed))
+		}
+	}
+	// The sessionid from the export wins; the separate sessionid setting is
+	// only a fallback for setups that never exported a full jar.
+	if sessionID != "" && jarCookie(jar, "sessionid") == "" {
+		jar.SetCookies(u, []*fhttp.Cookie{{
+			Name:     "sessionid",
+			Value:    sessionID,
+			Domain:   ".instagram.com",
+			Path:     "/",
+			Secure:   true,
+			HttpOnly: true,
+		}})
+	}
 	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
 		tls_client.WithTimeoutSeconds(30),
 		tls_client.WithClientProfile(tp.Profile),
@@ -117,11 +168,34 @@ func newIGClient(sessionID string) *igClient {
 		slog.Error("Failed to create tls client, check profiles", "error", err)
 	}
 	slog.Info("Instagram client TLS profile", "tls_fingerprint", tp.Profile.GetClientHelloStr())
-	return &igClient{
+	c := &igClient{
 		client: client,
 		ua:     tp.UA,
 		docID:  defaultIGGraphQLDocID,
 	}
+	// A full export already carries csrftoken and ds_user_id; seeding them
+	// here skips the bootstrap round-trips entirely.
+	if ck := jarCookie(jar, "csrftoken"); ck != "" {
+		c.csrf = ck
+	}
+	if ck := jarCookie(jar, "ds_user_id"); ck != "" {
+		c.userID = ck
+	}
+	return c
+}
+
+// jarCookie reads a single cookie value from the client jar.
+func jarCookie(jar fhttp.CookieJar, name string) string {
+	if jar == nil {
+		return ""
+	}
+	u, _ := url.Parse("https://www.instagram.com")
+	for _, ck := range jar.Cookies(u) {
+		if ck.Name == name && ck.Value != "" {
+			return ck.Value
+		}
+	}
+	return ""
 }
 
 // csrfFromJar refreshes c.csrf from the cookie jar. resp.Cookies() does not
@@ -142,26 +216,35 @@ func sessionRedirectErr(code int) error {
 	return fmt.Errorf("unexpected status %d: instagram session cookie (sessionid) is invalid or expired", code)
 }
 
-// bootstrap fetches the csrf token and own user id via regular pages.
+// bootstrap fetches whatever session metadata is still missing: the csrf
+// token from the home page and the own user id from the edit page. Both are
+// skipped when a full cookie export already provided them. Serialized with
+// bootMu so concurrent targets do not double-bootstrap the shared client.
 func (c *igClient) bootstrap(ctx context.Context) error {
-	if _, err := c.fetchPage(ctx, "https://www.instagram.com/"); err != nil {
-		return fmt.Errorf("fetch instagram home: %w", err)
-	}
+	c.bootMu.Lock()
+	defer c.bootMu.Unlock()
 
-	edit, err := c.fetchPage(ctx, "https://www.instagram.com/accounts/edit/")
-	if err != nil {
-		return fmt.Errorf("fetch instagram edit page: %w", err)
+	if c.csrf == "" {
+		if _, err := c.fetchPage(ctx, "https://www.instagram.com/"); err != nil {
+			return fmt.Errorf("fetch instagram home: %w", err)
+		}
 	}
-	m := igPkRe.FindStringSubmatch(string(edit))
-	if m == nil {
-		return fmt.Errorf("could not find own user id in edit page")
+	if c.userID == "" {
+		edit, err := c.fetchPage(ctx, "https://www.instagram.com/accounts/edit/")
+		if err != nil {
+			return fmt.Errorf("fetch instagram edit page: %w", err)
+		}
+		m := igPkRe.FindStringSubmatch(string(edit))
+		if m == nil {
+			return fmt.Errorf("could not find own user id in edit page")
+		}
+		if m[1] != "" {
+			c.userID = m[1]
+		} else {
+			c.userID = m[2]
+		}
+		c.setCookie("ds_user_id", c.userID)
 	}
-	if m[1] != "" {
-		c.userID = m[1]
-	} else {
-		c.userID = m[2]
-	}
-	c.setCookie("ds_user_id", c.userID)
 	return nil
 }
 
@@ -220,10 +303,15 @@ func (c *igClient) doGet(ctx context.Context, apiURL, username string) ([]byte, 
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("X-IG-App-ID", igAppID)
+	req.Header.Set("X-ASBD-ID", igASBDID)
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	if c.csrf != "" {
+		req.Header.Set("X-CSRFToken", c.csrf)
+	}
 	req.Header.Set("Sec-Fetch-Dest", "empty")
 	req.Header.Set("Sec-Fetch-Mode", "cors")
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Sec-Fetch-Storage-Access", "active")
 	req.Header.Set("Referer", "https://www.instagram.com/"+username+"/")
 
 	resp, err := c.client.Do(req)
@@ -322,10 +410,12 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("X-CSRFToken", c.csrf)
 	req.Header.Set("X-IG-App-ID", igAppID)
+	req.Header.Set("X-ASBD-ID", igASBDID)
 	req.Header.Set("X-Requested-With", "XMLHttpRequest")
 	req.Header.Set("Sec-Fetch-Dest", "empty")
 	req.Header.Set("Sec-Fetch-Mode", "cors")
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Sec-Fetch-Storage-Access", "active")
 	req.Header.Set("Origin", "https://www.instagram.com")
 	req.Header.Set("Referer", "https://www.instagram.com/"+username+"/")
 

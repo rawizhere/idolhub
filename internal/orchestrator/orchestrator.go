@@ -80,6 +80,7 @@ type Orchestrator struct {
 	mediaIndex     *gallery.Index
 	accounts       *store.AccountStore
 	posts          *store.PostStore
+	igBlockUntil   time.Time
 	twitterMu      sync.Mutex
 	jobCh          chan scrapeJob
 	logEvents      chan logEvent
@@ -490,6 +491,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 
 	opts.TwitterAuthToken = c.TwitterAuthToken
 	opts.InstagramSessionID = c.InstagramSessionID
+	opts.InstagramCookies = c.InstagramCookies
 	opts.TikTokCookies = c.TikTokCookies
 	opts.Posts = o.posts
 
@@ -508,6 +510,16 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 
 	if err != nil {
 		hintSessionRefresh(err)
+	}
+	// Circuit breaker: once instagram flags the session (temporary
+	// invalidation / "please wait" checkpoint), further requests with the
+	// dead session only prolong the block. Skip the remaining instagram
+	// targets until the next sync window instead.
+	if platform == "instagram" && errors.Is(err, scraper.ErrAuthExpired) {
+		o.mu.Lock()
+		o.igBlockUntil = time.Now().Add(6 * time.Hour)
+		o.mu.Unlock()
+		slog.Warn("Instagram session flagged; pausing instagram targets for 6 hours", "resume_after", time.Now().Add(6*time.Hour).Format(time.RFC3339))
 	}
 
 	o.mu.Lock()
@@ -710,7 +722,8 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 		o.mu.RUnlock()
 
 		// Random order and uneven gaps: a fixed sequence at fixed gaps
-		// reads as a batch job.
+		// reads as a batch job. Gaps of several minutes spread the targets
+		// across the window instead of bursting them into one cluster.
 		accs := slices.Clone(c.Accounts)
 		rand.Shuffle(len(accs), func(i, j int) { accs[i], accs[j] = accs[j], accs[i] })
 		for _, acc := range accs {
@@ -718,17 +731,28 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 				slog.Debug("Skipping auto-sync, task already running or queued", "user", acc.Username)
 				continue
 			}
+			if acc.Platform == "instagram" && o.instagramBlocked() {
+				slog.Info("Skipping auto-sync, instagram session is flagged (circuit breaker)", "user", acc.Username)
+				continue
+			}
 			o.StartScrape(acc.Username, acc.Platform, acc.SaveText, false)
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(15*time.Second + time.Duration(rand.Int63n(int64(75*time.Second)))):
+			case <-time.After(5*time.Minute + time.Duration(rand.Int63n(int64(10*time.Minute)))):
 			}
 		}
 		o.mu.Lock()
 		o.LastSync = time.Now()
 		o.mu.Unlock()
 	}
+}
+
+// instagramBlocked reports whether the instagram circuit breaker is active.
+func (o *Orchestrator) instagramBlocked() bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return time.Now().Before(o.igBlockUntil)
 }
 
 // hintSessionRefresh tells the operator how to restore a stale scraping session.
