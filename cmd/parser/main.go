@@ -31,6 +31,7 @@ import (
 	"idolhub/internal/config"
 	"idolhub/internal/download"
 	"idolhub/internal/gallery"
+	"idolhub/internal/igbrowser"
 	"idolhub/internal/logging"
 	"idolhub/internal/orchestrator"
 	"idolhub/internal/scraper"
@@ -190,6 +191,7 @@ func main() {
 	mux.HandleFunc("GET /api/config", app.handleConfigGet)
 	mux.HandleFunc("POST /api/config", app.handleConfigPost)
 	mux.HandleFunc("GET /api/progress", app.handleProgress)
+	mux.HandleFunc("GET /api/instagram/session", app.handleIGSessionStatus)
 	mux.HandleFunc("POST /api/scrape/start", app.handleScrapeStart)
 	mux.HandleFunc("POST /api/scrape/cancel", app.handleScrapeCancel)
 	mux.HandleFunc("POST /api/scrape/clear", app.handleScrapeClear)
@@ -359,6 +361,20 @@ func (a *App) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Push instagram cookies to the camoufox sidecar when one is configured.
+	if cfg.InstagramSidecarURL != "" && cfg.InstagramCookies != "" {
+		sc := igbrowser.New(cfg.InstagramSidecarURL)
+		importCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		go func(netscape string) {
+			defer cancel()
+			if err := sc.ImportCookies(importCtx, netscape); err != nil {
+				slog.Warn("Failed to import instagram cookies into sidecar", "error", err)
+			} else {
+				slog.Info("Imported instagram cookies into camoufox sidecar")
+			}
+		}(cfg.InstagramCookies)
+	}
+
 	for _, acc := range changed {
 		if a.st == nil {
 			continue
@@ -372,6 +388,21 @@ func (a *App) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 	a.orch.SyncTargets(cfg.Accounts)
 
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (a *App) handleIGSessionStatus(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	url := config.GetConfig().InstagramSidecarURL
+	if url == "" {
+		_ = json.NewEncoder(w).Encode(map[string]string{"session": "sidecar-not-configured"})
+		return
+	}
+	st, err := igbrowser.New(url).Status(r.Context())
+	if err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]string{"session": "sidecar-unreachable", "error": err.Error()})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(st)
 }
 
 type ProgressResponse struct {

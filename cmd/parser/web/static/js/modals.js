@@ -301,6 +301,10 @@ export async function loadConfig() {
     document.getElementById("twitter-cookies").value = data.twitter_cookies || "";
     document.getElementById("instagram-session-id").value = data.instagram_session_id || "";
     document.getElementById("instagram-cookies").value = data.instagram_cookies || "";
+    fetch("/api/instagram/session").then(res => res.json()).then(st => {
+      const el = document.getElementById("ig-session-status");
+      if (el) el.textContent = st.session === "ok" ? `browser session: ok (${st.cookies} cookies)` : `browser session: ${st.session}`;
+    }).catch(() => {});
     document.getElementById("tiktok-cookies").value = data.tiktok_cookies || "";
     document.getElementById("auto-sync-interval").value = data.auto_sync_interval || 0;
   } catch (err) {

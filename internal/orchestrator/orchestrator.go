@@ -493,6 +493,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	opts.TwitterCookies = c.TwitterCookies
 	opts.InstagramSessionID = c.InstagramSessionID
 	opts.InstagramCookies = c.InstagramCookies
+	opts.InstagramSidecarURL = c.InstagramSidecarURL
 	opts.TikTokCookies = c.TikTokCookies
 	opts.Posts = o.posts
 

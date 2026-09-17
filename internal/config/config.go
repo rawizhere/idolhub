@@ -38,13 +38,14 @@ func (a Account) ShouldDownloadVideos() bool {
 }
 
 type Config struct {
-	Accounts           []Account `json:"accounts"`
-	TwitterAuthToken   string    `json:"twitter_auth_token"`
-	TwitterCookies     string    `json:"twitter_cookies"`
-	InstagramSessionID string    `json:"instagram_session_id"`
-	InstagramCookies   string    `json:"instagram_cookies"`
-	TikTokCookies      string    `json:"tiktok_cookies"`
-	AutoSyncInterval   int       `json:"auto_sync_interval"` // In hours
+	Accounts            []Account `json:"accounts"`
+	TwitterAuthToken    string    `json:"twitter_auth_token"`
+	TwitterCookies      string    `json:"twitter_cookies"`
+	InstagramSessionID  string    `json:"instagram_session_id"`
+	InstagramCookies    string    `json:"instagram_cookies"`
+	InstagramSidecarURL string    `json:"instagram_sidecar_url"`
+	TikTokCookies       string    `json:"tiktok_cookies"`
+	AutoSyncInterval    int       `json:"auto_sync_interval"` // In hours
 }
 
 var (
@@ -93,13 +94,14 @@ func loadFromStoreLocked(st *store.Store) {
 		})
 	}
 	globalConfig = Config{
-		Accounts:           accounts,
-		TwitterAuthToken:   settingString(st, ctx, "twitter_auth_token"),
-		TwitterCookies:     settingString(st, ctx, "twitter_cookies"),
-		InstagramSessionID: settingString(st, ctx, "instagram_session_id"),
-		InstagramCookies:   settingString(st, ctx, "instagram_cookies"),
-		TikTokCookies:      settingString(st, ctx, "tiktok_cookies"),
-		AutoSyncInterval:   settingInt(st, ctx, "auto_sync_interval"),
+		Accounts:            accounts,
+		TwitterAuthToken:    settingString(st, ctx, "twitter_auth_token"),
+		TwitterCookies:      settingString(st, ctx, "twitter_cookies"),
+		InstagramSessionID:  settingString(st, ctx, "instagram_session_id"),
+		InstagramCookies:    settingString(st, ctx, "instagram_cookies"),
+		InstagramSidecarURL: settingString(st, ctx, "instagram_sidecar_url"),
+		TikTokCookies:       settingString(st, ctx, "tiktok_cookies"),
+		AutoSyncInterval:    settingInt(st, ctx, "auto_sync_interval"),
 	}
 }
 
@@ -169,12 +171,13 @@ func saveToStore(st *store.Store) error {
 		}
 	}
 	settings := map[string]any{
-		"twitter_auth_token":   globalConfig.TwitterAuthToken,
-		"twitter_cookies":      globalConfig.TwitterCookies,
-		"instagram_session_id": globalConfig.InstagramSessionID,
-		"instagram_cookies":    globalConfig.InstagramCookies,
-		"tiktok_cookies":       globalConfig.TikTokCookies,
-		"auto_sync_interval":   globalConfig.AutoSyncInterval,
+		"twitter_auth_token":    globalConfig.TwitterAuthToken,
+		"twitter_cookies":       globalConfig.TwitterCookies,
+		"instagram_session_id":  globalConfig.InstagramSessionID,
+		"instagram_cookies":     globalConfig.InstagramCookies,
+		"instagram_sidecar_url": globalConfig.InstagramSidecarURL,
+		"tiktok_cookies":        globalConfig.TikTokCookies,
+		"auto_sync_interval":    globalConfig.AutoSyncInterval,
 	}
 	for key, value := range settings {
 		b, err := json.Marshal(value)
