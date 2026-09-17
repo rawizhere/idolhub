@@ -40,7 +40,8 @@ FROM alpine:3.24
 
 ARG YT_DLP_VERSION=2026.08.19
 
-RUN apk add --no-cache \
+RUN apk upgrade --no-cache \
+    && apk add --no-cache \
     ffmpeg \
     python3 \
     py3-pip \
