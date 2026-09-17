@@ -32,7 +32,7 @@ type Index struct {
 var GlobalIndex *Index
 
 func Init(posts *store.PostStore) {
-	ttl := time.Minute
+	ttl := 10 * time.Minute
 	GlobalIndex = &Index{
 		files:      expirable.NewLRU[string, []MediaEntry](512, nil, ttl),
 		posts:      expirable.NewLRU[string, []Post](512, nil, ttl),

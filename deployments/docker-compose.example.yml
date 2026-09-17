@@ -13,6 +13,7 @@ services:
     volumes:
       - ../configs:/app/configs
       - app_data:/app/downloads
+      - ../thumbnails:/app/thumbnails
     restart: unless-stopped
     depends_on:
       - camoufox

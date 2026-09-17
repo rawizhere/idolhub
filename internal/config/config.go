@@ -44,6 +44,7 @@ type Config struct {
 	InstagramSessionID  string    `json:"instagram_session_id"`
 	InstagramCookies    string    `json:"instagram_cookies"`
 	InstagramSidecarURL string    `json:"instagram_sidecar_url"`
+	ThumbnailsDir       string    `json:"thumbnails_dir"`
 	TikTokCookies       string    `json:"tiktok_cookies"`
 	AutoSyncInterval    int       `json:"auto_sync_interval"` // In hours
 }
@@ -100,6 +101,7 @@ func loadFromStoreLocked(st *store.Store) {
 		InstagramSessionID:  settingString(st, ctx, "instagram_session_id"),
 		InstagramCookies:    settingString(st, ctx, "instagram_cookies"),
 		InstagramSidecarURL: settingString(st, ctx, "instagram_sidecar_url"),
+		ThumbnailsDir:       settingString(st, ctx, "thumbnails_dir"),
 		TikTokCookies:       settingString(st, ctx, "tiktok_cookies"),
 		AutoSyncInterval:    settingInt(st, ctx, "auto_sync_interval"),
 	}
@@ -176,6 +178,7 @@ func saveToStore(st *store.Store) error {
 		"instagram_session_id":  globalConfig.InstagramSessionID,
 		"instagram_cookies":     globalConfig.InstagramCookies,
 		"instagram_sidecar_url": globalConfig.InstagramSidecarURL,
+		"thumbnails_dir":        globalConfig.ThumbnailsDir,
 		"tiktok_cookies":        globalConfig.TikTokCookies,
 		"auto_sync_interval":    globalConfig.AutoSyncInterval,
 	}

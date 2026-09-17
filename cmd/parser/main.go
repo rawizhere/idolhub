@@ -233,7 +233,7 @@ func main() {
 
 	orchestrator.GlobalOrchestrator.SyncTargets(cfg.Accounts)
 
-	scraper.MigrateThumbnails()
+	scraper.MigrateThumbnails(config.GetConfig().ThumbnailsDir)
 	scraper.MigrateVideoCodecs()
 
 	sig := <-quit
@@ -495,13 +495,23 @@ func (a *App) handleMedia(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filePath := filepath.Join("downloads", filepath.FromSlash(filepath.Clean(relPath)))
+	thumbRel := isThumbnailRel(relPath)
+
+	// Thumbnails are served from the fast local dir when configured; the legacy in-tree copy is the fallback.
+	if thumbRel {
+		if alt := a.thumbnailFilePath(relPath); alt != "" {
+			filePath = alt
+		}
+	}
 
 	if info, err := os.Stat(filePath); err != nil || info.IsDir() {
 		if err == nil {
 			http.NotFound(w, r)
 			return
 		}
-		a.ensureThumbnail(filePath)
+		if thumbRel {
+			a.ensureThumbnail(filePath)
+		}
 	}
 
 	if ct := mime.TypeByExtension(strings.ToLower(filepath.Ext(filePath))); ct != "" {
@@ -511,18 +521,49 @@ func (a *App) handleMedia(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filePath)
 }
 
+// isThumbnailRel reports whether the /media/ relative path points at a thumbnail.
+func isThumbnailRel(rel string) bool {
+	return strings.Contains("/"+rel, "/thumbnails/")
+}
+
+// thumbnailFilePath resolves a thumbnail against the fast storage dir, falling back to the legacy in-tree location.
+func (a *App) thumbnailFilePath(relPath string) string {
+	rel := filepath.FromSlash(filepath.Clean(relPath))
+	legacy := filepath.Join("downloads", rel)
+	fast := filepath.Join(config.GetConfig().ThumbnailsDir, rel)
+	if config.GetConfig().ThumbnailsDir == "" {
+		return legacy
+	}
+	if _, err := os.Stat(fast); err == nil {
+		return fast
+	}
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return fast
+}
+
 var thumbnailExts = []string{".mp4", ".mov", ".webm", ".jpg", ".jpeg", ".png", ".webp"}
 
+// ensureThumbnail generates a missing thumbnail. thumbPath is the fast-dir destination; the source media always lives in downloads/.
 func (a *App) ensureThumbnail(thumbPath string) {
 	if !strings.Contains(thumbPath, "thumbnails"+string(filepath.Separator)) {
 		return
 	}
-	dir := filepath.Dir(thumbPath)
-	parentDir := filepath.Dir(dir)
+	// Map .../<user>/thumbnails/<base>.jpg back to the source file dir: thumbs_dir mirrors downloads/ minus the media root itself.
+	rel := relUnder(thumbPath, config.GetConfig().ThumbnailsDir)
+	if rel == "" {
+		rel = relUnder(thumbPath, "downloads")
+	}
+	parts := strings.SplitN(rel, string(filepath.Separator), 3)
+	if len(parts) < 3 {
+		return
+	}
 	base := strings.TrimSuffix(filepath.Base(thumbPath), filepath.Ext(thumbPath))
+	srcDir := filepath.Join("downloads", parts[0], parts[1])
 	var srcFile string
 	for _, ext := range thumbnailExts {
-		candidate := filepath.Join(parentDir, base+ext)
+		candidate := filepath.Join(srcDir, base+ext)
 		if _, err := os.Stat(candidate); err == nil {
 			srcFile = candidate
 			break
@@ -537,10 +578,30 @@ func (a *App) ensureThumbnail(thumbPath string) {
 		if _, err := os.Stat(thumbPath); err == nil {
 			return nil, nil
 		}
-		_ = os.MkdirAll(dir, 0755)
+		_ = os.MkdirAll(filepath.Dir(thumbPath), 0755)
 		_ = download.GenerateThumbnail(srcFile, thumbPath)
 		return nil, nil
 	})
+}
+
+// relUnder returns path relative to base, or "" when path is not under base.
+func relUnder(path, base string) string {
+	if base == "" {
+		return ""
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return ""
+	}
+	absBase, err := filepath.Abs(base)
+	if err != nil {
+		return ""
+	}
+	rel, err := filepath.Rel(absBase, absPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	return rel
 }
 
 func (a *App) handleScrapeStart(w http.ResponseWriter, r *http.Request) {

@@ -5,7 +5,7 @@ import (
 )
 
 templ GalleryGridItem(filename, mediaType, date, mediaURL, thumbURL string) {
-	<a class="gallery-item pswp-item group relative block w-full aspect-square overflow-hidden rounded-xl border border-slate-200 dark:border-zinc-800/80 bg-slate-100 dark:bg-zinc-900 shadow-xs hover:border-[#ff9900]/50 transition-all duration-200 cursor-pointer"
+	<a class="gallery-item pswp-item group relative block w-full aspect-square overflow-hidden rounded-xl border border-slate-200 dark:border-zinc-800/80 bg-slate-100 dark:bg-zinc-900 shadow-xs hover:border-[#ff9900]/50 transition-colors duration-150 cursor-pointer"
 	   href={ mediaURL }
 	   title={ filename }
 	   if mediaType == "video" {

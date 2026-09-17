@@ -72,6 +72,8 @@
 /* Gallery Grid Item */
 .gallery-item {
   width: 100%;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
 }
 
 /* Video Hover Preview */
