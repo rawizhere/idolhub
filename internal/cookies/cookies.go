@@ -46,6 +46,10 @@ func ParseNetscape(raw, domainSuffix string) ([]*fhttp.Cookie, error) {
 		expires := parts[4]
 		name := parts[5]
 		value := strings.Join(parts[6:], "\t")
+		// Cookie-Editor writes empty values as a literal "" pair.
+		if value == `""` {
+			value = ""
+		}
 		if !strings.Contains(domain, domainSuffix) {
 			continue
 		}

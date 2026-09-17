@@ -64,7 +64,7 @@ var (
 // New creates a scraper bound to an X session. Repeated calls with the same
 // credentials return the shared instance.
 func New(sess Session) (*Scraper, error) {
-	key := fmt.Sprintf("%x", sha256.Sum256([]byte(sess.AuthToken + "\x00" + sess.Cookies + "\x00" + sess.CSRFToken)))
+	key := fmt.Sprintf("%x", sha256.Sum256([]byte(sess.AuthToken+"\x00"+sess.Cookies+"\x00"+sess.CSRFToken)))
 	xSharedMu.Lock()
 	defer xSharedMu.Unlock()
 	if xShared != nil && xSharedKey == key {

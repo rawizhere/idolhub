@@ -202,13 +202,8 @@ func jarCookie(jar fhttp.CookieJar, name string) string {
 // csrfFromJar refreshes c.csrf from the cookie jar. resp.Cookies() does not
 // see instagram Set-Cookie headers through the tls-client fork, the jar does.
 func (c *igClient) csrfFromJar() {
-	if jar := c.client.GetCookieJar(); jar != nil {
-		u, _ := url.Parse("https://www.instagram.com")
-		for _, ck := range jar.Cookies(u) {
-			if ck.Name == "csrftoken" && ck.Value != "" {
-				c.csrf = ck.Value
-			}
-		}
+	if v := jarCookie(c.client.GetCookieJar(), "csrftoken"); v != "" {
+		c.csrf = v
 	}
 }
 
@@ -443,6 +438,11 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 				}
 			}
 			return nil, fmt.Errorf("%w: instagram returned HTML instead of JSON (session rejected or doc_id outdated)", ErrAuthExpired)
+		}
+		if c.docIDRefreshed {
+			// Successful page: re-arm the one-time doc_id refresh so the
+			// long-lived shared client can re-harvest a rotated doc_id later.
+			c.docIDRefreshed = false
 		}
 		return body, nil
 	case fhttp.StatusUnauthorized, fhttp.StatusForbidden:
