@@ -53,16 +53,26 @@ func MigrateThumbnails(thumbsDir string) {
 					return nil
 				}
 			}
-			if src, err := os.Open(legacy); err == nil {
-				_ = os.MkdirAll(filepath.Dir(dest), 0755)
-				dst, err := os.Create(dest)
-				if err == nil {
-					_, _ = io.Copy(dst, src)
+			src, oErr := os.Open(legacy)
+			if oErr == nil {
+				if mkErr := os.MkdirAll(filepath.Dir(dest), 0755); mkErr != nil {
+					slog.Error("Migration mkdir failed", "dir", filepath.Dir(dest), "error", mkErr)
+				}
+				dst, cErr := os.Create(dest)
+				if cErr == nil {
+					_, cErr = io.Copy(dst, src)
 					_ = dst.Close()
-					copied++
 				}
 				_ = src.Close()
+				if cErr == nil {
+					copied++
+				} else {
+					slog.Error("Migration copy failed", "dest", dest, "error", cErr)
+				}
 				return nil
+			}
+			if checked <= 3 {
+				slog.Warn("Migration legacy open failed, will generate", "legacy", legacy, "error", oErr)
 			}
 			_ = os.MkdirAll(filepath.Dir(dest), 0755)
 			if err := download.GenerateThumbnail(path, dest); err != nil {
@@ -73,7 +83,9 @@ func MigrateThumbnails(thumbsDir string) {
 			return nil
 		})
 
-		_ = os.WriteFile(marker, []byte("480p\n"), 0644)
+		if wErr := os.WriteFile(marker, []byte("480p\n"), 0644); wErr != nil {
+			slog.Error("Cannot write migration marker", "marker", marker, "error", wErr)
+		}
 		if copied+generated > 0 {
 			slog.Info("Thumbnail migration completed", "copied", copied, "generated", generated, "sources", checked)
 		} else {
