@@ -1,5 +1,4 @@
-// Package igbrowser talks to the camoufox sidecar that runs authenticated
-// instagram requests inside a real browser context.
+// Package igbrowser talks to the camoufox sidecar that runs authenticated instagram requests inside a real browser context.
 package igbrowser
 
 import (
@@ -31,9 +30,9 @@ type FetchResult struct {
 	Body   string `json:"body"`
 }
 
-// Fetch runs a fetch() inside the instagram.com page and returns the raw body.
-func (c *Client) Fetch(ctx context.Context, url, method, body string) (*FetchResult, error) {
-	payload, err := json.Marshal(map[string]string{"url": url, "method": method, "body": body})
+// Fetch runs a fetch() inside the instagram.com page and returns the raw body. navigate optionally loads a page first (lets the sidecar capture fresh request identity from instagram's own requests).
+func (c *Client) Fetch(ctx context.Context, url, method, body, navigate string) (*FetchResult, error) {
+	payload, err := json.Marshal(map[string]string{"url": url, "method": method, "body": body, "navigate": navigate})
 	if err != nil {
 		return nil, err
 	}
@@ -70,6 +69,9 @@ type Status struct {
 	SessionidExpires float64 `json:"sessionid_expires,omitempty"`
 	Cookies          int     `json:"cookies,omitempty"`
 	DsUserID         string  `json:"ds_user_id,omitempty"`
+	DocID            string  `json:"doc_id,omitempty"`
+	AsbdID           string  `json:"asbd_id,omitempty"`
+	WwwClaim         string  `json:"www_claim,omitempty"`
 	LastError        *string `json:"last_error"`
 }
 

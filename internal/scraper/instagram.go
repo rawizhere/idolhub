@@ -331,8 +331,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	return nil
 }
 
-// resolveUserID resolves the numeric user ID from username, doubling as a session check.
-// topsearch goes first: web_profile_info is heavily throttled.
+// resolveUserID resolves the numeric user ID from username, doubling as a session check. topsearch goes first: web_profile_info is heavily throttled.
 func (c *igClient) resolveUserID(ctx context.Context, username string) (string, error) {
 	return resolveUserIDShared(ctx, c, username)
 }

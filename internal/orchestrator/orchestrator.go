@@ -513,10 +513,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	if err != nil {
 		hintSessionRefresh(err)
 	}
-	// Circuit breaker: once instagram flags the session (temporary
-	// invalidation / "please wait" checkpoint), further requests with the
-	// dead session only prolong the block. Skip the remaining instagram
-	// targets until the next sync window instead.
+	// Circuit breaker: once instagram flags the session (temporary invalidation / "please wait" checkpoint), further requests with the dead session only prolong the block. Skip the remaining instagram targets until the next sync window instead.
 	if platform == "instagram" && errors.Is(err, scraper.ErrAuthExpired) {
 		o.mu.Lock()
 		o.igBlockUntil = time.Now().Add(6 * time.Hour)
@@ -699,8 +696,7 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 			if wait <= 0 {
 				wait = time.Minute
 			}
-			// Wake a random 0-20 min off the exact boundary; fixed wall-clock
-			// times twice a day are a signature.
+			// Wake a random 0-20 min off the exact boundary; fixed wall-clock times twice a day are a signature.
 			wait += time.Duration(rand.Int63n(int64(20 * time.Minute)))
 		}
 		select {
@@ -723,9 +719,7 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 		}
 		o.mu.RUnlock()
 
-		// Random order and uneven gaps: a fixed sequence at fixed gaps
-		// reads as a batch job. Gaps of several minutes spread the targets
-		// across the window instead of bursting them into one cluster.
+		// Random order and uneven gaps: a fixed sequence at fixed gaps reads as a batch job. Gaps of several minutes spread the targets across the window instead of bursting them into one cluster.
 		accs := slices.Clone(c.Accounts)
 		rand.Shuffle(len(accs), func(i, j int) { accs[i], accs[j] = accs[j], accs[i] })
 		for _, acc := range accs {

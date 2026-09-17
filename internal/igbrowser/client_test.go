@@ -20,7 +20,7 @@ func TestFetchRunsPageFetch(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL)
-	res, err := c.Fetch(context.Background(), "https://www.instagram.com/graphql/query", "POST", "a=1")
+	res, err := c.Fetch(context.Background(), "https://www.instagram.com/graphql/query", "POST", "a=1", "")
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestSidecarErrorSurfaces(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := New(srv.URL).Fetch(context.Background(), "https://www.instagram.com/x", "GET", ""); err == nil {
+	if _, err := New(srv.URL).Fetch(context.Background(), "https://www.instagram.com/x", "GET", "", ""); err == nil {
 		t.Fatal("want error on sidecar failure")
 	}
 }

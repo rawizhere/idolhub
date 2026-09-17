@@ -52,17 +52,14 @@ type Scraper struct {
 	lastHarvest time.Time
 }
 
-// xSharedMu guards the process-level twitter scraper. Like the instagram
-// client, it is reused across targets and sync windows so the account keeps
-// one stable client identity; it is rebuilt only when credentials change.
+// xSharedMu guards the process-level twitter scraper. Like the instagram client, it is reused across targets and sync windows so the account keeps one stable client identity; it is rebuilt only when credentials change.
 var (
 	xSharedMu  sync.Mutex
 	xShared    *Scraper
 	xSharedKey string
 )
 
-// New creates a scraper bound to an X session. Repeated calls with the same
-// credentials return the shared instance.
+// New creates a scraper bound to an X session. Repeated calls with the same credentials return the shared instance.
 func New(sess Session) (*Scraper, error) {
 	key := fmt.Sprintf("%x", sha256.Sum256([]byte(sess.AuthToken+"\x00"+sess.Cookies+"\x00"+sess.CSRFToken)))
 	xSharedMu.Lock()

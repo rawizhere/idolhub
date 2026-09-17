@@ -3,17 +3,19 @@
 Endpoints:
   POST /fetch            run fetch() inside an instagram.com page context
   POST /session/import   replace cookies from a Netscape cookie file
-  GET  /session/status   cookie health and last error
+  GET  /session/status   cookie health, last error, captured request identity
   GET  /health           process liveness
 
 One browser, one persistent profile on /data/profile. No CDP port.
+Request identity (x-asbd-id, graphql doc_id, www-claim) is captured at
+runtime from instagram's own in-page requests, never hardcoded.
 """
 
 import asyncio
-import json
 import os
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from camoufox.async_api import AsyncCamoufox
 from fastapi import FastAPI, HTTPException, Request
@@ -22,6 +24,33 @@ from pydantic import BaseModel
 PROFILE_DIR = os.environ.get("IG_PROFILE_DIR", "/data/profile")
 SNAPSHOT_PATH = os.environ.get("IG_SNAPSHOT_PATH", "/data/profile-snapshot.json")
 PAGE_TIMEOUT_MS = int(os.environ.get("IG_PAGE_TIMEOUT_MS", "45000"))
+HARVEST_TIMEOUT_S = float(os.environ.get("IG_HARVEST_TIMEOUT_S", "8"))
+
+# init script: wrap fetch in the page and record the identity instagram's own code sends on the profile-posts graphql operation.
+CAPTURE_JS = """
+window.__igcap = null;
+const _of = window.fetch;
+window.fetch = async function(input, init) {
+    try {
+        const url = typeof input === "string" ? input : (input && input.url) || "";
+        if (url.includes("/graphql/query") && init && typeof init.body === "string"
+            && init.body.includes("PolarisProfilePostsTabContentQuery_connection")) {
+            const hdrs = {};
+            const h = init.headers || {};
+            if (h instanceof Headers) { h.forEach((v, k) => hdrs[k] = v); }
+            else { Object.assign(hdrs, h); }
+            const resp = await _of.apply(this, arguments);
+            window.__igcap = {
+                headers: hdrs,
+                body: init.body,
+                www_claim: resp.headers.get("x-ig-set-www-claim") || null,
+            };
+            return resp;
+        }
+    } catch (e) {}
+    return _of.apply(this, arguments);
+};
+"""
 
 app = FastAPI()
 state = {
@@ -31,6 +60,9 @@ state = {
     "last_error": None,
     "last_snapshot": 0.0,
     "ready": False,
+    "asbd_id": None,
+    "doc_id": None,
+    "www_claim": None,
 }
 
 
@@ -38,6 +70,7 @@ class FetchReq(BaseModel):
     url: str
     method: str = "GET"
     body: str | None = None
+    navigate: str | None = None
 
 
 def parse_netscape(raw: str) -> list[dict]:
@@ -66,7 +99,6 @@ def parse_netscape(raw: str) -> list[dict]:
 
 
 def is_instagram(url: str) -> bool:
-    from urllib.parse import urlparse
     host = urlparse(url).hostname or ""
     return host == "instagram.com" or host.endswith(".instagram.com")
 
@@ -77,6 +109,33 @@ async def snapshot() -> None:
         return
     await ctx.storage_state(path=SNAPSHOT_PATH)
     state["last_snapshot"] = time.time()
+
+
+async def harvest() -> None:
+    """Wait until instagram's own page JS fires the profile-posts graphql
+    request, then take the request identity from it."""
+    page = state["page"]
+    if page is None:
+        return
+    deadline = time.time() + HARVEST_TIMEOUT_S
+    while time.time() < deadline:
+        cap = await page.evaluate("() => window.__igcap")
+        if cap:
+            hdrs = cap.get("headers") or {}
+            state["asbd_id"] = hdrs.get("X-ASBD-ID") or hdrs.get("x-asbd-id") or state["asbd_id"]
+            state["www_claim"] = cap.get("www_claim") or state["www_claim"]
+            body = cap.get("body") or ""
+            for piece in body.split("&"):
+                if piece.startswith("doc_id="):
+                    state["doc_id"] = piece[len("doc_id="):]
+            return
+        await asyncio.sleep(0.5)
+
+
+async def navigate(url: str) -> None:
+    page = state["page"]
+    await page.evaluate("() => { window.__igcap = null; }")
+    await page.goto(url, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
 
 
 @app.on_event("startup")
@@ -90,6 +149,7 @@ async def startup() -> None:
     )
     state["context"] = await launch.__aenter__()
     page = await state["context"].new_page()
+    await page.add_init_script(CAPTURE_JS)
     await page.goto("https://www.instagram.com/", wait_until="domcontentloaded",
                     timeout=PAGE_TIMEOUT_MS)
     state["page"] = page
@@ -105,7 +165,9 @@ async def health() -> dict:
 async def status() -> dict:
     ctx = state["context"]
     out = {"ready": state["ready"], "last_error": state["last_error"],
-           "last_snapshot": state["last_snapshot"]}
+           "last_snapshot": state["last_snapshot"],
+           "doc_id": state["doc_id"], "asbd_id": state["asbd_id"],
+           "www_claim": state["www_claim"]}
     if ctx is None:
         out["session"] = "no-context"
         return out
@@ -132,10 +194,7 @@ async def session_import(request: Request) -> dict:
     async with state["lock"]:
         await state["context"].clear_cookies()
         await state["context"].add_cookies(cookies)
-        page = state["page"]
-        # reload so the context picks up the new identity
-        await page.goto("https://www.instagram.com/", wait_until="domcontentloaded",
-                        timeout=PAGE_TIMEOUT_MS)
+        await navigate("https://www.instagram.com/")
         await snapshot()
     return {"imported": len(cookies), "status": "ok"}
 
@@ -149,8 +208,13 @@ async def fetch(req: FetchReq) -> dict:
         raise HTTPException(503, "browser not ready")
     async with state["lock"]:
         try:
+            if req.navigate:
+                if not is_instagram(req.navigate):
+                    raise HTTPException(400, "only instagram.com urls are allowed")
+                await navigate(req.navigate)
+                await harvest()
             result = await page.evaluate(
-                """async ({url, method, body}) => {
+                """async ({url, method, body, asbd, claim}) => {
                     const csrf = document.cookie.split("; ").find(c => c.startsWith("csrftoken="))?.split("=")[1] || "";
                     const headers = {};
                     if (body) {
@@ -158,8 +222,9 @@ async def fetch(req: FetchReq) -> dict:
                         headers["X-CSRFToken"] = csrf;
                         headers["X-IG-App-ID"] = "936619743392459";
                         headers["X-Requested-With"] = "XMLHttpRequest";
-                        headers["X-ASBD-ID"] = "198387";
                     }
+                    if (asbd) { headers["X-ASBD-ID"] = asbd; }
+                    if (claim) { headers["X-IG-WWW-Claim"] = claim; }
                     const r = await fetch(url, {
                         method: method,
                         credentials: "include",
@@ -167,11 +232,17 @@ async def fetch(req: FetchReq) -> dict:
                         body: body || undefined,
                     });
                     const text = await r.text();
-                    return {status: r.status, body: text};
+                    return {status: r.status, body: text,
+                            www_claim: r.headers.get("x-ig-set-www-claim")};
                 }""",
-                {"url": req.url, "method": req.method, "body": req.body},
+                {"url": req.url, "method": req.method, "body": req.body,
+                 "asbd": state["asbd_id"], "claim": state["www_claim"]},
             )
+            if result.get("www_claim"):
+                state["www_claim"] = result["www_claim"]
             state["last_error"] = None
+        except HTTPException:
+            raise
         except Exception as e:  # noqa: BLE001 - report everything to the caller
             state["last_error"] = str(e)
             raise HTTPException(502, f"page fetch failed: {e}")

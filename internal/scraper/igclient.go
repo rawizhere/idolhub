@@ -29,12 +29,10 @@ import (
 
 const igAppID = "936619743392459"
 
-// igASBD-ID is the anti-abuse header value instagram's web frontend sends on
-// every XHR. Any plausible numeric value works; it must simply be present.
+// igASBD-ID is the anti-abuse header value instagram's web frontend sends on every XHR. Any plausible numeric value works; it must simply be present.
 const igASBDID = "129477"
 
-// Built-in graphql doc_id and frontend build revision. The doc_id refreshes
-// itself from the js bundles when instagram starts answering with HTML.
+// Built-in graphql doc_id and frontend build revision. The doc_id refreshes itself from the js bundles when instagram starts answering with HTML.
 const (
 	defaultIGGraphQLDocID = "39535953862670189"
 	defaultIGSpinR        = "1046911589"
@@ -43,14 +41,11 @@ const (
 // igSrcRe extracts script bundle urls from an instagram page.
 var igSrcRe = regexp.MustCompile(`src="([^"]+\.js)"`)
 
-// igOpDocIDRe extracts the profile-posts doc_id from the Relay operation
-// definition inside a JS bundle. Instagram stopped embedding doc_id in the
-// page HTML; the mapping now lives in a bundle next to the query name.
+// igOpDocIDRe extracts the profile-posts doc_id from the Relay operation definition inside a JS bundle. Instagram stopped embedding doc_id in the page HTML; the mapping now lives in a bundle next to the query name.
 var igOpDocIDRe = regexp.MustCompile(
 	`PolarisProfilePostsTabContentQuery_connection_instagramRelayOperation",\[\],\(function\([^)]*\)\{[a-z]\.exports="([0-9]{10,21})"`)
 
-// refreshDocID harvests the current doc_id from the JS bundles referenced
-// by the profile page.
+// refreshDocID harvests the current doc_id from the JS bundles referenced by the profile page.
 func (c *igClient) refreshDocID(ctx context.Context, username string) error {
 	page, err := c.fetchPage(ctx, "https://www.instagram.com/"+username+"/")
 	if err != nil {
@@ -101,21 +96,17 @@ type igClient struct {
 	docIDRefreshed bool
 	bootMu         sync.Mutex
 
-	// key identifies the credential set (sessionid + exported cookies) this
-	// client was built from; the shared client is rebuilt only when it changes.
+	// key identifies the credential set (sessionid + exported cookies) this client was built from; the shared client is rebuilt only when it changes.
 	key string
 }
 
-// igSharedClientMu guards the process-level instagram client. One long-lived
-// client (and cookie jar) is reused across targets and sync windows: a real
-// browser does not grow a fresh device identity every twelve hours.
+// igSharedClientMu guards the process-level instagram client. One long-lived client (and cookie jar) is reused across targets and sync windows: a real browser does not grow a fresh device identity every twelve hours.
 var (
 	igSharedClientMu sync.Mutex
 	igSharedClient   *igClient
 )
 
-// getIGClient returns the shared instagram client, rebuilding it only when
-// the configured credentials change (e.g. the user pasted a new cookie export).
+// getIGClient returns the shared instagram client, rebuilding it only when the configured credentials change (e.g. the user pasted a new cookie export).
 func getIGClient(sessionID, cookieExport string) *igClient {
 	key := fmt.Sprintf("%d|%x", len(sessionID), sha256.Sum256([]byte(cookieExport)))
 	igSharedClientMu.Lock()
@@ -129,10 +120,7 @@ func getIGClient(sessionID, cookieExport string) *igClient {
 	return c
 }
 
-// newIGClient builds a client whose cookie jar starts from a full browser
-// cookie export (Netscape format) when one is configured. Device cookies
-// (mid, ig_did, datr) are what makes the session look like the browser it
-// was created in; a bare sessionid is a strong automation signal.
+// newIGClient builds a client whose cookie jar starts from a full browser cookie export (Netscape format) when one is configured. Device cookies (mid, ig_did, datr) are what makes the session look like the browser it was created in; a bare sessionid is a strong automation signal.
 func newIGClient(sessionID, cookieExport string) *igClient {
 	tp := browser.FirefoxProfile
 	jar, _ := fcookiejar.New(nil)
@@ -146,8 +134,7 @@ func newIGClient(sessionID, cookieExport string) *igClient {
 			slog.Info("Loaded instagram cookie export into client jar", "cookies", len(parsed))
 		}
 	}
-	// The sessionid from the export wins; the separate sessionid setting is
-	// only a fallback for setups that never exported a full jar.
+	// The sessionid from the export wins; the separate sessionid setting is only a fallback for setups that never exported a full jar.
 	if sessionID != "" && jarCookie(jar, "sessionid") == "" {
 		jar.SetCookies(u, []*fhttp.Cookie{{
 			Name:     "sessionid",
@@ -173,8 +160,7 @@ func newIGClient(sessionID, cookieExport string) *igClient {
 		ua:     tp.UA,
 		docID:  defaultIGGraphQLDocID,
 	}
-	// A full export already carries csrftoken and ds_user_id; seeding them
-	// here skips the bootstrap round-trips entirely.
+	// A full export already carries csrftoken and ds_user_id; seeding them here skips the bootstrap round-trips entirely.
 	if ck := jarCookie(jar, "csrftoken"); ck != "" {
 		c.csrf = ck
 	}
@@ -198,8 +184,7 @@ func jarCookie(jar fhttp.CookieJar, name string) string {
 	return ""
 }
 
-// csrfFromJar refreshes c.csrf from the cookie jar. resp.Cookies() does not
-// see instagram Set-Cookie headers through the tls-client fork, the jar does.
+// csrfFromJar refreshes c.csrf from the cookie jar. resp.Cookies() does not see instagram Set-Cookie headers through the tls-client fork, the jar does.
 func (c *igClient) csrfFromJar() {
 	if v := jarCookie(c.client.GetCookieJar(), "csrftoken"); v != "" {
 		c.csrf = v
@@ -211,10 +196,7 @@ func sessionRedirectErr(code int) error {
 	return fmt.Errorf("unexpected status %d: instagram session cookie (sessionid) is invalid or expired", code)
 }
 
-// bootstrap fetches whatever session metadata is still missing: the csrf
-// token from the home page and the own user id from the edit page. Both are
-// skipped when a full cookie export already provided them. Serialized with
-// bootMu so concurrent targets do not double-bootstrap the shared client.
+// bootstrap fetches whatever session metadata is still missing: the csrf token from the home page and the own user id from the edit page. Both are skipped when a full cookie export already provided them. Serialized with bootMu so concurrent targets do not double-bootstrap the shared client.
 func (c *igClient) bootstrap(ctx context.Context) error {
 	c.bootMu.Lock()
 	defer c.bootMu.Unlock()
@@ -262,8 +244,7 @@ func (c *igClient) fetchPage(ctx context.Context, pageURL string) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	// Minimal headers on purpose: the Sec-Fetch navigation trio makes
-	// instagram serve a degraded page variant without the doc_id bundles.
+	// Minimal headers on purpose: the Sec-Fetch navigation trio makes instagram serve a degraded page variant without the doc_id bundles.
 	req.Header.Set("User-Agent", c.ua)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
@@ -392,8 +373,7 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 			return nil, fmt.Errorf("%w: instagram returned HTML instead of JSON (session rejected or doc_id outdated)", ErrAuthExpired)
 		}
 		if c.docIDRefreshed {
-			// Successful page: re-arm the one-time doc_id refresh so the
-			// long-lived shared client can re-harvest a rotated doc_id later.
+			// Successful page: re-arm the one-time doc_id refresh so the long-lived shared client can re-harvest a rotated doc_id later.
 			c.docIDRefreshed = false
 		}
 		return body, nil
@@ -402,8 +382,7 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 			slog.Warn("Instagram graphql response is rate limiting", "status", resp.StatusCode, "body", strings.TrimSpace(string(body)))
 			return nil, fmt.Errorf("%w: instagram returned %d (rate limited)", download.ErrRateLimited, resp.StatusCode)
 		}
-		// A 403 with a logged-in "Page Not Found" page means an unknown
-		// doc_id, not a dead session; re-read it once before giving up.
+		// A 403 with a logged-in "Page Not Found" page means an unknown doc_id, not a dead session; re-read it once before giving up.
 		if len(body) > 0 && body[0] == '<' && !c.docIDRefreshed {
 			c.docIDRefreshed = true
 			if rerr := c.refreshDocID(ctx, username); rerr == nil {
@@ -439,8 +418,7 @@ func isRateLimitBody(body string) bool {
 	return false
 }
 
-// buildGraphQLForm builds the PolarisProfilePostsTabContentQuery form shared
-// by the tls-client and browser fetch paths.
+// buildGraphQLForm builds the PolarisProfilePostsTabContentQuery form shared by the tls-client and browser fetch paths.
 func buildGraphQLForm(username, userID, after string, count int, ownUserID, csrf, docID string) *url.Values {
 	v := url.Values{}
 	vars := map[string]any{

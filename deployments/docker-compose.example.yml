@@ -23,8 +23,7 @@ services:
       retries: 3
       start_period: 15s
 
-  # Real-browser engine for authenticated instagram requests.
-  # Point the instagram_sidecar_url setting at http://camoufox:9100 to use it.
+# Real-browser engine for authenticated instagram requests. Point the instagram_sidecar_url setting at http://camoufox:9100 to use it.
   camoufox:
     build:
       context: ./camoufox

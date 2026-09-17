@@ -10,16 +10,14 @@ import (
 	"idolhub/internal/igbrowser"
 )
 
-// igFetcher is the request surface scrapeInstagramDirect needs; both the
-// tls-client and the browser-sidecar paths implement it.
+// igFetcher is the request surface scrapeInstagramDirect needs; both the tls-client and the browser-sidecar paths implement it.
 type igFetcher interface {
 	doGet(ctx context.Context, apiURL, username string) ([]byte, error)
 	doGraphQL(ctx context.Context, username, userID, after string, count int) ([]byte, error)
 	resolveUserID(ctx context.Context, username string) (string, error)
 }
 
-// resolveUserIDShared resolves the numeric user id: topsearch first, then
-// web_profile_info. Works over any fetcher.
+// resolveUserIDShared resolves the numeric user id: topsearch first, then web_profile_info. Works over any fetcher.
 func resolveUserIDShared(ctx context.Context, f igFetcher, username string) (string, error) {
 	if id, err := f.doGet(ctx, fmt.Sprintf("https://www.instagram.com/api/v1/web/search/topsearch/?query=%s", url.PathEscape(username)), username); err == nil {
 		var search struct {
@@ -68,7 +66,7 @@ func newIGBrowserClient(sidecarURL string) *igBrowserClient {
 }
 
 func (b *igBrowserClient) doGet(ctx context.Context, apiURL, username string) ([]byte, error) {
-	res, err := b.sc.Fetch(ctx, apiURL, "GET", "")
+	res, err := b.sc.Fetch(ctx, apiURL, "GET", "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +76,9 @@ func (b *igBrowserClient) doGet(ctx context.Context, apiURL, username string) ([
 func (b *igBrowserClient) doGraphQL(ctx context.Context, username, userID, after string, count int) ([]byte, error) {
 	form := buildGraphQLForm(username, userID, after, count, b.ownID, "", b.docID)
 	body := form.Encode()
-	res, err := b.sc.Fetch(ctx, "https://www.instagram.com/graphql/query", "POST", body)
+	// Navigate to the profile first: the page's own JS fires the same graphql operation, and the sidecar harvests the fresh doc_id / asbd-id / www-claim from it before we send ours.
+	res, err := b.sc.Fetch(ctx, "https://www.instagram.com/graphql/query", "POST", body,
+		"https://www.instagram.com/"+username+"/")
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func (b *igBrowserClient) resolveUserID(ctx context.Context, username string) (s
 	return resolveUserIDShared(ctx, b, username)
 }
 
-// OwnID refreshes ds_user_id from the sidecar session status.
+// OwnID refreshes ds_user_id and the captured request identity (doc_id, www-claim) from the sidecar session status.
 func (b *igBrowserClient) OwnID(ctx context.Context) error {
 	st, err := b.sc.Status(ctx)
 	if err != nil {
@@ -114,5 +114,8 @@ func (b *igBrowserClient) OwnID(ctx context.Context) error {
 		return fmt.Errorf("%w: sidecar session is %s", ErrAuthExpired, st.Session)
 	}
 	b.ownID = st.DsUserID
+	if st.DocID != "" {
+		b.docID = st.DocID
+	}
 	return nil
 }

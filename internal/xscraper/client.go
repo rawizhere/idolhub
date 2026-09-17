@@ -37,9 +37,7 @@ type xClient struct {
 	csrfToken string
 }
 
-// newXClient builds the client. When a Netscape cookie export is provided it
-// carries the full device context (auth_token, ct0, kdt, twid, guest_id);
-// a bare auth_token with a fabricated ct0 is a weak bot signature.
+// newXClient builds the client. When a Netscape cookie export is provided it carries the full device context (auth_token, ct0, kdt, twid, guest_id); a bare auth_token with a fabricated ct0 is a weak bot signature.
 func newXClient(authToken, csrfToken, cookiesRaw string) (*xClient, error) {
 	tp := browser.FirefoxProfile
 	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), []tls_client.HttpClientOption{

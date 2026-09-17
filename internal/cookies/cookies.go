@@ -9,19 +9,7 @@ import (
 	fhttp "github.com/bogdanfinn/fhttp"
 )
 
-// parseNetscapeCookies parses a Netscape HTTP Cookie File (the format
-// produced by the Cookie-Editor browser extension) into fhttp cookies.
-// Lines look like:
-//
-//	#HttpOnly_.instagram.com	TRUE	/	TRUE	1801259143	ig_did	9C49...
-//
-// ParseNetscape parses a Netscape HTTP Cookie File (the format produced by
-// the Cookie-Editor browser extension) into fhttp cookies. Lines look like:
-//
-//	#HttpOnly_.instagram.com\tTRUE\t/\tTRUE\t1801259143\tig_did\t9C49...
-//
-// Only cookies whose domain contains domainSuffix are returned; everything
-// else is ignored.
+// parseNetscapeCookies parses a Netscape HTTP Cookie File (the format produced by the Cookie-Editor browser extension) into fhttp cookies. Lines look like:  #HttpOnly_.instagram.com	TRUE	/	TRUE	1801259143	ig_did	9C49...  ParseNetscape parses a Netscape HTTP Cookie File (the format produced by the Cookie-Editor browser extension) into fhttp cookies. Lines look like:  #HttpOnly_.instagram.com\tTRUE\t/\tTRUE\t1801259143\tig_did\t9C49...  Only cookies whose domain contains domainSuffix are returned; everything else is ignored.
 func ParseNetscape(raw, domainSuffix string) ([]*fhttp.Cookie, error) {
 	var cookies []*fhttp.Cookie
 	for _, line := range strings.Split(raw, "\n") {
