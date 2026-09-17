@@ -116,7 +116,7 @@ type TweetResult struct {
 	Error error
 }
 
-func (s *Scraper) timeline(ctx context.Context, op string, vars map[string]interface{}, max int) <-chan *TweetResult {
+func (s *Scraper) timeline(ctx context.Context, op string, vars map[string]interface{}, max int, referer string) <-chan *TweetResult {
 	ch := make(chan *TweetResult)
 	go func() {
 		defer close(ch)
@@ -132,7 +132,7 @@ func (s *Scraper) timeline(ctx context.Context, op string, vars map[string]inter
 			if cursor != "" {
 				vars["cursor"] = cursor
 			}
-			tweets, next, err := s.doTimelinePage(ctx, op, vars)
+			tweets, next, err := s.doTimelinePage(ctx, op, vars, referer)
 			if err != nil {
 				ch <- &TweetResult{Error: err}
 				return
@@ -172,10 +172,12 @@ func (s *Scraper) GetMediaTweets(ctx context.Context, screenName string, max int
 }
 
 func (s *Scraper) userTimeline(ctx context.Context, op, screenName string, max int) <-chan *TweetResult {
+	// The web app always sends its page URL as referer on graphql XHRs.
+	referer := "https://x.com/" + url.PathEscape(screenName) + "/"
 	ch := make(chan *TweetResult)
 	go func() {
 		defer close(ch)
-		uid, err := s.userID(ctx, screenName)
+		uid, err := s.userID(ctx, screenName, referer)
 		if err != nil {
 			ch <- &TweetResult{Error: err}
 			return
@@ -196,7 +198,7 @@ func (s *Scraper) userTimeline(ctx context.Context, op, screenName string, max i
 			vars["withCommunity"] = true
 			vars["withQuickPromoteEligibilityTweetFields"] = false
 		}
-		for r := range s.timeline(ctx, op, vars, max) {
+		for r := range s.timeline(ctx, op, vars, max, referer) {
 			ch <- r
 			if r.Error != nil {
 				return
@@ -206,9 +208,9 @@ func (s *Scraper) userTimeline(ctx context.Context, op, screenName string, max i
 	return ch
 }
 
-func (s *Scraper) userID(ctx context.Context, screenName string) (string, error) {
+func (s *Scraper) userID(ctx context.Context, screenName, referer string) (string, error) {
 	vars := map[string]interface{}{"screen_name": screenName}
-	body, err := s.doGet(ctx, opUserByScreenName, vars)
+	body, err := s.doGet(ctx, opUserByScreenName, vars, referer)
 	if err != nil {
 		return "", err
 	}
@@ -217,12 +219,12 @@ func (s *Scraper) userID(ctx context.Context, screenName string) (string, error)
 
 const maxRateLimitRetries = 5
 
-func (s *Scraper) doGet(ctx context.Context, op string, vars map[string]interface{}) ([]byte, error) {
-	body, err := s.doGetOnce(ctx, op, vars)
+func (s *Scraper) doGet(ctx context.Context, op string, vars map[string]interface{}, referer string) ([]byte, error) {
+	body, err := s.doGetOnce(ctx, op, vars, referer)
 	// Deploy rotated the hashes: re-harvest once and retry.
 	if err != nil && isUnknownQueryErr(err) && s.harvestDue() {
 		if _, herr := s.refreshQueryIDs(ctx); herr == nil {
-			body, err = s.doGetOnce(ctx, op, vars)
+			body, err = s.doGetOnce(ctx, op, vars, referer)
 		} else {
 			slog.Warn("Twitter queryId harvest failed", "operation", op, "error", herr)
 		}
@@ -230,7 +232,7 @@ func (s *Scraper) doGet(ctx context.Context, op string, vars map[string]interfac
 	return body, err
 }
 
-func (s *Scraper) doGetOnce(ctx context.Context, op string, vars map[string]interface{}) ([]byte, error) {
+func (s *Scraper) doGetOnce(ctx context.Context, op string, vars map[string]interface{}, referer string) ([]byte, error) {
 	if err := s.limiter.Wait(ctx); err != nil {
 		return nil, err
 	}
@@ -243,7 +245,7 @@ func (s *Scraper) doGetOnce(ctx context.Context, op string, vars map[string]inte
 	varsJSON, _ := json.Marshal(vars)
 	featsJSON, _ := json.Marshal(s.features)
 	u := gqlURL + "/" + qid + "/" + op + "?variables=" + url.QueryEscape(string(varsJSON)) + "&features=" + url.QueryEscape(string(featsJSON))
-	return s.client.get(ctx, u)
+	return s.client.get(ctx, u, referer)
 }
 
 // isUnknownQueryErr reports whether X rejected the queryId hash.
@@ -252,10 +254,10 @@ func isUnknownQueryErr(err error) bool {
 }
 
 // doTimelinePage fetches one timeline page, retrying on graphql rate limits.
-func (s *Scraper) doTimelinePage(ctx context.Context, op string, vars map[string]interface{}) ([]*Tweet, string, error) {
+func (s *Scraper) doTimelinePage(ctx context.Context, op string, vars map[string]interface{}, referer string) ([]*Tweet, string, error) {
 	backoff := 15 * time.Second
 	for attempt := 0; ; attempt++ {
-		body, err := s.doGet(ctx, op, vars)
+		body, err := s.doGet(ctx, op, vars, referer)
 		if err == nil {
 			var tweets []*Tweet
 			var next string

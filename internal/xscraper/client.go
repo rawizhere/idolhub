@@ -78,7 +78,7 @@ func newXClient(authToken, csrfToken, cookiesRaw string) (*xClient, error) {
 	return &xClient{http: client, ua: tp.UA, cookieHdr: strings.Join(pairs, "; "), csrfToken: csrfToken}, nil
 }
 
-func (c *xClient) get(ctx context.Context, rawURL string) ([]byte, error) {
+func (c *xClient) get(ctx context.Context, rawURL, referer string) ([]byte, error) {
 	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
@@ -95,6 +95,8 @@ func (c *xClient) get(ctx context.Context, rawURL string) ([]byte, error) {
 		"x-csrf-token":              []string{c.csrfToken},
 		"x-twitter-active-user":     []string{"yes"},
 		"x-twitter-client-language": []string{"en"},
+		"x-twitter-auth-type":       []string{"OAuthWebSession"},
+		"referer":                   []string{referer},
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
