@@ -282,10 +282,10 @@ export function openTokenSettings(platform) {
   toggleSettingsModal();
   setTimeout(() => {
     if (platform === "instagram") {
-      const el = document.getElementById("instagram-session-id");
+      const el = document.getElementById("instagram-cookies");
       if (el) { el.focus(); el.select(); }
     } else if (platform === "twitter") {
-      const el = document.getElementById("twitter-auth-token");
+      const el = document.getElementById("twitter-cookies");
       if (el) { el.focus(); el.select(); }
     } else if (platform === "tiktok") {
       const el = document.getElementById("tiktok-cookies");
@@ -297,9 +297,7 @@ export function openTokenSettings(platform) {
 export async function loadConfig() {
   try {
     const data = await fetchConfig();
-    document.getElementById("twitter-auth-token").value = data.twitter_auth_token || "";
     document.getElementById("twitter-cookies").value = data.twitter_cookies || "";
-    document.getElementById("instagram-session-id").value = data.instagram_session_id || "";
     document.getElementById("instagram-cookies").value = data.instagram_cookies || "";
     fetch("/api/instagram/session").then(res => res.json()).then(st => {
       const el = document.getElementById("ig-session-status");
@@ -318,9 +316,8 @@ export async function saveSettings() {
   await withLoading(btn, async () => {
     try {
       const current = await fetchConfig();
-      current.twitter_auth_token = document.getElementById("twitter-auth-token").value.trim();
+      // token fields are gone from the UI; the loaded values pass through untouched
       current.twitter_cookies = document.getElementById("twitter-cookies").value.trim();
-      current.instagram_session_id = document.getElementById("instagram-session-id").value.trim();
       current.instagram_cookies = document.getElementById("instagram-cookies").value.trim();
       current.tiktok_cookies = document.getElementById("tiktok-cookies").value.trim();
       current.auto_sync_interval = parseInt(document.getElementById("auto-sync-interval").value) || 0;
