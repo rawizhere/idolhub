@@ -362,6 +362,17 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 		return
 	}
 
+	if platform == "instagram" {
+		o.mu.Lock()
+		blocked := time.Now().Before(o.igBlockUntil)
+		resumeAt := o.igBlockUntil
+		o.mu.Unlock()
+		if blocked {
+			slog.Warn("Skipping scrape, instagram session is flagged (circuit breaker); save new instagram session settings to reset it", "user", username, "resume_after", resumeAt.Format(time.RFC3339))
+			return
+		}
+	}
+
 	if p.Status == "failed" || p.Status == "completed" {
 		p.Status = "idle"
 		p.Progress = 0
@@ -749,6 +760,13 @@ func (o *Orchestrator) instagramBlocked() bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	return time.Now().Before(o.igBlockUntil)
+}
+
+// ResetInstagramBlock clears the instagram circuit breaker; called when the operator saves fresh session settings.
+func (o *Orchestrator) ResetInstagramBlock() {
+	o.mu.Lock()
+	o.igBlockUntil = time.Time{}
+	o.mu.Unlock()
 }
 
 // hintSessionRefresh tells the operator how to restore a stale scraping session.

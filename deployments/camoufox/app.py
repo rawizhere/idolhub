@@ -138,27 +138,71 @@ async def navigate(url: str) -> None:
     await page.goto(url, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
 
 
-@app.on_event("startup")
-async def startup() -> None:
+# UA must equal the one the instagram sessionid was minted with, else instagram returns "useragent mismatch"
+IG_USER_AGENT = os.environ.get("IG_USER_AGENT", "").strip()
+
+
+async def launch_browser() -> None:
     Path(PROFILE_DIR).mkdir(parents=True, exist_ok=True)
-    launch = AsyncCamoufox(
+    opts = dict(
         persistent_context=True,
         user_data_dir=PROFILE_DIR,
         headless="virtual",
         i_know_what_im_doing=True,
     )
+    if IG_USER_AGENT:
+        # camoufox derives the rest of the fingerprint (os, screen, fonts) from a custom UA
+        opts["config"] = {"navigator.userAgent": IG_USER_AGENT,
+                          "headers.User-Agent": IG_USER_AGENT}
+    launch = AsyncCamoufox(**opts)
     state["context"] = await launch.__aenter__()
     page = await state["context"].new_page()
     await page.add_init_script(CAPTURE_JS)
     await page.goto("https://www.instagram.com/", wait_until="domcontentloaded",
                     timeout=PAGE_TIMEOUT_MS)
     state["page"] = page
+    state["last_error"] = None
     state["ready"] = True
+
+
+async def ensure_browser() -> None:
+    """Relaunch the browser if it died (oom kill, crash); the container keeps serving."""
+    page = state["page"]
+    context = state["context"]
+    if page is not None and not page.is_closed() and context is not None:
+        try:
+            await page.evaluate("() => 1")
+            return
+        except Exception:
+            pass
+    async with state["lock"]:
+        page = state["page"]
+        context = state["context"]
+        if page is not None and not page.is_closed() and context is not None:
+            return
+        state["last_error"] = "browser died; relaunching"
+        try:
+            if context is not None:
+                await context.close()
+        except Exception:
+            pass
+        state["page"] = None
+        state["context"] = None
+        state["ready"] = False
+        await launch_browser()
+
+
+@app.on_event("startup")
+async def startup() -> None:
+    await launch_browser()
 
 
 @app.get("/health")
 async def health() -> dict:
-    return {"ready": state["ready"], "last_error": state["last_error"]}
+    page = state["page"]
+    alive = page is not None and not page.is_closed()
+    return {"ready": state["ready"] and alive, "browser_alive": alive,
+            "last_error": state["last_error"]}
 
 
 @app.get("/session/status")
@@ -192,6 +236,7 @@ async def session_import(request: Request) -> dict:
     except ValueError as e:
         raise HTTPException(400, str(e))
     async with state["lock"]:
+        await ensure_browser()
         await state["context"].clear_cookies()
         await state["context"].add_cookies(cookies)
         await navigate("https://www.instagram.com/")
@@ -207,6 +252,7 @@ async def fetch(req: FetchReq) -> dict:
     if page is None:
         raise HTTPException(503, "browser not ready")
     async with state["lock"]:
+        await ensure_browser()
         try:
             if req.navigate:
                 if not is_instagram(req.navigate):
@@ -217,10 +263,10 @@ async def fetch(req: FetchReq) -> dict:
                 """async ({url, method, body, asbd, claim}) => {
                     const csrf = document.cookie.split("; ").find(c => c.startsWith("csrftoken="))?.split("=")[1] || "";
                     const headers = {};
+                    headers["X-IG-App-ID"] = "936619743392459";
                     if (body) {
                         headers["Content-Type"] = "application/x-www-form-urlencoded";
                         headers["X-CSRFToken"] = csrf;
-                        headers["X-IG-App-ID"] = "936619743392459";
                         headers["X-Requested-With"] = "XMLHttpRequest";
                     }
                     if (asbd) { headers["X-ASBD-ID"] = asbd; }

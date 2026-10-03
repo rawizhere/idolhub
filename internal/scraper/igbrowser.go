@@ -3,6 +3,7 @@ package scraper
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -38,6 +39,10 @@ func resolveUserIDShared(ctx context.Context, f igFetcher, username string) (str
 	}
 	profile, err := f.doGet(ctx, fmt.Sprintf("https://www.instagram.com/api/v1/users/web_profile_info/?username=%s", url.PathEscape(username)), username)
 	if err != nil {
+		// transport-level failure (sidecar down, network): report as-is, not as auth expiry
+		if !errors.Is(err, ErrAuthExpired) {
+			return "", fmt.Errorf("could not resolve Instagram user ID for @%s: %w", username, err)
+		}
 		return "", fmt.Errorf("%w: could not resolve Instagram user ID for @%s (session may be expired or rate-limited)", ErrAuthExpired, username)
 	}
 	var profileData struct {
@@ -87,16 +92,26 @@ func (b *igBrowserClient) doGraphQL(ctx context.Context, username, userID, after
 
 // handleBrowserStatus maps page fetch statuses to scraper errors.
 func handleBrowserStatus(res *igbrowser.FetchResult, what string) ([]byte, error) {
+	// surface instagram's own failure message ("useragent mismatch", "Please wait...") — the bare status hides the cause
+	reason := func() string {
+		var msg struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal([]byte(res.Body), &msg) == nil && msg.Message != "" {
+			return ": " + msg.Message
+		}
+		return ""
+	}
 	switch {
 	case res.Status == 200:
 		if strings.HasPrefix(strings.TrimSpace(res.Body), "<") {
-			return nil, fmt.Errorf("%w: %s returned HTML instead of JSON", ErrAuthExpired, what)
+			return nil, fmt.Errorf("%w: %s returned HTML instead of JSON (session rejected)", ErrAuthExpired, what)
 		}
 		return []byte(res.Body), nil
 	case res.Status == 401 || res.Status == 403 || res.Status == 429 || (res.Status >= 300 && res.Status < 400):
-		return nil, fmt.Errorf("%w: %s returned %d", ErrAuthExpired, what, res.Status)
+		return nil, fmt.Errorf("%w: %s returned %d%s", ErrAuthExpired, what, res.Status, reason())
 	default:
-		return nil, fmt.Errorf("instagram %s returned status %d", what, res.Status)
+		return nil, fmt.Errorf("instagram %s returned status %d%s", what, res.Status, reason())
 	}
 }
 

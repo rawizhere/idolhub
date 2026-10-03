@@ -29,10 +29,14 @@ services:
     build:
       context: ./camoufox
     container_name: camoufox
+    environment:
+      # must match the UA of the browser the instagram sessionid was created in
+      - IG_USER_AGENT=${IG_USER_AGENT:-}
     volumes:
       - camoufox_profile:/data
     restart: unless-stopped
-    mem_limit: 1500m
+    # firefox + instagram pages spike well past 1.5g; an oom kill leaves the sidecar serving 502s until restart
+    mem_limit: 3g
 
 volumes:
   app_data:

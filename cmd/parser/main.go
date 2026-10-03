@@ -361,6 +361,13 @@ func (a *App) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fresh instagram session credentials mean the operator fixed the session; lift the circuit breaker.
+	if cfg.InstagramSessionID != oldCfg.InstagramSessionID ||
+		cfg.InstagramCookies != oldCfg.InstagramCookies ||
+		cfg.InstagramSidecarURL != oldCfg.InstagramSidecarURL {
+		a.orch.ResetInstagramBlock()
+	}
+
 	// Push instagram cookies to the camoufox sidecar when one is configured.
 	if cfg.InstagramSidecarURL != "" && cfg.InstagramCookies != "" {
 		sc := igbrowser.New(cfg.InstagramSidecarURL)
