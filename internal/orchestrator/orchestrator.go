@@ -364,16 +364,13 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 	}
 
 	if platform == "instagram" || platform == "twitter" {
-		o.mu.Lock()
-		var blockedUntil time.Time
-		if platform == "instagram" {
-			blockedUntil = o.igBlockUntil
-		} else {
+		// o.mu is already held here; read the breaker field directly
+		blockedUntil := o.igBlockUntil
+		if platform == "twitter" {
 			blockedUntil = o.twBlockUntil
 		}
-		blocked := time.Now().Before(blockedUntil)
-		o.mu.Unlock()
-		if blocked {
+		if time.Now().Before(blockedUntil) {
+			o.mu.Unlock()
 			slog.Warn("Skipping scrape, session is flagged (circuit breaker); save new session settings to reset it", "user", username, "platform", platform, "resume_after", blockedUntil.Format(time.RFC3339))
 			return
 		}
