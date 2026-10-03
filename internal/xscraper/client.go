@@ -17,6 +17,9 @@ import (
 	"idolhub/internal/cookies"
 )
 
+// ErrAuthExpired means X rejected the session (dead auth_token, logged out, bad csrf); a fresh cookie export is needed.
+var ErrAuthExpired = errors.New("x.com session rejected")
+
 // RateLimitError is returned on HTTP 429 with the server-provided delay.
 type RateLimitError struct {
 	RetryAfter time.Duration
@@ -47,7 +50,9 @@ func newXClient(authToken, csrfToken, cookiesRaw string) (*xClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	pairs := make([]string, 0, 8)
+	// keep the cookie header in the export's jar order; a hand-sorted header is a subtle automation tell
+	var pairs []string
+	sawAuth, sawCt0 := false, false
 	if cookiesRaw != "" {
 		parsed, err := cookies.ParseNetscape(cookiesRaw, "x.com")
 		if err != nil {
@@ -55,21 +60,33 @@ func newXClient(authToken, csrfToken, cookiesRaw string) (*xClient, error) {
 		} else {
 			slog.Info("Loaded twitter cookie export into client", "cookies", len(parsed))
 			for _, ck := range parsed {
-				pairs = append(pairs, ck.Name+"="+ck.Value)
-				if ck.Name == "auth_token" && authToken == "" {
+				if ck.Name == "auth_token" {
+					sawAuth = true
+					if authToken != "" {
+						pairs = append(pairs, "auth_token="+authToken)
+						continue
+					}
 					authToken = ck.Value
 				}
 				if ck.Name == "ct0" {
+					sawCt0 = true
+					if csrfToken != "" {
+						pairs = append(pairs, "ct0="+csrfToken)
+						continue
+					}
 					csrfToken = ck.Value
 				}
+				pairs = append(pairs, ck.Name+"="+ck.Value)
 			}
 		}
 	}
 	if authToken == "" {
 		return nil, errors.New("no x.com auth_token in cookie export")
 	}
-	pairs = append(pairs, "auth_token="+authToken)
-	if csrfToken != "" {
+	if !sawAuth {
+		pairs = append(pairs, "auth_token="+authToken)
+	}
+	if csrfToken != "" && !sawCt0 {
 		pairs = append(pairs, "ct0="+csrfToken)
 	}
 	slog.Info("Twitter client TLS profile", "tls_fingerprint", tp.Profile.GetClientHelloStr())
@@ -111,6 +128,9 @@ func (c *xClient) get(ctx context.Context, rawURL, referer string) ([]byte, erro
 	}
 	if resp.StatusCode == fhttp.StatusTooManyRequests {
 		return nil, &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
+	}
+	if resp.StatusCode == fhttp.StatusUnauthorized || resp.StatusCode == fhttp.StatusForbidden {
+		return nil, fmt.Errorf("%w: response status %s", ErrAuthExpired, resp.Status)
 	}
 	if resp.StatusCode != fhttp.StatusOK {
 		return nil, fmt.Errorf("response status %s: %s", resp.Status, body)

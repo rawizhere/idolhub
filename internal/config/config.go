@@ -12,15 +12,16 @@ import (
 )
 
 type Account struct {
-	Username       string    `json:"username"`
-	Platform       string    `json:"platform"`      // "instagram" or "twitter"
-	SaveText       bool      `json:"save_text"`     // for twitter only
-	SkipRetweets   bool      `json:"skip_retweets"` // for twitter only
-	Filters        []string  `json:"filters"`       // for twitter only, match keywords/phrases
-	DownloadPhotos *bool     `json:"download_photos,omitempty"`
-	DownloadVideos *bool     `json:"download_videos,omitempty"`
-	LastSyncStatus string    `json:"last_sync_status,omitempty"`
-	LastSyncTime   time.Time `json:"last_sync_time,omitempty"`
+	Username         string    `json:"username"`
+	Platform         string    `json:"platform"`                     // "instagram" or "twitter"
+	SaveText         bool      `json:"save_text"`                    // for twitter only
+	SkipRetweets     bool      `json:"skip_retweets"`                // for twitter only
+	Filters          []string  `json:"filters"`                      // for twitter only, match keywords/phrases
+	TwitterAuthToken string    `json:"twitter_auth_token,omitempty"` // per-account override of the global twitter_auth_token
+	DownloadPhotos   *bool     `json:"download_photos,omitempty"`
+	DownloadVideos   *bool     `json:"download_videos,omitempty"`
+	LastSyncStatus   string    `json:"last_sync_status,omitempty"`
+	LastSyncTime     time.Time `json:"last_sync_time,omitempty"`
 }
 
 func (a Account) ShouldDownloadPhotos() bool {

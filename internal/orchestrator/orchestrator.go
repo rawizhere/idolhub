@@ -81,6 +81,7 @@ type Orchestrator struct {
 	accounts       *store.AccountStore
 	posts          *store.PostStore
 	igBlockUntil   time.Time
+	twBlockUntil   time.Time
 	twitterMu      sync.Mutex
 	jobCh          chan scrapeJob
 	logEvents      chan logEvent
@@ -362,13 +363,18 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 		return
 	}
 
-	if platform == "instagram" {
+	if platform == "instagram" || platform == "twitter" {
 		o.mu.Lock()
-		blocked := time.Now().Before(o.igBlockUntil)
-		resumeAt := o.igBlockUntil
+		var blockedUntil time.Time
+		if platform == "instagram" {
+			blockedUntil = o.igBlockUntil
+		} else {
+			blockedUntil = o.twBlockUntil
+		}
+		blocked := time.Now().Before(blockedUntil)
 		o.mu.Unlock()
 		if blocked {
-			slog.Warn("Skipping scrape, instagram session is flagged (circuit breaker); save new instagram session settings to reset it", "user", username, "resume_after", resumeAt.Format(time.RFC3339))
+			slog.Warn("Skipping scrape, session is flagged (circuit breaker); save new session settings to reset it", "user", username, "platform", platform, "resume_after", blockedUntil.Format(time.RFC3339))
 			return
 		}
 	}
@@ -496,11 +502,17 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 			dv := acc.ShouldDownloadVideos()
 			target.DownloadPhotos = &dp
 			target.DownloadVideos = &dv
+			// per-account token: one auth_token across all targets is the loudest ban signal X sees
+			if acc.TwitterAuthToken != "" {
+				opts.TwitterAuthToken = acc.TwitterAuthToken
+			}
 			break
 		}
 	}
 
-	opts.TwitterAuthToken = c.TwitterAuthToken
+	if opts.TwitterAuthToken == "" {
+		opts.TwitterAuthToken = c.TwitterAuthToken
+	}
 	opts.TwitterCookies = c.TwitterCookies
 	opts.InstagramSessionID = c.InstagramSessionID
 	opts.InstagramCookies = c.InstagramCookies
@@ -530,6 +542,12 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 		o.igBlockUntil = time.Now().Add(6 * time.Hour)
 		o.mu.Unlock()
 		slog.Warn("Instagram session flagged; pausing instagram targets for 6 hours", "resume_after", time.Now().Add(6*time.Hour).Format(time.RFC3339))
+	}
+	if platform == "twitter" && errors.Is(err, scraper.ErrAuthExpired) {
+		o.mu.Lock()
+		o.twBlockUntil = time.Now().Add(6 * time.Hour)
+		o.mu.Unlock()
+		slog.Warn("Twitter session flagged; pausing twitter targets for 6 hours", "resume_after", time.Now().Add(6*time.Hour).Format(time.RFC3339))
 	}
 
 	o.mu.Lock()
@@ -762,10 +780,11 @@ func (o *Orchestrator) instagramBlocked() bool {
 	return time.Now().Before(o.igBlockUntil)
 }
 
-// ResetInstagramBlock clears the instagram circuit breaker; called when the operator saves fresh session settings.
-func (o *Orchestrator) ResetInstagramBlock() {
+// ResetSessionBlocks clears the circuit breakers; called when the operator saves fresh session settings.
+func (o *Orchestrator) ResetSessionBlocks() {
 	o.mu.Lock()
 	o.igBlockUntil = time.Time{}
+	o.twBlockUntil = time.Time{}
 	o.mu.Unlock()
 }
 
@@ -773,7 +792,11 @@ func (o *Orchestrator) ResetInstagramBlock() {
 func hintSessionRefresh(err error) {
 	switch {
 	case errors.Is(err, scraper.ErrAuthExpired):
-		slog.Warn("Scraping session rejected by Instagram; the sessionid cookie expired, paste a fresh one in settings", "error", err)
+		if err != nil && strings.Contains(err.Error(), "twitter") {
+			slog.Warn("Scraping session rejected by Twitter; the auth_token expired, paste a fresh cookie export in settings", "error", err)
+		} else {
+			slog.Warn("Scraping session rejected by Instagram; the sessionid cookie expired, paste a fresh one in settings", "error", err)
+		}
 	case err != nil && strings.Contains(err.Error(), "Cannot find query with id"):
 		slog.Warn("Twitter rejected the queryId even after the bundle harvest; paste a fresh queryId in settings", "error", err)
 	}

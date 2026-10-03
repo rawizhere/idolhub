@@ -18,8 +18,12 @@ func parseTimeline(body []byte) ([]*Tweet, string, error) {
 
 	if len(resp.Errors) > 0 {
 		for _, e := range resp.Errors {
-			if e.Code == 88 {
+			switch e.Code {
+			case 88:
 				return nil, "", &RateLimitError{}
+			// 32 not logged in, 89 bad/expired auth token, 239 bad guest token: all mean the session is dead
+			case 32, 89, 239:
+				return nil, "", fmt.Errorf("%w: graphql code %d: %s", ErrAuthExpired, e.Code, e.Message)
 			}
 		}
 		msgs := make([]string, 0, len(resp.Errors))
@@ -153,6 +157,7 @@ func parseCreatedAt(s string) time.Time {
 	return t
 }
 
+// debt: features are hardcoded; harvest them together with queryIds once X starts validating them
 func timelineFeatures() map[string]interface{} {
 	return map[string]interface{}{
 		"rweb_lists_timeline_redesign_enabled":                                    true,

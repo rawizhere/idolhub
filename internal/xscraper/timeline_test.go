@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -180,10 +181,12 @@ func TestParseTimelineGraphqlErrors(t *testing.T) {
 		t.Fatalf("expected RateLimitError, got %v", err)
 	}
 
-	body = []byte(`{"errors":[{"code":32,"message":"Could not authenticate you"}]}`)
-	_, _, err = parseTimeline(body)
-	if err == nil || errors.As(err, &rle) {
-		t.Fatalf("expected plain error, got %v", err)
+	for _, code := range []int{32, 89, 239} {
+		body = []byte(fmt.Sprintf(`{"errors":[{"code":%d,"message":"Could not authenticate you"}]}`, code))
+		_, _, err = parseTimeline(body)
+		if !errors.Is(err, ErrAuthExpired) {
+			t.Fatalf("code %d: expected ErrAuthExpired, got %v", code, err)
+		}
 	}
 
 	body = []byte(`{"data":{"user":{"result":{"timeline":{"timeline":{"instructions":[]}}}}}}`)

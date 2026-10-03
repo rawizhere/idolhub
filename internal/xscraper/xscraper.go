@@ -233,8 +233,12 @@ func (s *Scraper) doGetOnce(ctx context.Context, op string, vars map[string]inte
 	if err := s.limiter.Wait(ctx); err != nil {
 		return nil, err
 	}
-	// Random extra pause: fixed intervals are a clean automation signal.
-	time.Sleep(time.Duration(mrand.Int63n(2500)) * time.Millisecond)
+	// Random extra pause, heavy-tailed: a thin uniform band reads as automation.
+	if mrand.Intn(10) == 0 {
+		time.Sleep(time.Duration(8+mrand.Int63n(18)) * time.Second)
+	} else {
+		time.Sleep(time.Duration(mrand.Int63n(2500)) * time.Millisecond)
+	}
 	qid := s.queryIDs[op]
 	if qid == "" {
 		return nil, fmt.Errorf("no queryId known for operation %s", op)
@@ -250,30 +254,41 @@ func isUnknownQueryErr(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "Cannot find query with id")
 }
 
-// doTimelinePage fetches one timeline page, retrying on graphql rate limits.
+// doTimelinePage fetches one timeline page, retrying rate limits and transient failures; auth errors are final.
 func (s *Scraper) doTimelinePage(ctx context.Context, op string, vars map[string]interface{}, referer string) ([]*Tweet, string, error) {
 	backoff := 15 * time.Second
 	for attempt := 0; ; attempt++ {
 		body, err := s.doGet(ctx, op, vars, referer)
+		var parseErr error
 		if err == nil {
 			var tweets []*Tweet
 			var next string
-			tweets, next, err = parseTimeline(body)
+			tweets, next, parseErr = parseTimeline(body)
 			var prle *RateLimitError
-			if !errors.As(err, &prle) {
-				return tweets, next, err
+			if !errors.As(parseErr, &prle) {
+				return tweets, next, parseErr
 			}
+			err = parseErr
 		}
-		var rle *RateLimitError
-		if !errors.As(err, &rle) || attempt >= maxRateLimitRetries {
+		if errors.Is(err, ErrAuthExpired) {
 			return nil, "", err
 		}
-		wait := rle.RetryAfter
+		var rle *RateLimitError
+		isRate := errors.As(err, &rle)
+		// one transient network/5xx blip must not kill the whole sync
+		isTransient := !isRate && attempt < 2
+		if (!isRate && !isTransient) || attempt >= maxRateLimitRetries {
+			return nil, "", err
+		}
+		wait := time.Duration(0)
+		if isRate {
+			wait = rle.RetryAfter
+		}
 		if wait <= 0 {
-			wait = backoff
+			wait = backoff + time.Duration(mrand.Int63n(int64(backoff/2)))
 			backoff *= 2
 		}
-		slog.Warn("x.com rate limited, backing off", "attempt", attempt+1, "wait", wait)
+		slog.Warn("x.com page fetch failed, backing off", "operation", op, "attempt", attempt+1, "wait", wait, "error", err)
 		select {
 		case <-ctx.Done():
 			return nil, "", ctx.Err()
