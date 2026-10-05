@@ -171,25 +171,22 @@ async def ensure_browser() -> None:
     context = state["context"]
     if page is not None and not page.is_closed() and context is not None:
         try:
-            await page.evaluate("() => 1")
+            # bounded probe: a wedged page must fail here and trigger relaunch, never hang the caller
+            await asyncio.wait_for(page.evaluate("() => 1"), timeout=10)
             return
         except Exception:
             pass
-    async with state["lock"]:
-        page = state["page"]
-        context = state["context"]
-        if page is not None and not page.is_closed() and context is not None:
-            return
-        state["last_error"] = "browser died; relaunching"
-        try:
-            if context is not None:
-                await context.close()
-        except Exception:
-            pass
-        state["page"] = None
-        state["context"] = None
-        state["ready"] = False
-        await launch_browser()
+    # caller already holds state["lock"]; re-acquiring it here deadlocked every /fetch forever
+    state["last_error"] = "browser died; relaunching"
+    try:
+        if context is not None:
+            await context.close()
+    except Exception:
+        pass
+    state["page"] = None
+    state["context"] = None
+    state["ready"] = False
+    await launch_browser()
 
 
 @app.on_event("startup")
@@ -259,7 +256,8 @@ async def fetch(req: FetchReq) -> dict:
                     raise HTTPException(400, "only instagram.com urls are allowed")
                 await navigate(req.navigate)
                 await harvest()
-            result = await page.evaluate(
+            # bound the whole in-page fetch so a stuck page returns 502 and releases the lock
+            result = await asyncio.wait_for(page.evaluate(
                 """async ({url, method, body, asbd, claim}) => {
                     const csrf = document.cookie.split("; ").find(c => c.startsWith("csrftoken="))?.split("=")[1] || "";
                     const headers = {};
@@ -283,7 +281,7 @@ async def fetch(req: FetchReq) -> dict:
                 }""",
                 {"url": req.url, "method": req.method, "body": req.body,
                  "asbd": state["asbd_id"], "claim": state["www_claim"]},
-            )
+            ), timeout=PAGE_TIMEOUT_MS / 1000 + 5)
             if result.get("www_claim"):
                 state["www_claim"] = result["www_claim"]
             state["last_error"] = None
