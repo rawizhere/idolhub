@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"idolhub/internal/igbrowser"
@@ -129,7 +130,25 @@ func handleBrowserStatus(res *igbrowser.FetchResult, what string) ([]byte, error
 	}
 }
 
+var profilePagePK = regexp.MustCompile(`profilePage_([0-9]+)`)
+
+// resolveUserID reads the numeric pk straight from the profile page HTML: topsearch is dead for web clients (404 for everyone) and web_profile_info is aggressively rate-limited, while the page itself always renders.
 func (b *igBrowserClient) resolveUserID(ctx context.Context, username string) (string, error) {
+	res, err := b.sc.Fetch(ctx, "https://www.instagram.com/"+username+"/", "GET", "", "https://www.instagram.com/")
+	if err == nil && res.Status == 200 {
+		if m := profilePagePK.FindStringSubmatch(res.Body); m != nil {
+			// the page load refreshed the sidecar's captured request identity; pull it in for graphql
+			if st, serr := b.sc.Status(ctx); serr == nil {
+				if st.DocID != "" {
+					b.docID = st.DocID
+				}
+				if st.DsUserID != "" {
+					b.ownID = st.DsUserID
+				}
+			}
+			return m[1], nil
+		}
+	}
 	return resolveUserIDShared(ctx, b, username)
 }
 
