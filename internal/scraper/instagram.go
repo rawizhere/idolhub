@@ -176,7 +176,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 
 		feedBytes, ferr := fetcher.doGraphQL(ctx, username, userID, nextMaxID, 33)
 		if ferr != nil {
-			if errors.Is(ferr, download.ErrRateLimited) || errors.Is(ferr, ErrAuthExpired) {
+			if errors.Is(ferr, download.ErrRateLimited) || errors.Is(ferr, ErrRateLimited) || errors.Is(ferr, ErrAuthExpired) {
 				close(jobs)
 				pool.Wait()
 				return ferr

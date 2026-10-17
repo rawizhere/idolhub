@@ -75,7 +75,19 @@ func (b *igBrowserClient) doGet(ctx context.Context, apiURL, username string) ([
 	if err != nil {
 		return nil, err
 	}
-	return handleBrowserStatus(res, apiURL)
+	out, herr := handleBrowserStatus(res, apiURL)
+	if herr == nil {
+		return out, nil
+	}
+	// A stale page context answers as logged-out HTML (topsearch 404) even when the cookie session is valid; retry once with a fresh instagram.com load.
+	if res.Status != 429 {
+		if res2, err2 := b.sc.Fetch(ctx, apiURL, "GET", "", "https://www.instagram.com/"); err2 == nil {
+			if out2, herr2 := handleBrowserStatus(res2, apiURL); herr2 == nil {
+				return out2, nil
+			}
+		}
+	}
+	return nil, herr
 }
 
 func (b *igBrowserClient) doGraphQL(ctx context.Context, username, userID, after string, count int) ([]byte, error) {
@@ -108,7 +120,9 @@ func handleBrowserStatus(res *igbrowser.FetchResult, what string) ([]byte, error
 			return nil, fmt.Errorf("%w: %s returned HTML instead of JSON (session rejected)", ErrAuthExpired, what)
 		}
 		return []byte(res.Body), nil
-	case res.Status == 401 || res.Status == 403 || res.Status == 429 || (res.Status >= 300 && res.Status < 400):
+	case res.Status == 429:
+		return nil, fmt.Errorf("%w: %s returned 429%s", ErrRateLimited, what, reason())
+	case res.Status == 401 || res.Status == 403 || (res.Status >= 300 && res.Status < 400):
 		return nil, fmt.Errorf("%w: %s returned %d%s", ErrAuthExpired, what, res.Status, reason())
 	default:
 		return nil, fmt.Errorf("instagram %s returned status %d%s", what, res.Status, reason())

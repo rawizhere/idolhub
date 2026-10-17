@@ -788,6 +788,8 @@ func (o *Orchestrator) ResetSessionBlocks() {
 // hintSessionRefresh tells the operator how to restore a stale scraping session.
 func hintSessionRefresh(err error) {
 	switch {
+	case errors.Is(err, scraper.ErrRateLimited):
+		slog.Warn("Instagram rate-limited requests (429); the session is valid, wait for the throttle to decay instead of re-saving cookies", "error", err)
 	case errors.Is(err, scraper.ErrAuthExpired):
 		if err != nil && strings.Contains(err.Error(), "twitter") {
 			slog.Warn("Scraping session rejected by Twitter; the auth_token expired, paste a fresh cookie export in settings", "error", err)
