@@ -18,6 +18,8 @@ type Account struct {
 	DownloadPhotos *bool
 	DownloadVideos *bool
 	Filters        []string
+	// TwitterAuthToken overrides the global twitter_auth_token for this account.
+	TwitterAuthToken string
 }
 
 // SyncInfo holds per-account sync bookkeeping.
@@ -37,14 +39,15 @@ func (s *AccountStore) Upsert(ctx context.Context, a Account) error {
 		return fmt.Errorf("store: account upsert: %w", err)
 	}
 	query := `
-INSERT INTO accounts (platform, username, save_text, skip_retweets, download_photos, download_videos, filters)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO accounts (platform, username, save_text, skip_retweets, download_photos, download_videos, filters, twitter_auth_token)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (platform, username) DO UPDATE SET
 	save_text = excluded.save_text,
 	skip_retweets = excluded.skip_retweets,
 	download_photos = excluded.download_photos,
 	download_videos = excluded.download_videos,
-	filters = excluded.filters`
+	filters = excluded.filters,
+	twitter_auth_token = excluded.twitter_auth_token`
 	args := []any{
 		a.Platform,
 		a.Username,
@@ -53,6 +56,7 @@ ON CONFLICT (platform, username) DO UPDATE SET
 		nullBool(a.DownloadPhotos),
 		nullBool(a.DownloadVideos),
 		filters,
+		nullString(a.TwitterAuthToken),
 	}
 	if err := execContext(ctx, s.db, query, args...); err != nil {
 		return fmt.Errorf("store: account upsert: %w", err)
@@ -62,7 +66,7 @@ ON CONFLICT (platform, username) DO UPDATE SET
 
 func (s *AccountStore) List(ctx context.Context) ([]Account, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT platform, username, save_text, skip_retweets, download_photos, download_videos, filters
+SELECT platform, username, save_text, skip_retweets, download_photos, download_videos, filters, twitter_auth_token
 FROM accounts
 ORDER BY platform, username`)
 	if err != nil {
@@ -101,11 +105,10 @@ func (s *AccountStore) GetSyncInfo(ctx context.Context, platform, username strin
 	return info, nil
 }
 
+// SetSyncInfo updates sync bookkeeping of an existing account. It never inserts: a late status write for a removed account must not bring it back on the next load.
 func (s *AccountStore) SetSyncInfo(ctx context.Context, platform, username, status string, at time.Time) error {
-	query := `
-INSERT INTO accounts (platform, username, last_sync_status, last_sync_time) VALUES (?, ?, ?, ?)
-ON CONFLICT (platform, username) DO UPDATE SET last_sync_status = excluded.last_sync_status, last_sync_time = excluded.last_sync_time`
-	if err := execContext(ctx, s.db, query, platform, username, status, nullTime(at)); err != nil {
+	query := `UPDATE accounts SET last_sync_status = ?, last_sync_time = ? WHERE platform = ? AND username = ?`
+	if err := execContext(ctx, s.db, query, status, nullTime(at), platform, username); err != nil {
 		return fmt.Errorf("store: sync info set: %w", err)
 	}
 	return nil
@@ -123,12 +126,14 @@ func scanAccount(rs rowScanner) (Account, error) {
 		downloadPhotos sql.NullBool
 		downloadVideos sql.NullBool
 		filters        sql.NullString
+		twitterToken   sql.NullString
 	)
-	if err := rs.Scan(&a.Platform, &a.Username, &saveText, &skipRetweets, &downloadPhotos, &downloadVideos, &filters); err != nil {
+	if err := rs.Scan(&a.Platform, &a.Username, &saveText, &skipRetweets, &downloadPhotos, &downloadVideos, &filters, &twitterToken); err != nil {
 		return Account{}, fmt.Errorf("store: account scan: %w", err)
 	}
 	a.SaveText = saveText == 1
 	a.SkipRetweets = skipRetweets == 1
+	a.TwitterAuthToken = twitterToken.String
 	if downloadPhotos.Valid {
 		v := downloadPhotos.Bool
 		a.DownloadPhotos = &v
@@ -193,6 +198,13 @@ func nullBool(b *bool) any {
 		return nil
 	}
 	return boolInt(*b)
+}
+
+func nullString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func nullTime(t time.Time) any {

@@ -62,6 +62,7 @@ type TaskProgress struct {
 type SSEEvent struct {
 	Type     string `json:"type"` // "log", "status", "progress"
 	Username string `json:"username"`
+	Platform string `json:"platform,omitempty"`
 	Level    string `json:"level,omitempty"`
 	Message  string `json:"message,omitempty"`
 	Status   string `json:"status,omitempty"`
@@ -69,7 +70,8 @@ type SSEEvent struct {
 }
 
 type Orchestrator struct {
-	mu             sync.RWMutex
+	mu sync.RWMutex
+	// progress and cancels are keyed by taskKey: the same handle on two platforms is two independent targets with their own watermark.
 	progress       map[string]*TaskProgress
 	globalLogs     []TaskLog
 	cancels        map[string]context.CancelFunc
@@ -88,13 +90,19 @@ type Orchestrator struct {
 }
 
 type logEvent struct {
-	user  string
-	t     time.Time
-	level string
-	msg   string
+	user     string
+	platform string
+	t        time.Time
+	level    string
+	msg      string
 }
 
 var GlobalOrchestrator *Orchestrator
+
+// taskKey identifies one scrape target.
+func taskKey(platform, username string) string {
+	return platform + "/" + strings.ToLower(username)
+}
 
 func InitOrchestrator(mediaIndex *gallery.Index, st *store.Store) {
 	autoSyncCtx, autoSyncCancel := context.WithCancel(context.Background())
@@ -149,7 +157,7 @@ type taskLogHandler struct {
 }
 
 func (h *taskLogHandler) Handle(ctx context.Context, r slog.Record) error {
-	var targetUser string
+	var targetUser, targetPlatform string
 	var attrs []string
 
 	r.Attrs(func(a slog.Attr) bool {
@@ -157,6 +165,9 @@ func (h *taskLogHandler) Handle(ctx context.Context, r slog.Record) error {
 		if k == "user" || k == "username" || k == "target" {
 			targetUser = a.Value.String()
 			return true
+		}
+		if k == "platform" {
+			targetPlatform = a.Value.String()
 		}
 		val := a.Value.Any()
 		if val != nil && val != "" {
@@ -170,7 +181,7 @@ func (h *taskLogHandler) Handle(ctx context.Context, r slog.Record) error {
 		formattedMsg = fmt.Sprintf("%s (%s)", formattedMsg, strings.Join(attrs, ", "))
 	}
 
-	evt := logEvent{user: targetUser, t: time.Now(), level: r.Level.String(), msg: formattedMsg}
+	evt := logEvent{user: targetUser, platform: targetPlatform, t: time.Now(), level: r.Level.String(), msg: formattedMsg}
 	if h.orch.logEvents == nil {
 		h.orch.dispatch(evt)
 	} else {
@@ -185,7 +196,7 @@ func (h *taskLogHandler) Handle(ctx context.Context, r slog.Record) error {
 
 func (o *Orchestrator) dispatch(evt logEvent) {
 	if evt.user != "" {
-		o.AppendTaskLog(evt.user, evt.t, evt.level, evt.msg)
+		o.AppendTaskLog(evt.platform, evt.user, evt.t, evt.level, evt.msg)
 	} else {
 		o.AppendGlobalLog(evt.t, evt.level, evt.msg)
 	}
@@ -274,15 +285,16 @@ func (o *Orchestrator) SyncTargets(accounts []config.Account) {
 
 	current := make(map[string]bool)
 	for _, acc := range accounts {
-		current[acc.Username] = true
-		if _, exists := o.progress[acc.Username]; !exists {
+		key := taskKey(acc.Platform, acc.Username)
+		current[key] = true
+		if _, exists := o.progress[key]; !exists {
 			status, updatedAt := o.loadPersistedSyncInfo(acc.Platform, acc.Username)
 			// Stale "running" or "queued" status from a previous instance; reset to idle
 			if status == "running" || status == "queued" {
 				status = "idle"
 				o.SavePersistedSyncInfo(acc.Platform, acc.Username, "idle", updatedAt)
 			}
-			o.progress[acc.Username] = &TaskProgress{
+			o.progress[key] = &TaskProgress{
 				Username:  acc.Username,
 				Platform:  acc.Platform,
 				Status:    status,
@@ -290,29 +302,28 @@ func (o *Orchestrator) SyncTargets(accounts []config.Account) {
 				Logs:      []TaskLog{},
 				UpdatedAt: updatedAt,
 			}
-		} else {
-			// Update platform if changed
-			o.progress[acc.Username].Platform = acc.Platform
 		}
 	}
 
-	// Persist final status of removed accounts before deleting from memory
+	// Removed accounts: their rows are already gone from the store, persisting status here would only recreate them.
 	for k := range o.progress {
 		if !current[k] {
-			o.SavePersistedSyncInfo(o.progress[k].Platform, k, o.progress[k].Status, o.progress[k].UpdatedAt)
 			delete(o.progress, k)
 		}
 	}
 }
 
-func (o *Orchestrator) AppendTaskLog(username string, t time.Time, level, msg string) {
+// AppendTaskLog appends a log line to a target. Without a platform the line goes to the active target of that username (or every one of them when none is active).
+func (o *Orchestrator) AppendTaskLog(platform, username string, t time.Time, level, msg string) {
 	o.mu.Lock()
-	p, exists := o.progress[username]
-	if exists {
+	for _, p := range o.logTargetsLocked(platform, username) {
 		p.Logs = pushLog(p.Logs, t, level, msg)
 		// don't clobber the last_sync watermark after the task stops running
 		if p.Status == "running" {
 			p.UpdatedAt = time.Now()
+		}
+		if platform == "" {
+			platform = p.Platform
 		}
 	}
 
@@ -323,14 +334,38 @@ func (o *Orchestrator) AppendTaskLog(username string, t time.Time, level, msg st
 	o.broadcast(SSEEvent{
 		Type:     "log",
 		Username: username,
+		Platform: platform,
 		Level:    level,
 		Message:  msg,
 	})
 }
 
-func (o *Orchestrator) setProgress(username string, pct int) {
+func (o *Orchestrator) logTargetsLocked(platform, username string) []*TaskProgress {
+	if platform != "" {
+		if p, ok := o.progress[taskKey(platform, username)]; ok {
+			return []*TaskProgress{p}
+		}
+		return nil
+	}
+	var all, active []*TaskProgress
+	for _, p := range o.progress {
+		if !strings.EqualFold(p.Username, username) {
+			continue
+		}
+		all = append(all, p)
+		if p.Status == "running" || p.Status == "queued" {
+			active = append(active, p)
+		}
+	}
+	if len(active) > 0 {
+		return active
+	}
+	return all
+}
+
+func (o *Orchestrator) setProgress(key string, pct int) {
 	o.mu.Lock()
-	if p, exists := o.progress[username]; exists && (p.Status == "running" || p.Status == "queued") {
+	if p, exists := o.progress[key]; exists && (p.Status == "running" || p.Status == "queued") {
 		p.Progress = pct
 	}
 	o.mu.Unlock()
@@ -345,8 +380,9 @@ func (o *Orchestrator) GetGlobalLogs() []TaskLog {
 }
 
 func (o *Orchestrator) StartScrape(username string, platform string, saveText bool, forceFull bool) {
+	key := taskKey(platform, username)
 	o.mu.Lock()
-	p, exists := o.progress[username]
+	p, exists := o.progress[key]
 	if !exists {
 		p = &TaskProgress{
 			Username: username,
@@ -354,12 +390,12 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 			Status:   "idle",
 			Logs:     []TaskLog{},
 		}
-		o.progress[username] = p
+		o.progress[key] = p
 	}
 
 	if p.Status == "running" || p.Status == "queued" {
 		o.mu.Unlock()
-		slog.Warn("Scraping task already running or queued", "user", username)
+		slog.Warn("Scraping task already running or queued", "user", username, "platform", platform)
 		return
 	}
 
@@ -425,14 +461,14 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 		beforeCount:   beforeCount,
 	}
 
-	o.broadcast(SSEEvent{Type: "status", Username: username, Status: "queued", Progress: 0})
+	o.broadcast(SSEEvent{Type: "status", Username: username, Platform: platform, Status: "queued", Progress: 0})
 	o.SavePersistedSyncInfo(platform, username, "queued", queuedAt)
 }
 
 func (o *Orchestrator) worker() {
 	for job := range o.jobCh {
 		o.mu.RLock()
-		p, ok := o.progress[job.username]
+		p, ok := o.progress[taskKey(job.platform, job.username)]
 		skip := ok && p.Status != "queued"
 		o.mu.RUnlock()
 		if skip {
@@ -448,9 +484,10 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	saveText := job.saveText
 	lastSync := job.lastSync
 	beforeCount := job.beforeCount
+	key := taskKey(platform, username)
 
 	o.mu.Lock()
-	p := o.progress[username]
+	p := o.progress[key]
 	if p == nil {
 		o.mu.Unlock()
 		slog.Warn("Skipping scrape for removed target", "user", username)
@@ -465,7 +502,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	o.mu.Unlock()
 
 	slog.Info("Starting media scrape worker", "user", username, "platform", platform)
-	o.broadcast(SSEEvent{Type: "status", Username: username, Status: "running", Progress: 5})
+	o.broadcast(SSEEvent{Type: "status", Username: username, Platform: platform, Status: "running", Progress: 5})
 	o.SavePersistedSyncInfo(platform, persistUser, persistStatus, persistUpdated)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -473,7 +510,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	defer timeoutCancel()
 
 	o.mu.Lock()
-	o.cancels[username] = cancel
+	o.cancels[key] = cancel
 	o.mu.Unlock()
 
 	target := scraper.Target{
@@ -486,13 +523,13 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 		LastSync:  lastSync,
 		ForceFull: job.forceFullSync,
 		OnProgress: func(pct int, _ string) {
-			o.setProgress(username, pct)
+			o.setProgress(key, pct)
 		},
 	}
 
 	c := config.GetConfig()
 	for _, acc := range c.Accounts {
-		if strings.EqualFold(acc.Username, username) {
+		if acc.Platform == platform && strings.EqualFold(acc.Username, username) {
 			target.SkipRetweets = acc.SkipRetweets
 			target.Filters = acc.Filters
 			dp := acc.ShouldDownloadPhotos()
@@ -548,7 +585,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	}
 
 	o.mu.Lock()
-	delete(o.cancels, username)
+	delete(o.cancels, key)
 	if err != nil {
 		if ctx.Err() != nil {
 			p.Status = "idle"
@@ -580,7 +617,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	o.SavePersistedSyncInfo(platform, p.Username, p.Status, p.UpdatedAt)
 	o.mu.Unlock()
 
-	o.broadcast(SSEEvent{Type: "status", Username: username, Status: p.Status, Progress: p.Progress})
+	o.broadcast(SSEEvent{Type: "status", Username: username, Platform: platform, Status: p.Status, Progress: p.Progress})
 
 	if err != nil {
 		if ctx.Err() != nil {
@@ -597,14 +634,14 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 func (o *Orchestrator) CancelAll() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	for username, cancel := range o.cancels {
-		delete(o.cancels, username)
+	for key, cancel := range o.cancels {
+		delete(o.cancels, key)
 		cancel()
 	}
 	for {
 		select {
 		case job := <-o.jobCh:
-			if p, ok := o.progress[job.username]; ok && p.Status == "queued" {
+			if p, ok := o.progress[taskKey(job.platform, job.username)]; ok && p.Status == "queued" {
 				p.Status = "idle"
 				p.Progress = 0
 			}
@@ -614,27 +651,37 @@ func (o *Orchestrator) CancelAll() {
 	}
 }
 
-// CancelScrape cancels a single scrape task by username, running or queued.
-func (o *Orchestrator) CancelScrape(username string) bool {
+// CancelScrape cancels the running or queued scrape of a target. An empty platform cancels every target with that username.
+func (o *Orchestrator) CancelScrape(platform, username string) bool {
+	var (
+		toCancel []context.CancelFunc
+		dequeued []TaskProgress
+	)
 	o.mu.Lock()
-	cancel, ok := o.cancels[username]
-	if ok {
-		delete(o.cancels, username)
-	}
-	if p, exists := o.progress[username]; exists && p.Status == "queued" {
-		p.Status = "idle"
-		p.Progress = 0
-		o.SavePersistedSyncInfo(p.Platform, username, "idle", p.UpdatedAt)
-		o.mu.Unlock()
-		o.broadcast(SSEEvent{Type: "status", Username: username, Status: "idle", Progress: 0})
-		return true
+	for key, p := range o.progress {
+		if !strings.EqualFold(p.Username, username) || (platform != "" && p.Platform != platform) {
+			continue
+		}
+		if cancel, ok := o.cancels[key]; ok {
+			delete(o.cancels, key)
+			toCancel = append(toCancel, cancel)
+		}
+		if p.Status == "queued" {
+			p.Status = "idle"
+			p.Progress = 0
+			o.SavePersistedSyncInfo(p.Platform, p.Username, "idle", p.UpdatedAt)
+			dequeued = append(dequeued, *p)
+		}
 	}
 	o.mu.Unlock()
-	if !ok || cancel == nil {
-		return false
+
+	for _, cancel := range toCancel {
+		cancel()
 	}
-	cancel()
-	return true
+	for _, p := range dequeued {
+		o.broadcast(SSEEvent{Type: "status", Username: p.Username, Platform: p.Platform, Status: "idle", Progress: 0})
+	}
+	return len(toCancel) > 0 || len(dequeued) > 0
 }
 
 // Shutdown stops the auto-sync loop and cancels all running tasks
@@ -659,7 +706,7 @@ func (o *Orchestrator) GetAllProgress(accounts []config.Account) []TaskProgress 
 	sources := make([]*TaskProgress, 0, len(accounts))
 	result := make([]TaskProgress, 0, len(accounts))
 	for _, acc := range accounts {
-		v, exists := o.progress[acc.Username]
+		v, exists := o.progress[taskKey(acc.Platform, acc.Username)]
 		sources = append(sources, v)
 		entry := TaskProgress{}
 		if exists {
@@ -740,7 +787,7 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 		runningSet := make(map[string]bool)
 		for _, p := range o.progress {
 			if p.Status == "running" || p.Status == "queued" {
-				runningSet[p.Username] = true
+				runningSet[taskKey(p.Platform, p.Username)] = true
 			}
 		}
 		o.mu.RUnlock()
@@ -749,7 +796,7 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 		accs := slices.Clone(c.Accounts)
 		rand.Shuffle(len(accs), func(i, j int) { accs[i], accs[j] = accs[j], accs[i] })
 		for _, acc := range accs {
-			if runningSet[acc.Username] {
+			if runningSet[taskKey(acc.Platform, acc.Username)] {
 				slog.Debug("Skipping auto-sync, task already running or queued", "user", acc.Username)
 				continue
 			}

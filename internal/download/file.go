@@ -3,6 +3,7 @@ package download
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math/rand/v2"
 	"net/http"
@@ -61,15 +62,38 @@ func File(ctx context.Context, client *http.Client, rawURL, dstPath string, o Fi
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	out, err := os.Create(dstPath)
+	// Write to a temp file and rename: a partial file at dstPath would pass the exists check above forever.
+	tmp, err := os.CreateTemp(filepath.Dir(dstPath), "."+filepath.Base(dstPath)+".part-*")
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = out.Close() }()
+	tmpPath := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tmp.Close()
+			_ = os.Remove(tmpPath)
+		}
+	}()
 
-	if _, err := io.Copy(out, resp.Body); err != nil {
+	if _, err := io.Copy(tmp, resp.Body); err != nil {
 		return false, err
 	}
+	if resp.ContentLength >= 0 {
+		if info, err := tmp.Stat(); err == nil && info.Size() != resp.ContentLength {
+			return false, fmt.Errorf("short body: got %d of %d bytes", info.Size(), resp.ContentLength)
+		}
+	}
+	if err := tmp.Close(); err != nil {
+		return false, err
+	}
+	if err := os.Chmod(tmpPath, 0644); err != nil {
+		return false, err
+	}
+	if err := os.Rename(tmpPath, dstPath); err != nil {
+		return false, err
+	}
+	committed = true
 	return true, nil
 }
 

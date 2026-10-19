@@ -73,17 +73,17 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 		return err
 	}
 
-	jobs := make(chan TwitterDownloadItem, 10000)
-	client := &http.Client{Timeout: 45 * time.Second}
-	pool := download.Start(ctx, jobs, numWorkers, func(ctx context.Context, item TwitterDownloadItem) bool {
-		return downloadTwitterMedia(ctx, item, outputDir, client, username)
-	})
-
 	// xscraper generates the csrf token and falls back to built-in defaults; a full cookie export (twitter_cookies) is preferred when configured.
 	s, err := xscraper.New(xscraper.Session{AuthToken: authToken, Cookies: opts.TwitterCookies})
 	if err != nil {
 		return fmt.Errorf("failed to init twitter client: %w", err)
 	}
+
+	jobs := make(chan TwitterDownloadItem, 10000)
+	client := &http.Client{Timeout: 45 * time.Second}
+	pool := download.Start(ctx, jobs, numWorkers, func(ctx context.Context, item TwitterDownloadItem) download.Result {
+		return downloadTwitterMedia(ctx, item, outputDir, client, username)
+	})
 
 	tlCtx, cancelTimeline := context.WithCancel(ctx)
 	defer cancelTimeline()
@@ -92,6 +92,15 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 		ch = s.GetTweets(tlCtx, username, 5000)
 	} else {
 		ch = s.GetMediaTweets(tlCtx, username, 5000)
+	}
+	// abort stops the timeline and the download workers; every early return goes through it so no goroutine outlives the scrape.
+	abort := func(err error) error {
+		cancelTimeline()
+		for range ch {
+		}
+		close(jobs)
+		pool.Wait()
+		return err
 	}
 	report(30, "timeline fetch")
 
@@ -104,18 +113,16 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 
 	for result := range ch {
 		if result.Error != nil {
-			cancelTimeline()
-			for range ch {
-			}
 			err := result.Error
-			if errors.Is(err, context.Canceled) {
-				break
+			// a cancelled or partial timeline is never a success: the caller would advance the watermark past unseen tweets
+			if ctx.Err() != nil {
+				return abort(ctx.Err())
 			}
 			slog.Error("Twitter timeline fetch failed", "user", username, "error", err)
 			if errors.Is(err, xscraper.ErrAuthExpired) {
-				return fmt.Errorf("%w: twitter rejected the session: %w", ErrAuthExpired, err)
+				return abort(fmt.Errorf("%w: twitter rejected the session: %w", ErrAuthExpired, err))
 			}
-			return fmt.Errorf("twitter timeline fetch failed: %w", err)
+			return abort(fmt.Errorf("twitter timeline fetch failed: %w", err))
 		}
 		tw := &result.Tweet
 
@@ -218,21 +225,27 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	}
 
 	close(jobs)
+	counts := pool.Wait()
 	report(90, "downloads done")
-	downloadedCount, skippedCount := pool.Wait()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if counts.Failed > 0 {
+		return fmt.Errorf("twitter: %d media downloads failed, keeping the sync watermark so they are retried", counts.Failed)
+	}
 
-	slog.Info("Twitter sync completed successfully", "user", username, "platform", "twitter", "downloaded", downloadedCount, "skipped_existing", skippedCount, "posts_saved", postsSaved)
+	slog.Info("Twitter sync completed successfully", "user", username, "platform", "twitter", "downloaded", counts.Downloaded, "skipped_existing", counts.Skipped, "posts_saved", postsSaved)
 	return nil
 }
 
-func downloadTwitterMedia(ctx context.Context, item TwitterDownloadItem, outputDir string, client *http.Client, username string) bool {
+func downloadTwitterMedia(ctx context.Context, item TwitterDownloadItem, outputDir string, client *http.Client, username string) download.Result {
 	var filename string
 	if item.IsVideo {
 		filename = fmt.Sprintf("%s_%s_video.mp4", item.DateStr, item.TweetID)
 	} else {
 		parsedURL, err := url.Parse(item.URL)
 		if err != nil {
-			return false
+			return download.Skipped
 		}
 		parts := strings.Split(parsedURL.Path, "/")
 		filename = fmt.Sprintf("%s_%s", item.DateStr, parts[len(parts)-1])
@@ -250,13 +263,16 @@ func downloadTwitterMedia(ctx context.Context, item TwitterDownloadItem, outputD
 	})
 	if err != nil {
 		slog.Warn("Failed to download media", "user", username, "kind", kind, "tweet_id", item.TweetID, "filename", filename, "error", err)
-		return false
+		if download.Gone(err) {
+			return download.Skipped
+		}
+		return download.Failed
 	}
 	if !downloaded {
-		return false
+		return download.Skipped
 	}
 
 	slog.Info("Twitter media downloaded successfully", "user", username, "kind", kind, "filename", filename)
 	download.ThumbnailAsync(filePath)
-	return true
+	return download.Downloaded
 }

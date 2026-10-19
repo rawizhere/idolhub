@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -150,25 +149,25 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	cdnClient := &http.Client{Timeout: 5 * time.Minute}
 
 	jobs := make(chan igDirectItem, 1000)
-	var downloadedCount int32
-	var skippedCount int32
 	postsSaved := 0
 
-	pool := download.Start(ctx, jobs, numWorkers, func(ctx context.Context, item igDirectItem) bool {
+	pool := download.Start(ctx, jobs, numWorkers, func(ctx context.Context, item igDirectItem) download.Result {
 		return downloadInstagramDirectMedia(ctx, item, outputDir, username, fileIdx, cdnClient)
 	})
+	// abort drains the workers; a feed that stopped early is never a success, or the caller advances the watermark past unseen posts.
+	abort := func(err error) error {
+		close(jobs)
+		pool.Wait()
+		return err
+	}
 
 	var nextMaxID string
 	page := 0
 	reachedOldPosts := false
 	consecutiveExistingPosts := 0
 	for {
-		select {
-		case <-ctx.Done():
-			close(jobs)
-			pool.Wait()
-			return ctx.Err()
-		default:
+		if ctx.Err() != nil {
+			return abort(ctx.Err())
 		}
 		page++
 
@@ -176,17 +175,14 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 
 		feedBytes, ferr := fetcher.doGraphQL(ctx, username, userID, nextMaxID, 33)
 		if ferr != nil {
-			if errors.Is(ferr, download.ErrRateLimited) || errors.Is(ferr, ErrRateLimited) || errors.Is(ferr, ErrAuthExpired) {
-				close(jobs)
-				pool.Wait()
-				return ferr
+			if ctx.Err() != nil {
+				return abort(ctx.Err())
 			}
 			slog.Error("Failed to fetch Instagram feed page", "user", username, "page", page, "error", ferr)
-			break
+			return abort(fmt.Errorf("instagram feed page %d: %w", page, ferr))
 		}
 		if len(feedBytes) == 0 {
-			slog.Info("Empty Instagram feed response, stopping", "user", username)
-			break
+			return abort(fmt.Errorf("instagram feed page %d: empty response", page))
 		}
 
 		var feed struct {
@@ -205,7 +201,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 
 		if err := json.Unmarshal(feedBytes, &feed); err != nil {
 			slog.Error("Failed to parse Instagram feed JSON", "user", username, "error", err)
-			break
+			return abort(fmt.Errorf("instagram feed page %d: parse: %w", page, err))
 		}
 
 		slog.Info("Instagram feed page parsed", "user", username, "page", page, "items", len(feed.Data.Feed.Edges), "has_next_page", feed.Data.Feed.PageInfo.HasNextPage)
@@ -274,8 +270,8 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 			for _, entry := range postEntries {
 				select {
 				case jobs <- entry:
-				default:
-					slog.Warn("Instagram download queue full, dropping item", "user", username, "media_id", entry.MediaID)
+				case <-ctx.Done():
+					return abort(ctx.Err())
 				}
 			}
 
@@ -317,17 +313,21 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 
 		// Rate-limit with jitter between pages
 		if err := igLimiter.Wait(ctx); err != nil {
-			close(jobs)
-			pool.Wait()
-			return ctx.Err()
+			return abort(ctx.Err())
 		}
 	}
 
 	close(jobs)
-	downloadedCount, skippedCount = pool.Wait()
+	counts := pool.Wait()
 	report(90, "downloads done")
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if counts.Failed > 0 {
+		return fmt.Errorf("instagram: %d media downloads failed, keeping the sync watermark so they are retried", counts.Failed)
+	}
 
-	slog.Info("Instagram direct sync progress summary", "user", username, "platform", "instagram", "downloaded", downloadedCount, "skipped_existing", skippedCount, "posts_saved", postsSaved)
+	slog.Info("Instagram direct sync progress summary", "user", username, "platform", "instagram", "downloaded", counts.Downloaded, "skipped_existing", counts.Skipped, "posts_saved", postsSaved)
 	return nil
 }
 
@@ -398,9 +398,9 @@ func (idx *igFileIndex) add(filename string) {
 }
 
 // downloadInstagramDirectMedia downloads a media item from CDN
-func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, outputDir string, username string, fileIdx *igFileIndex, client *http.Client) bool {
+func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, outputDir string, username string, fileIdx *igFileIndex, client *http.Client) download.Result {
 	if fileIdx != nil && fileIdx.exists(item) {
-		return false
+		return download.Skipped
 	}
 
 	ext := ".jpg"
@@ -411,7 +411,7 @@ func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, output
 	parsed, err := url.Parse(item.URL)
 	if err != nil {
 		slog.Warn("Failed to parse Instagram CDN URL", "user", username, "url", item.URL, "error", err)
-		return false
+		return download.Skipped
 	}
 	pathParts := strings.Split(parsed.Path, "/")
 	baseName := pathParts[len(pathParts)-1]
@@ -437,13 +437,16 @@ func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, output
 	downloaded, err := download.File(ctx, client, item.URL, filePath, download.FileOpts{Header: header})
 	if err != nil {
 		slog.Warn("Failed to download Instagram direct media", "user", username, "filename", filename, "error", err)
-		return false
+		if download.Gone(err) {
+			return download.Skipped
+		}
+		return download.Failed
 	}
 	if !downloaded {
 		if fileIdx != nil {
 			fileIdx.add(filename)
 		}
-		return false
+		return download.Skipped
 	}
 
 	label := "photo"
@@ -453,5 +456,5 @@ func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, output
 	slog.Info("Instagram file downloaded", "user", username, "filename", filename, "type", label)
 
 	download.ThumbnailAsync(filePath)
-	return true
+	return download.Downloaded
 }

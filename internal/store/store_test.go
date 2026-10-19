@@ -131,7 +131,8 @@ func TestAccountStoreRoundTrip(t *testing.T) {
 				Platform: "twitter", Username: "alice",
 				SaveText: true, SkipRetweets: true,
 				DownloadPhotos: boolPtr(false), DownloadVideos: boolPtr(true),
-				Filters: []string{"giveaway", "art"},
+				Filters:          []string{"giveaway", "art"},
+				TwitterAuthToken: "tok",
 			},
 		},
 		{
@@ -177,6 +178,9 @@ func TestAccountStoreRoundTrip(t *testing.T) {
 				!sameBoolPtr(found.DownloadVideos, tt.in.DownloadVideos) {
 				t.Errorf("nullable bools mismatch: got %+v, want %+v", found, tt.in)
 			}
+			if found.TwitterAuthToken != tt.in.TwitterAuthToken {
+				t.Errorf("twitter token = %q, want %q", found.TwitterAuthToken, tt.in.TwitterAuthToken)
+			}
 			if !equalStrings(found.Filters, tt.in.Filters) {
 				t.Errorf("filters = %v, want %v", found.Filters, tt.in.Filters)
 			}
@@ -189,6 +193,9 @@ func TestAccountSyncInfoRoundTrip(t *testing.T) {
 	s := openTestStore(t)
 
 	at := time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC).Truncate(time.Second)
+	if err := s.Accounts.Upsert(ctx, Account{Platform: "twitter", Username: "dave"}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
 	if err := s.Accounts.SetSyncInfo(ctx, "twitter", "dave", "ok", at); err != nil {
 		t.Fatalf("set sync info: %v", err)
 	}
@@ -279,3 +286,20 @@ func sameBoolPtr(a, b *bool) bool {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// A status write for a removed account must not recreate its row (it came back after restart).
+func TestSetSyncInfoDoesNotResurrectAccount(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	if err := s.Accounts.SetSyncInfo(ctx, "twitter", "ghost", "completed", time.Now()); err != nil {
+		t.Fatalf("set sync info: %v", err)
+	}
+	rows, err := s.Accounts.List(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("accounts = %+v, want none", rows)
+	}
+}

@@ -339,7 +339,7 @@ func (a *App) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 	for i, newAcc := range cfg.Accounts {
 		var oldAcc *config.Account
 		for _, acc := range oldCfg.Accounts {
-			if strings.EqualFold(acc.Username, newAcc.Username) {
+			if acc.Platform == newAcc.Platform && strings.EqualFold(acc.Username, newAcc.Username) {
 				oldAcc = &acc
 				break
 			}
@@ -441,7 +441,9 @@ func (a *App) handleProgress(w http.ResponseWriter, r *http.Request) {
 }
 
 type scrapeRequest struct {
-	Username  string `json:"username"`
+	Username string `json:"username"`
+	// Platform narrows the request to one target; empty means every account with that username.
+	Platform  string `json:"platform,omitempty"`
 	ForceFull bool   `json:"force_full,omitempty"`
 }
 
@@ -639,28 +641,29 @@ func (a *App) handleScrapeStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var targetAccount *config.Account
-	for i := range c.Accounts {
-		if strings.EqualFold(c.Accounts[i].Username, req.Username) {
-			targetAccount = &c.Accounts[i]
-			break
+	var targets []config.Account
+	for _, acc := range c.Accounts {
+		if strings.EqualFold(acc.Username, req.Username) && (req.Platform == "" || acc.Platform == req.Platform) {
+			targets = append(targets, acc)
 		}
 	}
 
-	if targetAccount == nil {
+	if len(targets) == 0 {
 		http.Error(w, "Account not found in settings", http.StatusNotFound)
 		return
 	}
 
-	if req.ForceFull {
-		slog.Info("Triggered force full resync for target", "user", targetAccount.Username, "platform", targetAccount.Platform)
-	} else {
-		slog.Info("Triggered sync for target", "user", targetAccount.Username, "platform", targetAccount.Platform)
+	for _, acc := range targets {
+		if req.ForceFull {
+			slog.Info("Triggered force full resync for target", "user", acc.Username, "platform", acc.Platform)
+		} else {
+			slog.Info("Triggered sync for target", "user", acc.Username, "platform", acc.Platform)
+		}
+		a.orch.StartScrape(acc.Username, acc.Platform, acc.SaveText, req.ForceFull)
 	}
-	a.orch.StartScrape(targetAccount.Username, targetAccount.Platform, targetAccount.SaveText, req.ForceFull)
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "started", "target": targetAccount.Username})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "started", "target": targets[0].Username})
 }
 
 type clearRequest struct {
@@ -682,8 +685,8 @@ func (a *App) handleScrapeCancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("Cancelling active sync", "user", req.Username)
-	ok := a.orch.CancelScrape(req.Username)
+	slog.Info("Cancelling active sync", "user", req.Username, "platform", req.Platform)
+	ok := a.orch.CancelScrape(req.Platform, req.Username)
 	w.Header().Set("Content-Type", "application/json")
 	if ok {
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "cancelled", "target": req.Username})

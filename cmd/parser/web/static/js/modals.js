@@ -148,7 +148,7 @@ export async function addAccount(e) {
       const current = await fetchConfig();
       if (!current.accounts) current.accounts = [];
 
-      const exists = current.accounts.some(acc => acc.username.toLowerCase() === username.toLowerCase());
+      const exists = current.accounts.some(acc => acc.platform === platform && acc.username.toLowerCase() === username.toLowerCase());
       if (exists) {
         toast(`Account @${username} already exists`, "error");
         return;
@@ -230,9 +230,11 @@ export async function saveEditChanges() {
 
     try {
       const current = await fetchConfig();
-      const idx = current.accounts.findIndex(acc => acc.username.toLowerCase() === username.toLowerCase());
+      const idx = current.accounts.findIndex(acc => acc.platform === platform && acc.username.toLowerCase() === username.toLowerCase());
       if (idx !== -1) {
+        // spread first: fields without inputs (twitter_auth_token) must survive the edit
         current.accounts[idx] = {
+          ...current.accounts[idx],
           username,
           platform,
           save_text: saveText,

@@ -70,6 +70,11 @@ export function initSSE() {
   };
 }
 
+// Same handle on two platforms is two targets; older events carry no platform.
+function matchesEvent(target, evt) {
+  return target.username === evt.username && (!evt.platform || target.platform === evt.platform);
+}
+
 export function handleSSEEvent(evt) {
   if (evt.type === "log") {
     const globalMsg = evt.username && evt.username !== "system" ? `[@${evt.username}] ${evt.message}` : evt.message;
@@ -80,7 +85,7 @@ export function handleSSEEvent(evt) {
     });
     if (state.globalLogs.length > 1000) state.globalLogs = state.globalLogs.slice(-1000);
 
-    const target = state.cachedProgress.find(t => t.username === evt.username);
+    const target = state.cachedProgress.find(t => matchesEvent(t, evt));
     if (target) {
       if (!target.logs) target.logs = [];
       target.logs.push({
@@ -98,7 +103,7 @@ export function handleSSEEvent(evt) {
       updateTerminal();
     }
   } else if (evt.type === "status") {
-    const target = state.cachedProgress.find(t => t.username === evt.username);
+    const target = state.cachedProgress.find(t => matchesEvent(t, evt));
     if (target) {
       target.status = evt.status;
       target.progress = evt.progress;

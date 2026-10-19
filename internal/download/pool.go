@@ -16,29 +16,48 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// Result is the outcome of one pool job.
+type Result int
+
+const (
+	Skipped Result = iota
+	Downloaded
+	// Failed marks a retryable failure: the sync must not advance its watermark past it.
+	Failed
+)
+
+// Counts tallies pool job outcomes.
+type Counts struct {
+	Downloaded, Skipped, Failed int32
+}
+
 // Pool runs fn over jobs across numWorkers goroutines and tallies results.
 type Pool[T any] struct {
 	g *errgroup.Group
 	d atomic.Int32
 	s atomic.Int32
+	f atomic.Int32
 }
 
 // Start launches workers right away; close jobs, then call Wait.
-func Start[T any](ctx context.Context, jobs <-chan T, numWorkers int, fn func(ctx context.Context, item T) bool) *Pool[T] {
+func Start[T any](ctx context.Context, jobs <-chan T, numWorkers int, fn func(ctx context.Context, item T) Result) *Pool[T] {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(numWorkers)
 	p := &Pool[T]{g: g}
 	for range numWorkers {
 		g.Go(func() error {
 			for item := range jobs {
-				select {
-				case <-ctx.Done():
-					return nil
-				default:
+				if ctx.Err() != nil {
+					// keep draining so producers never block on a full channel
+					p.f.Add(1)
+					continue
 				}
-				if fn(ctx, item) {
+				switch fn(ctx, item) {
+				case Downloaded:
 					p.d.Add(1)
-				} else {
+				case Failed:
+					p.f.Add(1)
+				default:
 					p.s.Add(1)
 				}
 			}
@@ -48,10 +67,10 @@ func Start[T any](ctx context.Context, jobs <-chan T, numWorkers int, fn func(ct
 	return p
 }
 
-// Wait blocks until all workers finish and returns downloaded/skipped counts.
-func (p *Pool[T]) Wait() (int32, int32) {
+// Wait blocks until all workers finish and returns the tallies.
+func (p *Pool[T]) Wait() Counts {
 	_ = p.g.Wait()
-	return p.d.Load(), p.s.Load()
+	return Counts{Downloaded: p.d.Load(), Skipped: p.s.Load(), Failed: p.f.Load()}
 }
 
 func GenerateThumbnail(srcPath, dstPath string) error {

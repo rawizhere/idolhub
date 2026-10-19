@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -84,15 +83,16 @@ func loadFromStoreLocked(st *store.Store) {
 			slog.Warn("Failed to read sync info from store", "user", row.Username, "error", err)
 		}
 		accounts = append(accounts, Account{
-			Username:       row.Username,
-			Platform:       row.Platform,
-			SaveText:       row.SaveText,
-			SkipRetweets:   row.SkipRetweets,
-			Filters:        row.Filters,
-			DownloadPhotos: row.DownloadPhotos,
-			DownloadVideos: row.DownloadVideos,
-			LastSyncStatus: info.Status,
-			LastSyncTime:   info.Time,
+			Username:         row.Username,
+			Platform:         row.Platform,
+			SaveText:         row.SaveText,
+			SkipRetweets:     row.SkipRetweets,
+			Filters:          row.Filters,
+			DownloadPhotos:   row.DownloadPhotos,
+			DownloadVideos:   row.DownloadVideos,
+			TwitterAuthToken: row.TwitterAuthToken,
+			LastSyncStatus:   info.Status,
+			LastSyncTime:     info.Time,
 		})
 	}
 	globalConfig = Config{
@@ -147,15 +147,16 @@ func saveToStore(st *store.Store) error {
 	ctx := context.Background()
 	keep := make(map[string]bool)
 	for _, acc := range globalConfig.Accounts {
-		keep[acc.Platform+"/"+strings.ToLower(acc.Username)] = true
+		keep[acc.Platform+"/"+acc.Username] = true
 		err := st.Accounts.Upsert(ctx, store.Account{
-			Platform:       acc.Platform,
-			Username:       acc.Username,
-			SaveText:       acc.SaveText,
-			SkipRetweets:   acc.SkipRetweets,
-			DownloadPhotos: acc.DownloadPhotos,
-			DownloadVideos: acc.DownloadVideos,
-			Filters:        acc.Filters,
+			Platform:         acc.Platform,
+			Username:         acc.Username,
+			SaveText:         acc.SaveText,
+			SkipRetweets:     acc.SkipRetweets,
+			DownloadPhotos:   acc.DownloadPhotos,
+			DownloadVideos:   acc.DownloadVideos,
+			Filters:          acc.Filters,
+			TwitterAuthToken: acc.TwitterAuthToken,
 		})
 		if err != nil {
 			return err
@@ -166,7 +167,8 @@ func saveToStore(st *store.Store) error {
 		return err
 	}
 	for _, row := range rows {
-		if keep[row.Platform+"/"+strings.ToLower(row.Username)] {
+		// exact match: the primary key is case-sensitive, so a renamed "Foo" -> "foo" must drop the old row
+		if keep[row.Platform+"/"+row.Username] {
 			continue
 		}
 		if err := st.Accounts.Delete(ctx, row.Platform, row.Username); err != nil {
