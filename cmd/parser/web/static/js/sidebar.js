@@ -3,7 +3,7 @@ import { timeAgo, toast, confirmDialog, escapeHtml, platformBadgeClass } from ".
 import { startSyncApi, cancelSyncApi, clearFolderApi, fetchConfig, postConfig } from "./api.js";
 import { updateTerminal } from "./dock.js";
 import { renderOverviewDashboard } from "./overview.js";
-import { loadUiState, saveUiState } from "./state.js";
+import { loadUiState, saveUiState, findTarget, activeTarget, isActiveTarget } from "./state.js";
 import {
   selectGalleryTarget,
   switchGalleryView,
@@ -60,7 +60,7 @@ export function renderDashboardSidebar() {
 
   let html = "";
   filtered.forEach(target => {
-    const isActive = state.activeTerminalUser === target.username;
+    const isActive = isActiveTarget(target.username, target.platform);
     const mediaCount = target.media_count || 0;
     const isRunning = target.status === "running" || target.status === "queued";
 
@@ -78,7 +78,7 @@ export function renderDashboardSidebar() {
 
     const syncButtonHTML = isRunning
       ? `<div class="w-6 h-6 rounded-md bg-amber-500/10 flex items-center justify-center text-[#ff9900]"><svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg></div>`
-      : `<button data-sidebar-action="quick-sync" data-username="${escapeHtml(target.username)}" class="opacity-0 group-hover:opacity-100 hover:bg-slate-200 dark:hover:bg-zinc-700 p-1 rounded-md text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer" title="Quick Sync (@${escapeHtml(target.username)})">
+      : `<button data-sidebar-action="quick-sync" data-username="${escapeHtml(target.username)}" data-platform="${escapeHtml(target.platform)}" class="opacity-0 group-hover:opacity-100 hover:bg-slate-200 dark:hover:bg-zinc-700 p-1 rounded-md text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer" title="Quick Sync (@${escapeHtml(target.username)})">
            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
          </button>`;
 
@@ -87,7 +87,7 @@ export function renderDashboardSidebar() {
       : "";
 
     html += `
-      <div class="group flex items-center justify-between p-2.5 rounded-xl border transition-all duration-150 cursor-pointer ${cardClass}" data-select-target="${escapeHtml(target.username)}">
+      <div class="group flex items-center justify-between p-2.5 rounded-xl border transition-all duration-150 cursor-pointer ${cardClass}" data-select-target="${escapeHtml(target.username)}" data-select-platform="${escapeHtml(target.platform)}">
         <div class="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
           <span class="w-2 h-2 rounded-full ${statusDotClass} flex-shrink-0"></span>
           <div class="flex flex-col gap-0.5 min-w-0">
@@ -113,12 +113,13 @@ export function renderDashboardSidebar() {
   container.innerHTML = html;
 }
 
-export function selectTerminalUser(username) {
+export function selectTerminalUser(username, platform) {
+  const target = findTarget(username, platform);
   state.activeTerminalUser = username;
+  state.activeTerminalPlatform = target ? target.platform : (platform || null);
   renderDashboardSidebar();
   closeSidebar();
 
-  const target = state.cachedProgress.find(t => t.username === username);
   if (!target) return;
 
   const breadcrumb = document.getElementById("header-breadcrumb-label");
@@ -135,11 +136,11 @@ export function selectTerminalUser(username) {
   platformBadge.className = `text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${platformBadgeClass(target.platform)}`;
 
   const syncBtn = document.getElementById("dashboard-btn-sync");
-  syncBtn.onclick = () => startSync(target.username, true);
+  syncBtn.onclick = () => startSync(target.username, target.platform, true);
 
   document.getElementById("dashboard-btn-edit").onclick = () => {
     fetchConfig().then(cfg => {
-      const acc = cfg.accounts.find(a => a.username.toLowerCase() === target.username.toLowerCase());
+      const acc = cfg.accounts.find(a => a.platform === target.platform && a.username.toLowerCase() === target.username.toLowerCase());
       if (acc) {
         window.dispatchEvent(new CustomEvent("open-edit-modal", {
           detail: {
@@ -164,7 +165,7 @@ export function selectTerminalUser(username) {
       tone: "danger",
     });
     if (!ok) return;
-    deleteAccount(target.username);
+    deleteAccount(target.username, target.platform);
     goToOverview();
   };
 
@@ -179,7 +180,7 @@ export function selectTerminalUser(username) {
     clearTargetFolder(target.platform, target.username);
   };
 
-  document.getElementById("dashboard-btn-cancel").onclick = () => cancelSync(target.username);
+  document.getElementById("dashboard-btn-cancel").onclick = () => cancelSync(target.username, target.platform);
 
   updateDashboardDetails();
   updateTerminal();
@@ -194,10 +195,10 @@ export async function restorePersistedView() {
   uiRestored = true;
   const saved = loadUiState();
   if (!saved || !saved.activeTerminalUser) return;
-  const target = state.cachedProgress.find(t => t.username === saved.activeTerminalUser);
+  const target = findTarget(saved.activeTerminalUser, saved.activeTerminalPlatform);
   if (!target) return;
 
-  await selectTerminalUser(saved.activeTerminalUser);
+  await selectTerminalUser(target.username, target.platform);
 
   state.currentView = saved.currentView === "posts" ? "posts" : "grid";
   state.currentFilter = saved.currentFilter || "all";
@@ -222,6 +223,7 @@ export async function restorePersistedView() {
 
 export function goToOverview() {
   state.activeTerminalUser = null;
+  state.activeTerminalPlatform = null;
   state.activeGalleryUser = null;
   saveUiState();
   const breadcrumb = document.getElementById("header-breadcrumb-label");
@@ -236,8 +238,7 @@ export function goToOverview() {
 }
 
 export function updateDashboardDetails() {
-  if (!state.activeTerminalUser) return;
-  const target = state.cachedProgress.find(t => t.username === state.activeTerminalUser);
+  const target = activeTarget();
   if (!target) return;
 
   const countEl = document.getElementById("dashboard-file-count");
@@ -253,19 +254,19 @@ export function updateDashboardDetails() {
   }
 }
 
-export async function quickSyncTarget(username) {
+export async function quickSyncTarget(username, platform) {
   try {
-    await startSyncApi(username);
+    await startSyncApi(username, false, platform);
     toast(`Sync started for @${username}`, "success", 2000);
   } catch (err) {
     toast(`Failed to sync @${username}: ${err.message}`, "error");
   }
 }
 
-export async function startSync(username, shouldSelect = false) {
+export async function startSync(username, platform, shouldSelect = false) {
   try {
-    await startSyncApi(username);
-    if (shouldSelect) selectTerminalUser(username);
+    await startSyncApi(username, false, platform);
+    if (shouldSelect) selectTerminalUser(username, platform);
     toast(`Sync started for @${username}`, "success", 2000);
   } catch (err) {
     toast(`Failed to start sync: ${err.message}`, "error");
@@ -291,7 +292,7 @@ export async function fullResyncAll() {
   }
 }
 
-export async function cancelSync(username) {
+export async function cancelSync(username, platform) {
   const ok = await confirmDialog({
     title: "Cancel Active Sync",
     message: `Stop the running sync for @${username}? Downloaded files will be kept.`,
@@ -300,17 +301,17 @@ export async function cancelSync(username) {
   });
   if (!ok) return;
   try {
-    await cancelSyncApi(username);
+    await cancelSyncApi(username, platform);
     toast(`Cancelled sync for @${username}`, "info");
   } catch (err) {
     toast(`Failed to cancel: ${err.message}`, "error");
   }
 }
 
-export async function deleteAccount(username) {
+export async function deleteAccount(username, platform) {
   try {
     const current = await fetchConfig();
-    current.accounts = current.accounts.filter(acc => acc.username.toLowerCase() !== username.toLowerCase());
+    current.accounts = current.accounts.filter(acc => !(acc.platform === platform && acc.username.toLowerCase() === username.toLowerCase()));
     await postConfig(current);
     toast(`Removed @${username}`, "success");
   } catch (err) {

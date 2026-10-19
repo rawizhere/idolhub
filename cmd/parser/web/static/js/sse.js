@@ -1,4 +1,4 @@
-import { state } from "./state.js";
+import { state, isActiveTarget } from "./state.js";
 import { fetchProgress } from "./api.js";
 import { updateAutoUpdateStatus, updateGlobalSyncBadge, renderOverviewDashboard } from "./overview.js";
 import { renderDashboardSidebar, updateDashboardDetails, restorePersistedView } from "./sidebar.js";
@@ -99,7 +99,7 @@ export function handleSSEEvent(evt) {
     if (dockLog && evt.message) {
       dockLog.textContent = globalMsg;
     }
-    if (!state.activeTerminalUser || state.activeTerminalUser === evt.username) {
+    if (!state.activeTerminalUser || isActiveTarget(evt.username, evt.platform)) {
       updateTerminal();
     }
   } else if (evt.type === "status") {
@@ -110,7 +110,7 @@ export function handleSSEEvent(evt) {
     }
     updateGlobalSyncBadge();
     renderDashboardSidebar();
-    if (state.activeTerminalUser === evt.username) {
+    if (isActiveTarget(evt.username, evt.platform)) {
       updateDashboardDetails();
     }
     if (evt.status === "completed" || evt.status === "failed") {

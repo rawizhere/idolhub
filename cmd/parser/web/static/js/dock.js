@@ -1,5 +1,5 @@
-import { state } from "./state.js";
-import { toast } from "./utils.js";
+import { state, activeTarget } from "./state.js";
+import { toast, escapeHtml } from "./utils.js";
 
 export function toggleBottomConsole(forceState) {
   state.dockConsoleOpen = forceState !== undefined ? forceState : !state.dockConsoleOpen;
@@ -34,7 +34,7 @@ export function updateTerminal() {
   if (!terminal) return;
 
   const isTargetView = Boolean(state.activeTerminalUser);
-  const target = isTargetView ? state.cachedProgress.find(t => t.username === state.activeTerminalUser) : null;
+  const target = isTargetView ? activeTarget() : null;
   const lines = isTargetView ? (target?.logs || []) : (state.globalLogs || []);
 
   let filtered = lines;
@@ -45,7 +45,7 @@ export function updateTerminal() {
   terminal.innerHTML = "";
   if (filtered.length === 0) {
     terminal.innerHTML = isTargetView
-      ? `<div class="text-zinc-500">[SYSTEM] No log entries for active target @${state.activeTerminalUser}.</div>`
+      ? `<div class="text-zinc-500">[SYSTEM] No log entries for active target @${escapeHtml(state.activeTerminalUser)}.</div>`
       : `<div class="text-zinc-500">[SYSTEM] Live logger initialized. Select a target or run sync.</div>`;
     return;
   }
@@ -70,7 +70,7 @@ export function updateTerminal() {
 
 export function copyTerminalLogs() {
   const isTargetView = Boolean(state.activeTerminalUser);
-  const target = isTargetView ? state.cachedProgress.find(t => t.username === state.activeTerminalUser) : null;
+  const target = isTargetView ? activeTarget() : null;
   const lines = isTargetView ? (target?.logs || []) : (state.globalLogs || []);
   if (!lines || lines.length === 0) {
     toast("No logs available to copy.", "info");

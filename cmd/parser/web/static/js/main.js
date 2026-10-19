@@ -219,16 +219,16 @@ document.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
     const action = actionEl.dataset.sidebarAction || actionEl.dataset.overviewAction;
-    if (action === "quick-sync") quickSyncTarget(actionEl.dataset.username);
+    if (action === "quick-sync") quickSyncTarget(actionEl.dataset.username, actionEl.dataset.platform);
     else if (action === "open-token-settings") openTokenSettings(actionEl.dataset.platform);
-    else if (action === "sync") startSync(actionEl.dataset.username);
+    else if (action === "sync") startSync(actionEl.dataset.username, actionEl.dataset.platform);
     return;
   }
   const sel = e.target.closest("[data-select-target]");
   if (sel) {
     e.preventDefault();
     e.stopPropagation();
-    selectTerminalUser(sel.dataset.selectTarget);
+    selectTerminalUser(sel.dataset.selectTarget, sel.dataset.selectPlatform);
   }
 }, true);
 

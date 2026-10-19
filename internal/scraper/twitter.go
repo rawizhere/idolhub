@@ -34,6 +34,9 @@ func snowflakeToTime(tweetIDStr string) (time.Time, error) {
 	return time.UnixMilli((tweetID >> 22) + epoch).UTC(), nil
 }
 
+// twitterTimelineMax caps tweets read per sync. At ~8s per 50-tweet page this is about an hour, well inside the 2h task timeout; X itself stops serving user timelines after a few thousand tweets.
+const twitterTimelineMax = 20000
+
 func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	username := t.Username
 	saveText := t.SaveText
@@ -89,10 +92,11 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	defer cancelTimeline()
 	var ch <-chan *xscraper.TweetResult
 	if saveText {
-		ch = s.GetTweets(tlCtx, username, 5000)
+		ch = s.GetTweets(tlCtx, username, twitterTimelineMax)
 	} else {
-		ch = s.GetMediaTweets(tlCtx, username, 5000)
+		ch = s.GetMediaTweets(tlCtx, username, twitterTimelineMax)
 	}
+	received := 0
 	// abort stops the timeline and the download workers; every early return goes through it so no goroutine outlives the scrape.
 	abort := func(err error) error {
 		cancelTimeline()
@@ -124,6 +128,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 			}
 			return abort(fmt.Errorf("twitter timeline fetch failed: %w", err))
 		}
+		received++
 		tw := &result.Tweet
 
 		dateStr := "unknown_date"
@@ -222,6 +227,10 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 				postsSaved++
 			}
 		}
+	}
+
+	if received >= twitterTimelineMax {
+		slog.Warn("Twitter timeline hit the per-sync tweet cap; older tweets were not fetched", "user", username, "cap", twitterTimelineMax)
 	}
 
 	close(jobs)

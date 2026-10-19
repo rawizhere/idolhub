@@ -173,7 +173,7 @@ export async function addAccount(e) {
       toggleCmdPalette();
 
       loadProgress();
-      selectTerminalUser(username);
+      selectTerminalUser(username, platform);
     } catch (err) {
       toast(`Failed to add account: ${err.message}`, "error");
     }
@@ -246,7 +246,7 @@ export async function saveEditChanges() {
         await postConfig(current);
         toast(`Updated @${username}`, "success");
         loadProgress();
-        selectTerminalUser(username);
+        selectTerminalUser(username, platform);
       }
     } catch (err) {
       toast(`Failed to update @${username}: ${err.message}`, "error");
@@ -257,6 +257,7 @@ export async function saveEditChanges() {
 
 export async function fullResyncTarget() {
   const username = state.editConfig.username;
+  const platform = state.editConfig.platform;
   const ok = await confirmDialog({
     title: "Force Full Resync",
     message: `Fully rescan @${username} from the beginning of its feed? Existing files will be preserved.`,
@@ -266,7 +267,7 @@ export async function fullResyncTarget() {
   if (!ok) return;
 
   try {
-    await startSyncApi(username, true);
+    await startSyncApi(username, true, platform);
     toast(`Full resync started for @${username}.`, "success", 2500);
     loadProgress();
   } catch (err) {

@@ -53,3 +53,19 @@ func TestStartScrapeKeysByPlatform(t *testing.T) {
 		t.Errorf("twitter status = %q, want idle", got)
 	}
 }
+
+// A pending full resync turns the next scrape into a full one, even when the caller asked for an incremental run.
+func TestRequestFullResyncForcesFullScrape(t *testing.T) {
+	o := &Orchestrator{
+		progress: make(map[string]*TaskProgress),
+		cancels:  make(map[string]context.CancelFunc),
+		jobCh:    make(chan scrapeJob, 2),
+	}
+	o.RequestFullResync("twitter", "Idol")
+	o.StartScrape("idol", "twitter", false, false)
+
+	job := <-o.jobCh
+	if !job.forceFullSync || !job.lastSync.IsZero() {
+		t.Errorf("job = %+v, want forced full sync from zero watermark", job)
+	}
+}

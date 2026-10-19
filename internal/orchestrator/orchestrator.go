@@ -82,11 +82,14 @@ type Orchestrator struct {
 	mediaIndex     *gallery.Index
 	accounts       *store.AccountStore
 	posts          *store.PostStore
-	igBlockUntil   time.Time
-	twBlockUntil   time.Time
-	twitterMu      sync.Mutex
-	jobCh          chan scrapeJob
-	logEvents      chan logEvent
+	settings       *store.SettingsStore
+	// fullResync holds task keys whose next scrape must be a full one (media was quarantined after their watermark).
+	fullResync   map[string]bool
+	igBlockUntil time.Time
+	twBlockUntil time.Time
+	twitterMu    sync.Mutex
+	jobCh        chan scrapeJob
+	logEvents    chan logEvent
 }
 
 type logEvent struct {
@@ -126,6 +129,8 @@ func InitOrchestrator(mediaIndex *gallery.Index, st *store.Store) {
 		mediaIndex:     mediaIndex,
 		accounts:       st.Accounts,
 		posts:          st.Posts,
+		settings:       st.Settings,
+		fullResync:     loadFullResync(st.Settings),
 		jobCh:          make(chan scrapeJob, 100),
 		logEvents:      make(chan logEvent, 4096),
 	}
@@ -412,6 +417,11 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 		}
 	}
 
+	if o.fullResync[key] && !forceFull {
+		forceFull = true
+		slog.Info("Full resync pending for target (media was re-queued after an integrity check)", "user", username, "platform", platform)
+	}
+
 	if p.Status == "failed" || p.Status == "completed" {
 		p.Status = "idle"
 		p.Progress = 0
@@ -601,6 +611,10 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 		p.Progress = 100
 		p.AuthError = false
 		p.UpdatedAt = scrapeStart
+		if job.forceFullSync && o.fullResync[key] {
+			delete(o.fullResync, key)
+			o.saveFullResyncLocked()
+		}
 	}
 	p.mediaCountCachedAt = time.Time{}
 	if o.mediaIndex != nil {
@@ -822,6 +836,54 @@ func (o *Orchestrator) instagramBlocked() bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	return time.Now().Before(o.igBlockUntil)
+}
+
+const fullResyncSetting = "pending_full_resync"
+
+func loadFullResync(st *store.SettingsStore) map[string]bool {
+	out := make(map[string]bool)
+	if st == nil {
+		return out
+	}
+	raw, err := st.Get(context.Background(), fullResyncSetting)
+	if err != nil {
+		return out
+	}
+	var keys []string
+	if err := json.Unmarshal([]byte(raw), &keys); err != nil {
+		slog.Warn("Failed to parse pending full resyncs", "error", err)
+		return out
+	}
+	for _, k := range keys {
+		out[k] = true
+	}
+	return out
+}
+
+func (o *Orchestrator) saveFullResyncLocked() {
+	if o.settings == nil {
+		return
+	}
+	keys := make([]string, 0, len(o.fullResync))
+	for k := range o.fullResync {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	b, _ := json.Marshal(keys)
+	if err := o.settings.Set(context.Background(), fullResyncSetting, string(b)); err != nil {
+		slog.Warn("Failed to persist pending full resyncs", "error", err)
+	}
+}
+
+// RequestFullResync makes the next scrape of a target a full one; it survives restarts and is cleared by the first successful full run.
+func (o *Orchestrator) RequestFullResync(platform, username string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.fullResync == nil {
+		o.fullResync = make(map[string]bool)
+	}
+	o.fullResync[taskKey(platform, username)] = true
+	o.saveFullResyncLocked()
 }
 
 // ResetSessionBlocks clears the circuit breakers; called when the operator saves fresh session settings.

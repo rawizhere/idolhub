@@ -23,21 +23,21 @@ export async function fetchProgress() {
   return res.json();
 }
 
-export async function startSyncApi(username, forceFull = false) {
+export async function startSyncApi(username, forceFull = false, platform = "") {
   const res = await fetch("/api/scrape/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, force_full: Boolean(forceFull) })
+    body: JSON.stringify({ username, platform, force_full: Boolean(forceFull) })
   });
   if (!res.ok) throw new Error("Failed to trigger sync");
   return res.json();
 }
 
-export async function cancelSyncApi(username) {
+export async function cancelSyncApi(username, platform = "") {
   const res = await fetch("/api/scrape/cancel", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username })
+    body: JSON.stringify({ username, platform })
   });
   if (!res.ok) throw new Error("Failed to cancel sync");
   return res.json();

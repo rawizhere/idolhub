@@ -35,7 +35,8 @@ func MigrateThumbnails(thumbsDir string) {
 				return nil
 			}
 			if d.IsDir() {
-				if d.Name() == "thumbnails" {
+				// dot dirs hold quarantined or temporary files, never library media
+				if d.Name() == "thumbnails" || strings.HasPrefix(d.Name(), ".") {
 					return filepath.SkipDir
 				}
 				return nil

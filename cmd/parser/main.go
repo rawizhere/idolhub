@@ -233,8 +233,19 @@ func main() {
 
 	orchestrator.GlobalOrchestrator.SyncTargets(cfg.Accounts)
 
-	scraper.MigrateThumbnails(config.GetConfig().ThumbnailsDir)
-	scraper.MigrateVideoCodecs()
+	go func() {
+		// Integrity first: the thumbnail and codec migrations must not work from truncated files.
+		thumbsDir := config.GetConfig().ThumbnailsDir
+		affected, err := download.QuarantineIncomplete("downloads", thumbsDir)
+		if err != nil {
+			slog.Error("Media integrity check failed", "error", err)
+		}
+		for _, t := range affected {
+			app.orch.RequestFullResync(t.Platform, t.Username)
+		}
+		scraper.MigrateThumbnails(thumbsDir)
+		scraper.MigrateVideoCodecs()
+	}()
 
 	sig := <-quit
 	slog.Info("Received signal, shutting down", "signal", sig)

@@ -119,7 +119,7 @@ export async function renderGlobalSearchResults(query) {
             
             <!-- Top Target & Date Badges -->
             <div class="absolute top-2 inset-x-2 flex items-center justify-between pointer-events-none z-20">
-              <span data-select-target="${escapeHtml(f.username)}" class="pointer-events-auto text-[9px] font-bold px-1.5 py-0.5 rounded border backdrop-blur-xs shadow-xs cursor-pointer hover:scale-105 transition-transform ${platBadge}">
+              <span data-select-target="${escapeHtml(f.username)}" data-select-platform="${escapeHtml(f.platform)}" class="pointer-events-auto text-[9px] font-bold px-1.5 py-0.5 rounded border backdrop-blur-xs shadow-xs cursor-pointer hover:scale-105 transition-transform ${platBadge}">
                 @${escapeHtml(f.username)}
               </span>
               ${f.date ? `<span class="text-[9px] font-mono font-bold bg-black/75 text-white px-1.5 py-0.5 rounded backdrop-blur-xs">${f.date}</span>` : ''}
@@ -217,7 +217,7 @@ export function renderOverviewDashboard() {
       : "Never";
 
     tableRows += `
-      <tr class="hover:bg-slate-100/80 dark:hover:bg-zinc-800/80 transition-colors border-b border-slate-100 dark:border-zinc-800 cursor-pointer group" data-select-target="${escapeHtml(target.username)}">
+      <tr class="hover:bg-slate-100/80 dark:hover:bg-zinc-800/80 transition-colors border-b border-slate-100 dark:border-zinc-800 cursor-pointer group" data-select-target="${escapeHtml(target.username)}" data-select-platform="${escapeHtml(target.platform)}">
         <td class="px-5 py-3 whitespace-nowrap">
           <div class="flex items-center gap-2.5">
             <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${platformBadgeClass(target.platform)}">${escapeHtml(target.platform)}</span>
@@ -234,7 +234,7 @@ export function renderOverviewDashboard() {
           ${target.new_count > 0 ? `<span class="ml-1.5 inline-flex items-center text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800/80">+${target.new_count} new</span>` : ''}
         </td>
         <td class="px-5 py-3 whitespace-nowrap text-right">
-          <button data-overview-action="sync" data-username="${escapeHtml(target.username)}" class="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 hover:text-slate-900 dark:text-zinc-200 dark:hover:text-white transition-colors cursor-pointer border border-transparent dark:border-zinc-700" ${isRunning ? 'disabled' : ''}>
+          <button data-overview-action="sync" data-username="${escapeHtml(target.username)}" data-platform="${escapeHtml(target.platform)}" class="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 hover:text-slate-900 dark:text-zinc-200 dark:hover:text-white transition-colors cursor-pointer border border-transparent dark:border-zinc-700" ${isRunning ? 'disabled' : ''}>
             ${isRunning ? 'Syncing...' : 'Sync'}
           </button>
         </td>
