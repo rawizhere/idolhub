@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -67,7 +68,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
 		// fonts are vendored under /static/fonts; an explicit font-src replaces default-src, so it must name 'self'
-		h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://img.youtube.com; media-src 'self'; connect-src 'self'")
+		h.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: https://img.youtube.com https://pbs.twimg.com https://*.cdninstagram.com https://*.fbcdn.net; media-src 'self'; connect-src 'self'")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -196,9 +197,23 @@ func main() {
 	mux.HandleFunc("POST /api/scrape/start", app.handleScrapeStart)
 	mux.HandleFunc("POST /api/scrape/cancel", app.handleScrapeCancel)
 	mux.HandleFunc("POST /api/scrape/clear", app.handleScrapeClear)
-	mux.HandleFunc("GET /api/gallery", app.handleGallery)
 	mux.HandleFunc("GET /api/gallery/meta", app.handleGalleryMeta)
 	mux.HandleFunc("GET /api/search", app.handleGlobalSearchAPI)
+	mux.HandleFunc("GET /api/recent", app.handleRecent)
+	mux.HandleFunc("POST /api/media/zip", app.handleMediaZip)
+	mux.HandleFunc("POST /api/media/delete", app.handleMediaDelete)
+	mux.HandleFunc("GET /api/accounts", app.handleAccountsList)
+	mux.HandleFunc("POST /api/accounts", app.handleAccountCreate)
+	mux.HandleFunc("GET /api/accounts/export", app.handleAccountsExport)
+	mux.HandleFunc("POST /api/accounts/import", app.handleAccountsImport)
+	mux.HandleFunc("PATCH /api/accounts/{platform}/{username}", app.handleAccountPatch)
+	mux.HandleFunc("DELETE /api/accounts/{platform}/{username}", app.handleAccountDelete)
+	mux.HandleFunc("GET /api/accounts/{platform}/{username}/runs", app.handleAccountRuns)
+	mux.HandleFunc("GET /api/accounts/{platform}/{username}/filter-preview", app.handleFilterPreview)
+	mux.HandleFunc("GET /api/lookup", app.handleLookup)
+	mux.HandleFunc("POST /api/sessions/{platform}/check", app.handleSessionCheck)
+	mux.HandleFunc("GET /api/storage", app.handleStorage)
+	mux.HandleFunc("POST /api/storage/quarantine/clear", app.handleQuarantineClear)
 	mux.Handle("GET /api/events", app.orch.SSEHandler())
 	mux.HandleFunc("GET /gallery/{platform}/{username}", app.handleGalleryPage)
 	mux.HandleFunc("GET /gallery/{platform}/{username}/page/{page}", app.handleGalleryPage)
@@ -309,11 +324,13 @@ func (a *App) serveStatic() http.Handler {
 		if name == "" {
 			name = "index.html"
 		}
-		if name == "index.html" {
-			w.Header().Set("Cache-Control", "no-store")
-			w.Header().Set("Pragma", "no-cache")
-		} else if etag, ok := staticETags[name]; ok {
-			w.Header().Set("Cache-Control", "max-age=3600")
+		if etag, ok := staticETags[name]; ok {
+			// app code revalidates on every load so a deploy is picked up without cache-busting query strings; vendored files rarely change
+			if strings.HasPrefix(name, "vendor/") || strings.HasPrefix(name, "fonts/") {
+				w.Header().Set("Cache-Control", "max-age=86400")
+			} else {
+				w.Header().Set("Cache-Control", "no-cache")
+			}
 			w.Header().Set("ETag", etag)
 			if r.Header.Get("If-None-Match") == etag {
 				w.WriteHeader(http.StatusNotModified)
@@ -329,24 +346,22 @@ func (a *App) serveStatic() http.Handler {
 	})
 }
 
-func (a *App) handleConfigGet(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(config.GetConfig())
-}
-
 func (a *App) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Content-Type", "application/json")
-	var cfg config.Config
-	if err := decodeJSON(w, r, &cfg); err != nil {
+	var req configDTO
+	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	oldCfg := config.GetConfig()
+	cfg, err := req.merge(oldCfg)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	var changed []config.Account
 	for i, newAcc := range cfg.Accounts {
 		var oldAcc *config.Account
@@ -407,6 +422,7 @@ func (a *App) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.orch.SyncTargets(cfg.Accounts)
+	a.orch.ConcurrencyChanged()
 
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
@@ -457,50 +473,6 @@ type scrapeRequest struct {
 	// Platform narrows the request to one target; empty means every account with that username.
 	Platform  string `json:"platform,omitempty"`
 	ForceFull bool   `json:"force_full,omitempty"`
-}
-
-type GalleryResponse struct {
-	Username string         `json:"username"`
-	Platform string         `json:"platform"`
-	Files    []gallery.File `json:"files"`
-	Posts    []gallery.Post `json:"posts"`
-}
-
-func (a *App) handleGallery(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Content-Type", "application/json")
-
-	platform := r.URL.Query().Get("platform")
-	username := r.URL.Query().Get("username")
-	if platform == "" || username == "" {
-		http.Error(w, "Missing platform or username", http.StatusBadRequest)
-		return
-	}
-
-	files := a.mediaIndex.View(platform, username)
-	posts := a.mediaIndex.Posts(platform, username)
-	byName := fileMap(files)
-
-	for i, p := range posts {
-		for _, gf := range a.postLocalFiles(p, platform, username, byName) {
-			posts[i].LocalFiles = append(posts[i].LocalFiles, gallery.PostMediaFile{
-				Filename:     gf.Filename,
-				URL:          gf.URL,
-				ThumbnailURL: gf.ThumbnailURL,
-			})
-		}
-	}
-	slices.SortFunc(posts, func(a, b gallery.Post) int {
-		return cmp.Compare(b.Date, a.Date)
-	})
-
-	_ = json.NewEncoder(w).Encode(GalleryResponse{
-		Username: username,
-		Platform: platform,
-		Files:    files,
-		Posts:    posts,
-	})
 }
 
 func (a *App) handleMedia(w http.ResponseWriter, r *http.Request) {
@@ -881,6 +853,17 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 
 	galleryFiles := a.mediaIndex.View(platform, username)
 	byName := fileMap(galleryFiles)
+	filePostText := gallery.GlobalIndex.FilePostText(platform, username)
+	fileSource := make(map[string]string)
+	for _, rp := range a.mediaIndex.Posts(platform, username) {
+		src := postSourceURL(platform, username, rp.TweetID)
+		if src == "" {
+			continue
+		}
+		for _, gf := range a.postLocalFiles(rp, platform, username, byName) {
+			fileSource[gf.Filename] = src
+		}
+	}
 	allFiles := make([]templates.GalleryFileData, 0, len(galleryFiles))
 	for _, f := range galleryFiles {
 		allFiles = append(allFiles, templates.GalleryFileData{
@@ -890,10 +873,10 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 			Size:         f.Size,
 			URL:          f.URL,
 			ThumbnailURL: f.ThumbnailURL,
+			Caption:      strings.TrimSpace(tcoRe.ReplaceAllString(filePostText[f.Filename], "")),
+			SourceURL:    fileSource[f.Filename],
 		})
 	}
-
-	filePostText := gallery.GlobalIndex.FilePostText(platform, username)
 
 	if filter != "all" {
 		allFiles = gallery.Keep(allFiles, func(f templates.GalleryFileData) bool { return f.Type == filter })
@@ -930,7 +913,8 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pageFiles, totalPages := gallery.Page(allFiles, page, galleryPageSize)
-	templ.Handler(templates.GalleryGridPage(pageFiles, platform, username, filter, search, sortParam, year, month, p.Tags, page, totalPages)).ServeHTTP(w, r)
+	next := nextPageURL("/gallery/"+url.PathEscape(platform)+"/"+url.PathEscape(username), r, page, totalPages)
+	templ.Handler(templates.GalleryGridPage(pageFiles, next)).ServeHTTP(w, r)
 }
 
 func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp galleryPageParams) {
@@ -962,6 +946,7 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 		var localFiles []templates.GalleryPostMediaFile
 		for _, gf := range a.postLocalFiles(p, gp.Platform, gp.Username, byName) {
 			localFiles = append(localFiles, templates.GalleryPostMediaFile{
+				Date:         gf.Date,
 				Filename:     gf.Filename,
 				URL:          gf.URL,
 				ThumbnailURL: gf.ThumbnailURL,
@@ -986,7 +971,7 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 			TweetIDSuffix: tweetIDSuffix,
 			DateLabel:     dateLabel,
 			CleanText:     cleanText,
-			Platform:      gp.Platform,
+			SourceURL:     postSourceURL(gp.Platform, gp.Username, p.TweetID),
 			LocalFiles:    localFiles,
 			YoutubeURLs:   youtubeURLs,
 		})
@@ -1019,7 +1004,32 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 
 	pagePosts, totalPages := gallery.Page(allPosts, gp.Page, galleryPageSize)
 
-	templ.Handler(templates.GalleryPostsPage(pagePosts, gp.Platform, gp.Username, gp.Sort, gp.Search, gp.Year, gp.Month, gp.Tags, gp.Page, totalPages)).ServeHTTP(w, r)
+	next := nextPageURL("/gallery/"+url.PathEscape(gp.Platform)+"/"+url.PathEscape(gp.Username)+"/posts", r, gp.Page, totalPages)
+	templ.Handler(templates.GalleryPostsPage(pagePosts, next)).ServeHTTP(w, r)
+}
+
+// nextPageURL keeps the request's filters, re-encoded, so captions with & or # survive into the next page.
+func nextPageURL(base string, r *http.Request, page, totalPages int) string {
+	if page >= totalPages {
+		return ""
+	}
+	return base + "/page/" + strconv.Itoa(page+1) + "?" + r.URL.Query().Encode()
+}
+
+// postSourceURL links a post back to where it was scraped from; instagram media ids have no public URL.
+func postSourceURL(platform, username, id string) string {
+	if id == "" {
+		return ""
+	}
+	switch platform {
+	case "twitter":
+		return "https://x.com/" + url.PathEscape(username) + "/status/" + url.PathEscape(id)
+	case "tiktok":
+		return "https://www.tiktok.com/@" + url.PathEscape(username) + "/video/" + url.PathEscape(id)
+	case "youtube":
+		return "https://www.youtube.com/shorts/" + url.PathEscape(id)
+	}
+	return ""
 }
 
 type GlobalSearchResultFile struct {
@@ -1151,8 +1161,10 @@ type HashtagCount struct {
 }
 
 type GalleryFiltersResponse struct {
-	Years    []string       `json:"years"`
-	Hashtags []HashtagCount `json:"hashtags"`
+	FileCount int            `json:"file_count"`
+	PostCount int            `json:"post_count"`
+	Years     []string       `json:"years"`
+	Hashtags  []HashtagCount `json:"hashtags"`
 }
 
 func (a *App) handleGalleryMeta(w http.ResponseWriter, r *http.Request) {
@@ -1170,12 +1182,14 @@ func (a *App) handleGalleryMeta(w http.ResponseWriter, r *http.Request) {
 	years := make(map[string]struct{})
 	tagCounts := make(map[string]int)
 
-	for _, f := range a.mediaIndex.View(platform, username) {
+	files := a.mediaIndex.View(platform, username)
+	posts := a.mediaIndex.Posts(platform, username)
+	for _, f := range files {
 		if len(f.Date) >= 4 {
 			years[f.Date[:4]] = struct{}{}
 		}
 	}
-	for _, p := range a.mediaIndex.Posts(platform, username) {
+	for _, p := range posts {
 		if len(p.Date) >= 4 {
 			years[p.Date[:4]] = struct{}{}
 		}
@@ -1203,7 +1217,9 @@ func (a *App) handleGalleryMeta(w http.ResponseWriter, r *http.Request) {
 	})
 
 	_ = json.NewEncoder(w).Encode(GalleryFiltersResponse{
-		Years:    sortedYears,
-		Hashtags: hashtags,
+		FileCount: len(files),
+		PostCount: len(posts),
+		Years:     sortedYears,
+		Hashtags:  hashtags,
 	})
 }

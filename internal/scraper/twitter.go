@@ -50,7 +50,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	if t.DownloadVideos != nil {
 		downloadVideos = *t.DownloadVideos
 	}
-	lastSync := opts.LastSync
+	lastSync := opts.cutoff()
 	report := func(pct int, msg string) {
 		if opts.OnProgress != nil {
 			opts.OnProgress(pct, msg)
@@ -58,9 +58,10 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	}
 	slog.Info("Scraping Twitter target user", "user", username, "platform", "twitter", "save_text", saveText, "skip_retweets", skipRetweets, "filters", filters, "download_photos", downloadPhotos, "download_videos", downloadVideos, "last_sync", lastSync)
 
+	// the auth_token normally comes from the cookie export; a bare token is the legacy setup
 	authToken := opts.TwitterAuthToken
-	if authToken == "" {
-		err := fmt.Errorf("twitter auth token is not set in settings")
+	if authToken == "" && opts.TwitterCookies == "" {
+		err := fmt.Errorf("twitter session is not configured: paste an x.com cookie export in settings")
 		slog.Error("Scraper aborted", "error", err)
 		return err
 	}
@@ -114,6 +115,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	}
 	queuedURLs := make(map[string]bool)
 	postsSaved := 0
+	taken := 0
 
 	for result := range ch {
 		if result.Error != nil {
@@ -160,6 +162,15 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 		if !matched || (tw.IsRetweet && !saveText) {
 			continue
 		}
+
+		if opts.MaxPosts > 0 && taken >= opts.MaxPosts {
+			slog.Info("Reached the post limit for this sync, stopping timeline", "user", username, "max_posts", opts.MaxPosts)
+			cancelTimeline()
+			for range ch {
+			}
+			break
+		}
+		taken++
 
 		var tweetMedia []queuedMedia
 		queueItem := func(rawURL string, kind string) {

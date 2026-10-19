@@ -1,37 +1,402 @@
-import { state, saveUiState } from "./state.js";
-import { toast, debounce } from "./utils.js";
-import { fetchGalleryMeta, fetchGalleryFilterMeta } from "./api.js";
+import { state, targetKey, filtersDirty } from "./state.js";
+import { onClick } from "./actions.js";
+import { toast, escapeHtml, safeUrl, confirmDialog, withLoading } from "./utils.js";
+import { fetchGalleryMeta, fetchHTML, deleteMediaApi } from "./api.js";
+import { syncUrl, slideFromHash, setSlideHash } from "./router.js";
+import { loadProgress } from "./sse.js";
+import { renderTargetSettings, confirmLeave } from "./target-settings.js";
 
-let metaAbortController = null;
-let gridAbortController = null;
-let postsAbortController = null;
+const $ = (id) => document.getElementById(id);
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-const PSWP_VIDEO_W = 1920;
-const PSWP_VIDEO_H = 1080;
+let metaAbort = null;
+let pageAbort = null;
+// bumped on every full re-render so late infinite-scroll responses for an old filter set are dropped
+let generation = 0;
 
-function pswpUpdateVideoSize(content, video) {
-  if (!video || !content) return;
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
-  if (!vw || !vh) return;
-  content.width = vw;
-  content.height = vh;
-  if (content.slide) {
-    content.slide.width = vw;
-    content.slide.height = vh;
-    if (content.slide.data) {
-      content.slide.data.w = vw;
-      content.slide.data.h = vh;
+/* ---------- target + rendering ---------- */
+
+// showTarget switches the gallery to a target. route carries filters from the URL; without it a new target starts unfiltered.
+export async function showTarget(target, route = null) {
+  const changed = !state.target || targetKey(state.target) !== targetKey(target);
+  state.target = { platform: target.platform, username: target.username };
+
+  if (route) {
+    state.view = route.view;
+    state.filter = route.filter;
+    state.query = route.query;
+    state.sortAsc = route.sortAsc;
+    state.years = new Set(route.years);
+    state.months = new Set(route.months);
+    state.tags = new Set(route.tags);
+  } else if (changed) {
+    resetFilterState();
+  }
+
+  if (changed) {
+    setSelecting(false);
+    state.galleryMeta = null;
+    showGalleryState("loading");
+    if (metaAbort) metaAbort.abort();
+    metaAbort = new AbortController();
+    try {
+      state.galleryMeta = await fetchGalleryMeta(target.platform, target.username, metaAbort.signal);
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      toast(`Failed to load gallery: ${err.message}`, "error");
+      state.galleryMeta = { file_count: 0, post_count: 0, years: [], hashtags: [] };
     }
-    content.slide.calculateSize();
-    content.slide.zoomAndPanToInitial();
-    content.slide.applyCurrentZoomPan();
-    content.slide.updateContentSize(true);
+  }
+
+  const meta = state.galleryMeta;
+  if (!meta) return;
+  if (state.view === "posts" && !meta.post_count) state.view = "grid";
+  syncFilterUI();
+  if (state.view === "settings") {
+    showGalleryState("settings");
+    await renderTargetSettings();
+    return;
+  }
+  if (!meta.file_count && !meta.post_count && state.view !== "settings") {
+    showGalleryState("empty", "Nothing downloaded for this target yet — run a sync.");
+    return;
+  }
+  await renderGallery();
+}
+
+export async function refreshMeta() {
+  if (!state.target) return;
+  try {
+    state.galleryMeta = await fetchGalleryMeta(state.target.platform, state.target.username);
+    syncFilterUI();
+  } catch (_) {}
+}
+
+function resetFilterState() {
+  state.view = "grid";
+  state.filter = "all";
+  state.query = "";
+  state.sortAsc = false;
+  state.years = new Set();
+  state.months = new Set();
+  state.tags = new Set();
+}
+
+function showGalleryState(view, emptyText) {
+  const grid = $("lg-container");
+  const posts = $("gallery-posts-list");
+  const show = (el, on, display = "flex") => {
+    el.classList.toggle("hidden", !on);
+    if (display === "flex") el.classList.toggle("flex", on);
+  };
+  show($("target-settings"), view === "settings");
+  show($("gallery-loading"), view === "loading");
+  show($("gallery-empty"), view === "empty");
+  if (emptyText) $("gallery-empty-text").textContent = emptyText;
+  grid.classList.toggle("hidden", !(view === "content" && state.view === "grid"));
+  show(posts, view === "content" && state.view === "posts");
+}
+
+function pageUrl() {
+  const t = state.target;
+  const p = new URLSearchParams({
+    sort: state.sortAsc ? "asc" : "desc",
+    q: state.query,
+    year: state.years.size ? [...state.years].join(",") : "all",
+    month: state.months.size ? [...state.months].join(",") : "all",
+    tags: state.tags.size ? [...state.tags].join(",") : "all"
+  });
+  const base = `/gallery/${encodeURIComponent(t.platform)}/${encodeURIComponent(t.username)}`;
+  if (state.view === "posts") return `${base}/posts/page/1?${p}`;
+  p.set("filter", state.filter);
+  return `${base}?${p}`;
+}
+
+export async function renderGallery() {
+  if (!state.target || !state.galleryMeta || state.view === "settings") return;
+  generation++;
+  const container = state.view === "grid" ? $("lg-container") : $("gallery-posts-list");
+  if (pageAbort) pageAbort.abort();
+  pageAbort = new AbortController();
+  const gen = generation;
+  try {
+    const html = await fetchHTML(pageUrl(), pageAbort.signal);
+    if (gen !== generation) return;
+    container.innerHTML = html;
+    const hasItems = container.querySelector(".gallery-item, .post-card");
+    if (!hasItems) {
+      showGalleryState("empty", "No media matches your filters.");
+      return;
+    }
+    showGalleryState("content");
+    afterInsert(container);
+    openSlideFromHash();
+  } catch (err) {
+    if (err.name === "AbortError") return;
+    container.innerHTML = "";
+    showGalleryState("empty", "Failed to load gallery.");
+    toast(`Failed to load gallery: ${err.message}`, "error");
   }
 }
 
-let pswpLightboxModule = null;
-let pswpModule = null;
+function afterInsert(container) {
+  container.querySelectorAll("[data-next-url]").forEach(s => scrollObserver.observe(s));
+  initVideoHoverPreviews(container);
+  if (state.selecting) markSelected(container);
+}
+
+/* ---------- infinite scroll ---------- */
+
+const scrollObserver = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) loadNext(e.target); });
+}, { rootMargin: "800px 0px" });
+
+async function loadNext(sentinel) {
+  if (!sentinel || sentinel.dataset.loading === "1") return;
+  sentinel.dataset.loading = "1";
+  scrollObserver.unobserve(sentinel);
+  const gen = generation;
+  try {
+    const html = await fetchHTML(sentinel.dataset.nextUrl);
+    if (gen !== generation || !sentinel.isConnected) return;
+    const parent = sentinel.parentElement;
+    const tpl = document.createElement("template");
+    tpl.innerHTML = html;
+    sentinel.replaceWith(tpl.content);
+    afterInsert(parent);
+  } catch (err) {
+    delete sentinel.dataset.loading;
+    toast(`Failed to load more: ${err.message}`, "error");
+  }
+}
+
+/* ---------- filter UI ---------- */
+
+function setPressed(el, on) {
+  if (el) el.setAttribute("aria-pressed", on ? "true" : "false");
+}
+
+export function syncFilterUI() {
+  const meta = state.galleryMeta || {};
+  const isGrid = state.view === "grid";
+
+  document.querySelectorAll("#gallery-view-tabs [data-view]").forEach(b => setPressed(b, b.dataset.view === state.view));
+  $("tab-posts").classList.toggle("hidden", !meta.post_count);
+
+  document.querySelectorAll("[data-gallery-only]").forEach(el => el.classList.toggle("hidden", state.view === "settings"));
+  const typePills = $("media-type-pills");
+  typePills.classList.toggle("hidden", !isGrid);
+  typePills.querySelectorAll("[data-filter]").forEach(b => setPressed(b, b.dataset.filter === state.filter));
+
+  // dates
+  const dateCount = state.years.size + state.months.size;
+  $("date-filter-label").textContent = dateCount ? `Dates (${dateCount})` : "Dates";
+  setPressed($("btn-date-filter"), dateCount > 0);
+  const years = meta.years || [];
+  $("year-dropdown-list").innerHTML = years.length
+    ? years.map(y => `<button type="button" class="pill" data-action="toggle-year" data-value="${escapeHtml(y)}" aria-pressed="${state.years.has(y)}">${escapeHtml(y)}</button>`).join("")
+    : `<span class="text-[0.625rem] text-slate-400">No dated media</span>`;
+  $("month-dropdown-list").innerHTML = MONTHS.map((name, i) => {
+    const v = String(i + 1).padStart(2, "0");
+    return `<button type="button" class="pill justify-center" data-action="toggle-month" data-value="${v}" aria-pressed="${state.months.has(v)}">${name}</button>`;
+  }).join("");
+
+  // hashtags
+  const tags = meta.hashtags || [];
+  const tagBtn = $("btn-hashtag-filter");
+  tagBtn.classList.toggle("hidden", tags.length === 0);
+  $("hashtag-filter-label").textContent = state.tags.size ? `#tags (${state.tags.size})` : "#tags";
+  setPressed(tagBtn, state.tags.size > 0);
+  $("hashtag-dropdown").innerHTML = tags.map(t => `
+    <button type="button" class="menu-item ${state.tags.has(t.tag) ? "bg-[#ff9900]/15" : ""}" data-action="toggle-tag" data-value="${escapeHtml(t.tag)}" aria-pressed="${state.tags.has(t.tag)}">
+      <span class="w-3.5 h-3.5 rounded border flex items-center justify-center text-[0.5625rem] ${state.tags.has(t.tag) ? "bg-[#ff9900] border-[#ff9900] text-black" : "border-slate-300 dark:border-zinc-600"}">${state.tags.has(t.tag) ? "✓" : ""}</span>
+      <span class="truncate flex-1">${escapeHtml(t.tag)}</span>
+      <span class="text-[0.5625rem] bg-slate-100 dark:bg-zinc-800 text-slate-500 px-1.5 rounded-full">${t.count}</span>
+    </button>`).join("");
+
+  // sort
+  $("sort-order-label").textContent = state.sortAsc ? "Oldest" : "Newest";
+  $("sort-order-icon").style.transform = state.sortAsc ? "rotate(180deg)" : "";
+  setPressed($("btn-sort-toggle"), state.sortAsc);
+
+  $("btn-select-mode").classList.toggle("hidden", !isGrid);
+  setPressed($("btn-select-mode"), state.selecting);
+  setPressed($("btn-density-toggle"), state.gridDensity === "compact");
+  $("btn-reset-filters").classList.toggle("hidden", !filtersDirty());
+
+  const grid = $("lg-container");
+  grid.classList.toggle("density-compact", state.gridDensity === "compact");
+  grid.classList.toggle("density-relaxed", state.gridDensity !== "compact");
+}
+
+// filtersChanged re-renders after any filter tweak and records it in the URL without a history entry.
+function filtersChanged() {
+  syncFilterUI();
+  syncUrl();
+  renderGallery();
+}
+
+export async function setView(view, { push = true } = {}) {
+  if (view === state.view || (view === "posts" && !state.galleryMeta?.post_count)) return;
+  if (state.view === "settings" && !(await confirmLeave())) return;
+  state.view = view;
+  if (view !== "grid") setSelecting(false);
+  syncFilterUI();
+  syncUrl({ push });
+  if (view === "settings") {
+    showGalleryState("settings");
+    renderTargetSettings();
+    return;
+  }
+  showGalleryState("loading");
+  renderGallery();
+}
+
+export function setQuery(q) {
+  state.query = q;
+  filtersChanged();
+}
+
+function toggleIn(set, value) {
+  if (set.has(value)) set.delete(value);
+  else set.add(value);
+}
+
+export function resetFilters() {
+  const view = state.view;
+  resetFilterState();
+  state.view = view;
+  const input = $("search-input");
+  if (input) input.value = "";
+  $("search-clear")?.classList.add("hidden");
+  filtersChanged();
+}
+
+onClick({
+  "view": (el) => setView(el.dataset.view),
+  "type-filter": (el) => { state.filter = el.dataset.filter; filtersChanged(); },
+  "toggle-sort": () => { state.sortAsc = !state.sortAsc; filtersChanged(); },
+  "toggle-year": (el) => { toggleIn(state.years, el.dataset.value); filtersChanged(); },
+  "toggle-month": (el) => { toggleIn(state.months, el.dataset.value); filtersChanged(); },
+  "toggle-tag": (el) => { toggleIn(state.tags, el.dataset.value); filtersChanged(); },
+  "clear-dates": () => { state.years.clear(); state.months.clear(); filtersChanged(); },
+  "reset-filters": resetFilters,
+  "toggle-density": () => {
+    state.gridDensity = state.gridDensity === "relaxed" ? "compact" : "relaxed";
+    try { localStorage.setItem("idolhub-density", state.gridDensity); } catch (_) {}
+    syncFilterUI();
+  },
+  "load-more": (el) => loadNext(el.closest("[data-next-url]")),
+  "youtube-play": (btn) => {
+    const id = btn.dataset.youtubeId || "";
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return;
+    const frame = document.createElement("iframe");
+    frame.className = "absolute inset-0 w-full h-full";
+    frame.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
+    frame.title = "YouTube video player";
+    frame.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+    frame.allowFullscreen = true;
+    btn.replaceChildren(frame);
+    delete btn.dataset.action;
+  },
+  "toggle-select": () => setSelecting(!state.selecting),
+  "select-all": () => {
+    $("lg-container").querySelectorAll(".gallery-item").forEach(i => state.selected.add(i.dataset.filename));
+    markSelected($("lg-container"));
+  },
+  "download-selected": downloadSelected,
+  "delete-selected": (el) => withLoading(el, deleteSelected)
+});
+
+/* ---------- selection ---------- */
+
+let anchorItem = null;
+
+export function setSelecting(on) {
+  state.selecting = on;
+  if (!on) {
+    state.selected.clear();
+    anchorItem = null;
+  }
+  $("lg-container").classList.toggle("selecting", on);
+  markSelected($("lg-container"));
+  setPressed($("btn-select-mode"), on);
+}
+
+function markSelected(container) {
+  container.querySelectorAll(".gallery-item").forEach(i => i.classList.toggle("is-selected", state.selected.has(i.dataset.filename)));
+  const bar = $("selection-bar");
+  bar.classList.toggle("hidden", !state.selecting);
+  bar.classList.toggle("flex", state.selecting);
+  $("selection-count").textContent = state.selected.size;
+}
+
+function selectItem(item, range) {
+  const items = [...$("lg-container").querySelectorAll(".gallery-item")];
+  if (range && anchorItem && anchorItem.isConnected) {
+    const [a, b] = [items.indexOf(anchorItem), items.indexOf(item)].sort((x, y) => x - y);
+    items.slice(a, b + 1).forEach(i => state.selected.add(i.dataset.filename));
+  } else {
+    toggleIn(state.selected, item.dataset.filename);
+    anchorItem = item;
+  }
+  markSelected($("lg-container"));
+}
+
+function downloadSelected() {
+  if (!state.selected.size) { toast("Select some files first", "info"); return; }
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = "/api/media/zip";
+  form.hidden = true;
+  const add = (name, value) => {
+    const input = document.createElement("input");
+    input.type = "hidden";
+    input.name = name;
+    input.value = value;
+    form.appendChild(input);
+  };
+  add("platform", state.target.platform);
+  add("username", state.target.username);
+  state.selected.forEach(f => add("file", f));
+  document.body.appendChild(form);
+  form.submit();
+  form.remove();
+  toast(`Preparing ZIP of ${state.selected.size} files…`, "info", 2500);
+}
+
+async function deleteSelected() {
+  const files = [...state.selected];
+  if (!files.length) { toast("Select some files first", "info"); return; }
+  const ok = await confirmDialog({
+    title: `Delete ${files.length} file${files.length === 1 ? "" : "s"}`,
+    message: "The selected files and their thumbnails are removed from disk. A full resync may download them again.",
+    confirmText: "Delete files",
+    tone: "danger"
+  });
+  if (!ok) return;
+  try {
+    const res = await deleteMediaApi(state.target.platform, state.target.username, files);
+    const gone = new Set(files);
+    $("lg-container").querySelectorAll(".gallery-item").forEach(i => { if (gone.has(i.dataset.filename)) i.remove(); });
+    setSelecting(false);
+    toast(`Deleted ${res.deleted} files`, "success");
+    refreshMeta();
+    loadProgress();
+  } catch (err) {
+    toast(`Failed to delete: ${err.message}`, "error");
+  }
+}
+
+/* ---------- lightbox ---------- */
+
+const ICONS = {
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+  source: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>'
+};
+const toolbarIcon = (name) => `<svg viewBox="0 0 24 24" width="22" height="22" style="fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round">${ICONS[name]}</svg>`;
+
+let lightboxPromise = null;
 
 function ensurePhotoSwipeCss() {
   if (document.querySelector('link[href="/static/vendor/photoswipe.min.css"]')) return;
@@ -41,23 +406,39 @@ function ensurePhotoSwipeCss() {
   document.head.appendChild(link);
 }
 
-export async function preloadPhotoSwipe() {
-  if (pswpLightboxModule && pswpModule) return;
-  try {
-    const [lbMod, psMod] = await Promise.all([
-      import("/static/vendor/photoswipe-lightbox.esm.min.js"),
-      import("/static/vendor/photoswipe.esm.min.js")
-    ]);
-    pswpLightboxModule = lbMod;
-    pswpModule = psMod;
-  } catch (err) {
-    console.error("Failed to preload PhotoSwipe modules:", err);
+function getLightbox() {
+  if (!lightboxPromise) {
+    ensurePhotoSwipeCss();
+    lightboxPromise = import("/static/vendor/photoswipe-lightbox.esm.min.js").then(({ default: Lightbox }) => {
+      const lb = new Lightbox({
+        children: "a.pswp-item",
+        showHideAnimationType: "none",
+        bgOpacity: 0.92,
+        pswpModule: () => import("/static/vendor/photoswipe.esm.min.js")
+      });
+      addItemData(lb);
+      addToolbar(lb);
+      addVideoHandling(lb);
+      lb.on("change", () => setSlideHash(lb.pswp?.currSlide?.data?.filename || ""));
+      lb.on("close", () => setSlideHash(""));
+      lb.init();
+      return lb;
+    }).catch(err => {
+      lightboxPromise = null;
+      throw err;
+    });
   }
+  return lightboxPromise;
 }
 
-function pswpAddItemDataFilter(lb) {
+export function preloadLightbox() {
+  getLightbox().catch(() => {});
+}
+
+function addItemData(lb) {
   lb.addFilter("domItemData", (itemData, element, linkEl) => {
-    const img = linkEl ? linkEl.querySelector("img") : null;
+    const el = linkEl || element;
+    const img = el.querySelector("img");
     if (img) {
       itemData.msrc = img.src;
       if (img.naturalWidth && img.naturalHeight) {
@@ -69,24 +450,25 @@ function pswpAddItemDataFilter(lb) {
       itemData.w = 1920;
       itemData.h = 1080;
     }
+    itemData.filename = el.dataset.filename || "";
+    itemData.caption = el.dataset.caption || "";
+    itemData.date = el.dataset.date || "";
+    itemData.source = safeUrl(el.dataset.source);
     return itemData;
   });
 
   lb.addFilter("itemData", (itemData) => {
     if (itemData.type === "video" && itemData.src) {
-      itemData.w = PSWP_VIDEO_W;
-      itemData.h = PSWP_VIDEO_H;
+      itemData.w = 1920;
+      itemData.h = 1080;
+      const src = escapeHtml(itemData.src);
       itemData.html = `
         <div class="pswp-video-container" style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;padding:20px;box-sizing:border-box;pointer-events:auto;">
-          <video src="${itemData.src}" controls playsinline preload="metadata" style="max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;border-radius:12px;box-shadow:0 25px 60px rgba(0,0,0,0.6);" onerror="if(!this.dataset.errored){this.dataset.errored='1';const fb=this.nextElementSibling;if(fb){fb.classList.remove('hidden');fb.classList.add('flex');}this.style.display='none';}"></video>
+          <video src="${src}" controls playsinline preload="metadata" style="max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;border-radius:12px;box-shadow:0 25px 60px rgba(0,0,0,0.6);"></video>
           <div class="video-codec-fallback hidden flex-col items-center justify-center p-6 bg-zinc-900/95 text-white rounded-xl border border-zinc-800 text-center max-w-md gap-3 shadow-2xl">
-            <svg class="w-10 h-10 text-amber-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
             <p class="text-xs font-semibold text-zinc-200">Video format not supported by this browser.</p>
-            <p class="text-[11px] text-zinc-400">Open the file directly or play in an external player like QuickTime / VLC.</p>
-            <a href="${itemData.src}" target="_blank" rel="noopener noreferrer" class="mt-2 bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold text-xs px-4 py-2 rounded-lg transition-all shadow-xs inline-flex items-center gap-1.5 cursor-pointer">
-              <span>Open Raw Video File</span>
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-            </a>
+            <p class="text-[0.6875rem] text-zinc-400">Download the file and play it in an external player like QuickTime or VLC.</p>
+            <a href="${src}" download class="mt-2 bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold text-xs px-4 py-2 rounded-lg">Download video</a>
           </div>
         </div>`;
     }
@@ -94,146 +476,135 @@ function pswpAddItemDataFilter(lb) {
   });
 }
 
-function pswpAddVideoControls(lb) {
-  function handleVideo(el, content) {
-    const v = el && el.querySelector && el.querySelector("video");
+function addToolbar(lb) {
+  lb.on("uiRegister", () => {
+    const ui = lb.pswp.ui;
+    ui.registerElement({
+      name: "download-button",
+      title: "Download",
+      order: 8,
+      isButton: true,
+      tagName: "a",
+      html: toolbarIcon("download"),
+      onInit: (el, pswp) => {
+        el.setAttribute("download", "");
+        pswp.on("change", () => { el.href = pswp.currSlide.data.src; });
+      }
+    });
+    ui.registerElement({
+      name: "source-button",
+      title: "Open original post",
+      order: 9,
+      isButton: true,
+      tagName: "a",
+      html: toolbarIcon("source"),
+      onInit: (el, pswp) => {
+        el.target = "_blank";
+        el.rel = "noopener noreferrer";
+        pswp.on("change", () => {
+          const src = pswp.currSlide.data.source;
+          el.hidden = !src;
+          if (src) el.href = src;
+        });
+      }
+    });
+    ui.registerElement({
+      name: "caption",
+      order: 9,
+      isButton: false,
+      appendTo: "root",
+      onInit: (el, pswp) => {
+        pswp.on("change", () => {
+          const { caption, date } = pswp.currSlide.data;
+          el.replaceChildren();
+          if (date) {
+            const t = document.createElement("time");
+            t.textContent = date;
+            el.appendChild(t);
+          }
+          if (caption) el.appendChild(document.createTextNode(caption));
+          el.hidden = !caption && !date;
+        });
+      }
+    });
+  });
+}
+
+function addVideoHandling(lb) {
+  const resize = (content, video) => {
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (!vw || !vh || !content) return;
+    content.width = vw;
+    content.height = vh;
+    const slide = content.slide;
+    if (!slide) return;
+    slide.width = vw;
+    slide.height = vh;
+    if (slide.data) { slide.data.w = vw; slide.data.h = vh; }
+    slide.calculateSize();
+    slide.zoomAndPanToInitial();
+    slide.applyCurrentZoomPan();
+    slide.updateContentSize(true);
+  };
+  const showFallback = (video) => {
+    const fb = video.nextElementSibling;
+    if (fb) { fb.classList.remove("hidden"); fb.classList.add("flex"); }
+    video.style.display = "none";
+  };
+  const activate = (content) => {
+    const v = content?.element?.querySelector?.("video");
     if (!v) return;
-    if (v.readyState >= 1) {
-      pswpUpdateVideoSize(content, v);
-    } else {
-      v.addEventListener("loadedmetadata", () => {
-        pswpUpdateVideoSize(content, v);
-      }, { once: true });
-    }
+    // the error may already have fired before activation; inline onerror is blocked by the CSP
+    if (v.error) showFallback(v);
+    else v.addEventListener("error", () => showFallback(v), { once: true });
+    if (v.readyState >= 1) resize(content, v);
+    else v.addEventListener("loadedmetadata", () => resize(content, v), { once: true });
     v.play().catch(() => {});
-  }
-
-  lb.on("change", () => {
-    if (lb.pswp && lb.pswp.element) {
-      lb.pswp.element.querySelectorAll("video").forEach(v => v.pause());
-      const el = lb.pswp.currSlide && lb.pswp.currSlide.content && lb.pswp.currSlide.content.element;
-      if (el) handleVideo(el, lb.pswp.currSlide.content);
-    }
-  });
-
-  lb.on("contentActivate", (e) => {
-    const el = e.content && e.content.element;
-    if (el) handleVideo(el, e.content);
-  });
-
-  lb.on("contentDeactivate", (e) => {
-    const v = e.content && e.content.element && e.content.element.querySelector && e.content.element.querySelector("video");
-    if (v) v.pause();
-  });
-
-  lb.on("destroy", () => {
-    if (lb.pswp && lb.pswp.element) {
-      lb.pswp.element.querySelectorAll("video").forEach(v => v.pause());
-    }
-  });
+  };
+  lb.on("contentActivate", (e) => activate(e.content));
+  lb.on("contentDeactivate", (e) => e.content?.element?.querySelector?.("video")?.pause());
+  lb.on("close", () => lb.pswp?.element?.querySelectorAll("video").forEach(v => v.pause()));
 }
 
-let pswpGridInitPromise = null;
-let pswpPostsInitPromise = null;
-
-async function createPhotoSwipe(isPosts) {
-  ensurePhotoSwipeCss();
-  const key = isPosts ? "pswpPosts" : "pswpGrid";
-  if (state[key]) {
-    try { state[key].destroy(); } catch (_) {}
-    state[key] = null;
+async function openLightbox(galleryEl, item) {
+  try {
+    const lb = await getLightbox();
+    const items = [...galleryEl.querySelectorAll("a.pswp-item")];
+    const idx = items.indexOf(item);
+    if (idx >= 0) lb.loadAndOpen(idx, { gallery: galleryEl });
+  } catch (err) {
+    toast(`Viewer failed to load: ${err.message}`, "error");
   }
-  const Lightbox = pswpLightboxModule?.default || (await import("/static/vendor/photoswipe-lightbox.esm.min.js")).default;
-  const lb = new Lightbox({
-    gallery: isPosts ? "#gallery-posts-list" : "#lg-container, #global-search-grid",
-    children: "a.pswp-item",
-    showHideAnimationType: "none",
-    showAnimationDuration: 0,
-    hideAnimationDuration: 0,
-    bgOpacity: 0.92,
-    pswpModule: () => pswpModule ? Promise.resolve(pswpModule) : import("/static/vendor/photoswipe.esm.min.js"),
-  });
-  pswpAddItemDataFilter(lb);
-  pswpAddVideoControls(lb);
-  lb.init();
-  state[key] = lb;
 }
 
-export function initPhotoSwipeGrid() {
-  if (!pswpGridInitPromise) {
-    pswpGridInitPromise = createPhotoSwipe(false).catch(err => {
-      console.error("PhotoSwipe grid init error:", err);
-      pswpGridInitPromise = null;
-    });
-  }
-  return pswpGridInitPromise;
+// openSlideFromHash reopens a shared #f=<filename> link once its tile is on the page.
+function openSlideFromHash() {
+  const name = slideFromHash();
+  if (!name) return;
+  const container = state.view === "grid" ? $("lg-container") : $("gallery-posts-list");
+  const item = [...container.querySelectorAll("a.pswp-item")].find(a => a.dataset.filename === name);
+  if (item) openLightbox(container, item);
 }
 
-export function initPhotoSwipePosts() {
-  if (!pswpPostsInitPromise) {
-    pswpPostsInitPromise = createPhotoSwipe(true).catch(err => {
-      console.error("PhotoSwipe posts init error:", err);
-      pswpPostsInitPromise = null;
-    });
-  }
-  return pswpPostsInitPromise;
-}
-
-// Global click protection to prevent direct file navigation on any platform
 document.addEventListener("click", (e) => {
   const item = e.target.closest("a.pswp-item");
   if (!item) return;
-
-  // Let middle clicks or ctrl/cmd-clicks open in new tab if user wants to
-  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.button === 1) return;
-
-  e.preventDefault();
-
-  const galleryEl = item.closest("#lg-container, #global-search-grid, #gallery-posts-list");
+  const galleryEl = item.closest(".pswp-gallery");
   if (!galleryEl) return;
-
-  const isPosts = galleryEl.id === "gallery-posts-list";
-  const lb = isPosts ? state.pswpPosts : state.pswpGrid;
-
-  if (lb && lb.shouldOpen !== undefined) {
-    const items = Array.from(galleryEl.querySelectorAll("a.pswp-item"));
-    const idx = items.indexOf(item);
-    if (idx >= 0) {
-      lb.loadAndOpen(idx, { gallery: galleryEl });
-    }
-  } else {
-    const pending = isPosts ? initPhotoSwipePosts() : initPhotoSwipeGrid();
-    pending.then(() => {
-      const currentLb = isPosts ? state.pswpPosts : state.pswpGrid;
-      if (currentLb) {
-        const items = Array.from(galleryEl.querySelectorAll("a.pswp-item"));
-        const idx = items.indexOf(item);
-        if (idx >= 0) {
-          currentLb.loadAndOpen(idx, { gallery: galleryEl });
-        }
-      }
-    });
+  if (galleryEl.id === "lg-container" && (state.selecting || e.shiftKey)) {
+    e.preventDefault();
+    if (!state.selecting) setSelecting(true);
+    selectItem(item, e.shiftKey);
+    return;
   }
-}, false);
+  // modifier clicks keep the browser's open-in-new-tab behaviour
+  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.button === 1) return;
+  e.preventDefault();
+  openLightbox(galleryEl, item);
+});
 
-export function initYoutubePreviews() {
-  document.querySelectorAll("button.youtube-preview[data-youtube-id]").forEach(btn => {
-    if (btn.dataset.ytBound === "1") return;
-    btn.dataset.ytBound = "1";
-    btn.addEventListener("click", () => {
-      const id = btn.dataset.youtubeId || "";
-      if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return;
-      const frame = document.createElement("iframe");
-      frame.className = "absolute inset-0 w-full h-full";
-      frame.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
-      frame.title = "YouTube video player";
-      frame.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
-      frame.allowFullscreen = true;
-      btn.replaceChildren(frame);
-      btn.classList.remove("cursor-pointer", "hover:shadow-md", "hover:border-[#ff9900]/50");
-    });
-  });
-}
+/* ---------- hover previews ---------- */
 
 const hoverPreviews = new WeakMap();
 
@@ -250,27 +621,23 @@ function stopHoverPreview(tile) {
   p.removeTimer = setTimeout(() => el.remove(), 200);
 }
 
-export function initVideoHoverPreviews() {
-  const tiles = document.querySelectorAll(".video-preview-tile[data-video-src]");
-  if (!tiles.length) return;
-
-  const io = new IntersectionObserver(entries => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) entry.target.dataset.inViewport = "1";
-      else stopHoverPreview(entry.target);
-    });
+const tileObserver = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    entry.target.dataset.inViewport = entry.isIntersecting ? "1" : "";
+    if (!entry.isIntersecting) stopHoverPreview(entry.target);
   });
+});
 
-  tiles.forEach(tile => {
-    if (tile.dataset.hoverBound === "1") return;
-    tile.dataset.hoverBound = "1";
-    io.observe(tile);
-
+export function initVideoHoverPreviews(root = document) {
+  if (!window.matchMedia("(hover: hover)").matches) return;
+  root.querySelectorAll(".video-preview-tile[data-video-src]").forEach(tile => {
+    if (hoverPreviews.has(tile)) return;
+    tileObserver.observe(tile);
     const p = { previewEl: null, hoverTimer: null, removeTimer: null };
     hoverPreviews.set(tile, p);
 
     tile.addEventListener("mouseenter", () => {
-      if (tile.dataset.inViewport !== "1") return;
+      if (tile.dataset.inViewport !== "1" || state.selecting) return;
       clearTimeout(p.removeTimer);
       p.hoverTimer = setTimeout(() => {
         let el = p.previewEl;
@@ -286,451 +653,9 @@ export function initVideoHoverPreviews() {
           p.previewEl = el;
         }
         el.currentTime = 0;
-        el.play().then(() => {
-          if (p.previewEl === el) el.classList.remove("opacity-0");
-        }).catch(() => {});
+        el.play().then(() => { if (p.previewEl === el) el.classList.remove("opacity-0"); }).catch(() => {});
       }, 200);
     });
-
     tile.addEventListener("mouseleave", () => stopHoverPreview(tile));
   });
-}
-
-export async function selectGalleryTarget(platform, username) {
-  state.activeGalleryUser = username;
-  state.activeGalleryPlatform = platform;
-  state.currentView = "grid";
-
-  state.postsSearchQuery = "";
-  state.gridSearchQuery = "";
-  const gallerySearchInput = document.getElementById("gallery-search-input");
-  if (gallerySearchInput) gallerySearchInput.value = "";
-  const globalSearchInput = document.getElementById("global-search-input");
-  if (globalSearchInput) globalSearchInput.value = "";
-
-  showGalleryState("loading");
-
-  if (metaAbortController) metaAbortController.abort();
-  metaAbortController = new AbortController();
-
-  try {
-    const [meta, filterMeta] = await Promise.all([
-      fetchGalleryMeta(platform, username, metaAbortController.signal),
-      fetchGalleryFilterMeta(platform, username)
-    ]);
-    state.galleryMeta = meta;
-    state.galleryFilterMeta = filterMeta;
-  } catch (err) {
-    if (err.name === "AbortError") return;
-    console.error("Gallery meta error:", err);
-    state.galleryFilterMeta = null;
-  }
-
-  const files = state.galleryMeta?.files || [];
-  const hasPosts = state.galleryMeta?.posts && state.galleryMeta.posts.length > 0;
-
-  const tabPosts = document.getElementById("tab-posts");
-  if (tabPosts) tabPosts.style.display = hasPosts ? "inline-flex" : "none";
-
-  if (files.length === 0) {
-    showGalleryState("empty");
-    return;
-  }
-
-  showGalleryState("content");
-  state.selectedHashtags.clear();
-  state.selectedYears.clear();
-  state.selectedMonths.clear();
-
-  populateDateDropdown();
-  populateHashtagDropdown();
-  updateResetButtonVisibility();
-
-  switchGalleryView(state.currentView);
-}
-
-export function showGalleryState(viewState) {
-  const loading = document.getElementById("gallery-loading");
-  const empty = document.getElementById("gallery-empty");
-  const gridView = document.getElementById("gallery-grid-view");
-  const postsView = document.getElementById("gallery-posts-view");
-
-  if (loading) loading.style.display = viewState === "loading" ? "flex" : "none";
-  if (empty) empty.style.display = viewState === "empty" ? "flex" : "none";
-  if (gridView) gridView.style.display = (viewState === "content" && state.currentView === "grid") ? "block" : "none";
-  if (postsView) postsView.style.display = (viewState === "content" && state.currentView === "posts") ? "block" : "none";
-}
-
-export async function renderGalleryGrid() {
-  const container = document.getElementById("lg-container");
-  if (!container) return;
-  container.innerHTML = "";
-  saveUiState();
-  if (gridAbortController) gridAbortController.abort();
-  gridAbortController = new AbortController();
-  const signal = gridAbortController.signal;
-  const year = state.selectedYears.size > 0 ? Array.from(state.selectedYears).join(",") : "all";
-  const month = state.selectedMonths.size > 0 ? Array.from(state.selectedMonths).join(",") : "all";
-  const tags = state.selectedHashtags.size > 0 ? Array.from(state.selectedHashtags).join(",") : "all";
-  const url = `/gallery/${encodeURIComponent(state.activeGalleryPlatform)}/${encodeURIComponent(state.activeGalleryUser)}?filter=${encodeURIComponent(state.currentFilter)}&q=${encodeURIComponent(state.gridSearchQuery)}&sort=${state.postsSortAsc ? "asc" : "desc"}&year=${encodeURIComponent(year)}&month=${encodeURIComponent(month)}&tags=${encodeURIComponent(tags)}`;
-  try {
-    const res = await fetch(url, { signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const html = await res.text();
-    container.innerHTML = html;
-    if (window.htmx) window.htmx.process(container);
-    initPhotoSwipeGrid();
-    initVideoHoverPreviews();
-    updateResetButtonVisibility();
-  } catch (err) {
-    if (err.name === "AbortError") return;
-    console.error("Grid render error:", err);
-    container.innerHTML = `<div class="col-span-full text-center text-xs font-semibold text-slate-500 py-12">Failed to load gallery</div>`;
-    toast(`Failed to load gallery: ${err.message}`, "error");
-  }
-}
-
-export async function renderGalleryPosts() {
-  const container = document.getElementById("gallery-posts-list");
-  if (!container) return;
-  container.innerHTML = "";
-  saveUiState();
-  if (postsAbortController) postsAbortController.abort();
-  postsAbortController = new AbortController();
-  const signal = postsAbortController.signal;
-  const year = state.selectedYears.size > 0 ? Array.from(state.selectedYears).join(",") : "all";
-  const month = state.selectedMonths.size > 0 ? Array.from(state.selectedMonths).join(",") : "all";
-  const tags = state.selectedHashtags.size > 0 ? Array.from(state.selectedHashtags).join(",") : "all";
-  const url = `/gallery/${encodeURIComponent(state.activeGalleryPlatform)}/${encodeURIComponent(state.activeGalleryUser)}/posts/page/1?sort=${state.postsSortAsc ? "asc" : "desc"}&q=${encodeURIComponent(state.postsSearchQuery)}&year=${encodeURIComponent(year)}&month=${encodeURIComponent(month)}&tags=${encodeURIComponent(tags)}`;
-  try {
-    const res = await fetch(url, { signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const html = await res.text();
-    container.innerHTML = html;
-    if (window.htmx) window.htmx.process(container);
-    initPhotoSwipePosts();
-    initYoutubePreviews();
-    updateResetButtonVisibility();
-  } catch (err) {
-    if (err.name === "AbortError") return;
-    console.error("Posts render error:", err);
-    container.innerHTML = `<div class="text-center text-xs font-semibold text-slate-500 py-12">Failed to load posts</div>`;
-    toast(`Failed to load posts: ${err.message}`, "error");
-  }
-}
-
-export function switchGalleryView(view) {
-  state.currentView = view;
-  document.querySelectorAll(".gallery-tab").forEach(t => {
-    const active = t.id === `tab-${view}`;
-    t.className = active
-      ? "gallery-tab inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md transition-all cursor-pointer bg-[#ff9900] text-black dark:text-black font-bold shadow-2xs"
-      : "gallery-tab inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md transition-all cursor-pointer text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white bg-transparent";
-  });
-
-  const gridView = document.getElementById("gallery-grid-view");
-  const postsView = document.getElementById("gallery-posts-view");
-  if (gridView) gridView.style.display = view === "grid" ? "block" : "none";
-  if (postsView) postsView.style.display = view === "posts" ? "block" : "none";
-
-  const typePills = document.getElementById("media-type-pills");
-  if (typePills) typePills.style.display = view === "grid" ? "flex" : "none";
-
-  if (view === "grid") renderGalleryGrid();
-  else renderGalleryPosts();
-}
-
-export function syncMediaTypePills() {
-  document.querySelectorAll("#media-type-pills .gallery-filter-btn").forEach(btn => {
-    const active = btn.dataset.filter === state.currentFilter;
-    btn.className = active
-      ? "gallery-filter-btn text-xs px-2.5 py-1 rounded-lg transition-all cursor-pointer bg-[#ff9900] text-black dark:text-black font-bold shadow-2xs border border-[#ff9900]"
-      : "gallery-filter-btn text-xs font-medium px-2.5 py-1 rounded-lg transition-all cursor-pointer text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800";
-  });
-}
-
-export function applyGalleryFilter(filter) {
-  state.currentFilter = filter;
-  syncMediaTypePills();
-  if (state.currentView === "grid") renderGalleryGrid();
-  else renderGalleryPosts();
-}
-
-export function renderPostsSortState() {
-  const label = document.getElementById("sort-order-label");
-  const icon = document.getElementById("sort-order-icon");
-  const btn = document.getElementById("btn-sort-toggle");
-  if (label) label.textContent = state.postsSortAsc ? "Oldest" : "Newest";
-  if (icon) {
-    icon.outerHTML = state.postsSortAsc
-      ? `<svg id="sort-order-icon" class="w-3.5 h-3.5 ${state.postsSortAsc ? 'text-black dark:text-black' : 'text-[#ff9900]'}" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg>`
-      : `<svg id="sort-order-icon" class="w-3.5 h-3.5 text-[#ff9900]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>`;
-  }
-  if (btn) {
-    btn.className = state.postsSortAsc
-      ? "text-xs font-bold bg-[#ff9900] text-black dark:text-black border border-[#ff9900] px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
-      : "text-xs font-semibold bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white border border-slate-200 dark:border-zinc-800 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer";
-  }
-}
-
-export function togglePostsSort() {
-  state.postsSortAsc = !state.postsSortAsc;
-  renderPostsSortState();
-  if (state.currentView === "grid") renderGalleryGrid();
-  else renderGalleryPosts();
-}
-
-export const applyGallerySearch = debounce(() => {
-  const input = document.getElementById("gallery-search-input");
-  const clearBtn = document.getElementById("gallery-search-clear");
-  const val = input ? input.value.trim().toLowerCase() : "";
-  if (clearBtn) clearBtn.classList.toggle("hidden", !val);
-  state.postsSearchQuery = val;
-  state.gridSearchQuery = val;
-  if (state.currentView === "grid") renderGalleryGrid();
-  else renderGalleryPosts();
-}, 180);
-
-export function clearGallerySearch() {
-  const input = document.getElementById("gallery-search-input");
-  if (input) input.value = "";
-  applyGallerySearch();
-}
-
-export function resetAllFilters() {
-  state.currentFilter = "all";
-  state.postsSearchQuery = "";
-  state.gridSearchQuery = "";
-  state.postsSortAsc = false;
-  state.selectedYears.clear();
-  state.selectedMonths.clear();
-  state.selectedHashtags.clear();
-
-  const searchInput = document.getElementById("gallery-search-input");
-  if (searchInput) searchInput.value = "";
-  const clearBtn = document.getElementById("gallery-search-clear");
-  if (clearBtn) clearBtn.classList.add("hidden");
-
-  const globalSearchInput = document.getElementById("global-search-input");
-  if (globalSearchInput) globalSearchInput.value = "";
-  const globalClearBtn = document.getElementById("global-search-clear");
-  if (globalClearBtn) globalClearBtn.classList.add("hidden");
-
-  applyGalleryFilter("all");
-  updateDateFilterLabel();
-  updateHashtagLabel();
-  populateDateDropdown();
-  populateHashtagDropdown();
-
-  const sortBtn = document.getElementById("btn-sort-toggle");
-  const sortLabel = document.getElementById("sort-order-label");
-  if (sortLabel) sortLabel.textContent = "Newest";
-  if (sortBtn) {
-    sortBtn.className = "text-xs font-semibold bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white border border-slate-200 dark:border-zinc-800 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer";
-  }
-
-  if (state.currentView === "grid") renderGalleryGrid();
-  else renderGalleryPosts();
-}
-
-export function updateResetButtonVisibility() {
-  const resetBtn = document.getElementById("btn-reset-filters");
-  if (!resetBtn) return;
-  const isDirty = state.currentFilter !== "all" || state.gridSearchQuery !== "" || state.postsSearchQuery !== "" || state.selectedYears.size > 0 || state.selectedMonths.size > 0 || state.selectedHashtags.size > 0 || state.postsSortAsc;
-  resetBtn.classList.toggle("hidden", !isDirty);
-}
-
-export function toggleDropdown(id) {
-  const el = document.getElementById(id);
-  if (el) el.classList.toggle("hidden");
-}
-
-export function populateDateDropdown() {
-  const yearList = document.getElementById("year-dropdown-list");
-  const monthList = document.getElementById("month-dropdown-list");
-  if (!yearList || !monthList) return;
-
-  let sortedYears = state.galleryFilterMeta?.years;
-  if (!sortedYears) {
-    const yearsSet = new Set();
-    (state.galleryMeta?.files || []).forEach(f => {
-      if (f.date && /^\d{4}-\d{2}-\d{2}/.test(f.date)) {
-        yearsSet.add(f.date.slice(0, 4));
-      }
-    });
-    (state.galleryMeta?.posts || []).forEach(p => {
-      if (p.date && /^\d{4}-\d{2}-\d{2}/.test(p.date)) {
-        yearsSet.add(p.date.slice(0, 4));
-      }
-    });
-    sortedYears = Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
-  }
-  let yHTML = "";
-  sortedYears.forEach(yr => {
-    const isChecked = state.selectedYears.has(yr);
-    yHTML += `
-      <label class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs select-none cursor-pointer ${isChecked ? 'bg-[#ff9900] text-black dark:text-black font-bold border border-[#ff9900]' : 'bg-slate-100 dark:bg-zinc-800 text-slate-700 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white font-semibold'}">
-        <input type="checkbox" value="${yr}" ${isChecked ? "checked" : ""} class="accent-[#ff9900] rounded w-3 h-3" onchange="window.toggleYearFilter(this)">
-        <span>${yr}</span>
-      </label>
-    `;
-  });
-  yearList.innerHTML = yHTML || `<span class="text-[10px] text-slate-400">All available</span>`;
-
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  let mHTML = "";
-  monthNames.forEach((name, idx) => {
-    const mVal = String(idx + 1).padStart(2, "0");
-    const isChecked = state.selectedMonths.has(mVal);
-    mHTML += `
-      <label class="flex items-center justify-center py-1.5 rounded-md text-xs select-none cursor-pointer ${isChecked ? 'bg-[#ff9900] text-black dark:text-black font-bold border border-[#ff9900]' : 'bg-slate-100 dark:bg-zinc-800 text-slate-700 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white font-semibold'}">
-        <input type="checkbox" value="${mVal}" ${isChecked ? "checked" : ""} class="hidden" onchange="window.toggleMonthFilter(this)">
-        <span>${name}</span>
-      </label>
-    `;
-  });
-  monthList.innerHTML = mHTML;
-  updateDateFilterLabel();
-}
-
-export function toggleYearFilter(checkbox) {
-  const val = checkbox.value;
-  if (checkbox.checked) state.selectedYears.add(val);
-  else state.selectedYears.delete(val);
-  updateDateFilterLabel();
-  populateDateDropdown();
-  if (state.currentView === "grid") renderGalleryGrid();
-  else renderGalleryPosts();
-}
-
-export function toggleMonthFilter(checkbox) {
-  const val = checkbox.value;
-  if (checkbox.checked) state.selectedMonths.add(val);
-  else state.selectedMonths.delete(val);
-  updateDateFilterLabel();
-  populateDateDropdown();
-  if (state.currentView === "grid") renderGalleryGrid();
-  else renderGalleryPosts();
-}
-
-export function clearDateFilters() {
-  state.selectedYears.clear();
-  state.selectedMonths.clear();
-  updateDateFilterLabel();
-  populateDateDropdown();
-  if (state.currentView === "grid") renderGalleryGrid();
-  else renderGalleryPosts();
-}
-
-export function updateDateFilterLabel() {
-  const label = document.getElementById("date-filter-label");
-  const btn = document.getElementById("btn-date-filter");
-  if (!label || !btn) return;
-  const count = state.selectedYears.size + state.selectedMonths.size;
-  if (count === 0) {
-    label.textContent = "Dates";
-    btn.className = "text-xs font-semibold bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white border border-slate-200 dark:border-zinc-800 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer";
-  } else {
-    label.textContent = `Dates (${count})`;
-    btn.className = "text-xs font-bold bg-[#ff9900] text-black dark:text-black border border-[#ff9900] px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs";
-  }
-}
-
-function extractHashtags(text) {
-  if (!text) return [];
-  const matches = text.match(/#\w+/g);
-  return matches ? matches.map(m => m.toLowerCase()) : [];
-}
-
-export function populateHashtagDropdown() {
-  const container = document.getElementById("hashtag-filter-container");
-  const dropdown = document.getElementById("hashtag-dropdown");
-  if (!container || !dropdown) return;
-
-  const serverTags = state.galleryFilterMeta?.hashtags;
-  let hashtagsMap;
-  if (serverTags) {
-    hashtagsMap = new Map(serverTags.map(t => [t.tag, t.count]));
-  } else {
-    hashtagsMap = new Map();
-    (state.galleryMeta?.posts || []).forEach(post => {
-      extractHashtags(post.text).forEach(tag => {
-        hashtagsMap.set(tag, (hashtagsMap.get(tag) || 0) + 1);
-      });
-    });
-  }
-
-  if (hashtagsMap.size === 0) {
-    container.style.display = "none";
-    return;
-  }
-
-  container.style.display = "inline-block";
-  const sortedTags = Array.from(hashtagsMap.keys()).sort((a, b) => hashtagsMap.get(b) - hashtagsMap.get(a));
-
-  let html = "";
-  sortedTags.forEach(tag => {
-    const isChecked = state.selectedHashtags.has(tag);
-    const count = hashtagsMap.get(tag);
-    html += `
-      <label class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg cursor-pointer text-xs select-none ${isChecked ? 'bg-[#ff9900] text-black dark:text-black font-bold' : 'hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-700 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white font-semibold'}">
-        <input type="checkbox" value="${tag}" ${isChecked ? "checked" : ""} class="accent-[#ff9900] rounded w-3.5 h-3.5" onchange="window.toggleHashtagFilter(this)">
-        <span class="truncate">${tag}</span>
-        <span class="text-[9px] ${isChecked ? 'bg-black/15 text-black dark:text-black font-bold' : 'bg-slate-100 dark:bg-zinc-800 text-slate-400'} px-1.5 py-0.2 rounded-full ml-auto">${count}</span>
-      </label>
-    `;
-  });
-  dropdown.innerHTML = html;
-  updateHashtagLabel();
-}
-
-export function toggleHashtagFilter(checkbox) {
-  const tag = checkbox.value;
-  if (checkbox.checked) state.selectedHashtags.add(tag);
-  else state.selectedHashtags.delete(tag);
-  updateHashtagLabel();
-  populateHashtagDropdown();
-  if (state.currentView === "grid") renderGalleryGrid();
-  else renderGalleryPosts();
-}
-
-export function updateHashtagLabel() {
-  const label = document.getElementById("hashtag-filter-label");
-  const btn = document.getElementById("btn-hashtag-filter");
-  if (!label || !btn) return;
-  if (state.selectedHashtags.size > 0) {
-    label.textContent = `#tags (${state.selectedHashtags.size})`;
-    btn.className = "text-xs font-bold bg-[#ff9900] text-black dark:text-black border border-[#ff9900] px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs";
-  } else {
-    label.textContent = "#tags";
-    btn.className = "text-xs font-semibold bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white border border-slate-200 dark:border-zinc-800 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer";
-  }
-}
-
-export function initDensity() {
-  const container = document.getElementById("lg-container");
-  if (container) {
-    container.classList.toggle("density-compact", state.gridDensity === "compact");
-    container.classList.toggle("density-relaxed", state.gridDensity === "relaxed");
-  }
-}
-
-export function toggleDensity() {
-  state.gridDensity = state.gridDensity === "relaxed" ? "compact" : "relaxed";
-  localStorage.setItem("idolhub-density", state.gridDensity);
-  initDensity();
-  toast(`Grid density: ${state.gridDensity}`, "info", 1200);
-}
-
-export function forceLoadMore(sentinel) {
-  if (!sentinel || sentinel.dataset.loading === "1") return;
-  if (sentinel.classList.contains("htmx-request")) return;
-  const url = sentinel.getAttribute("hx-get");
-  if (!url) return;
-  if (!window.htmx) {
-    toast("Cannot load more right now", "error");
-    return;
-  }
-  sentinel.dataset.loading = "1";
-  window.htmx.ajax("GET", url, { target: sentinel, swap: "outerHTML" });
 }

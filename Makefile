@@ -9,8 +9,7 @@ templ:
 	$(GO) tool templ generate -path ./cmd/parser/web/templates/
 
 css:
-	npm ci --silent
-	npx @tailwindcss/cli -i cmd/parser/web/static/input.css -o cmd/parser/web/static/app.css --minify
+	cd cmd/parser/web && npm ci --silent && npx @tailwindcss/cli -i static/input.css -o static/app.css --minify
 
 build: templ css
 	CGO_ENABLED=0 $(GO) build -ldflags="-s -w" -o $(BIN) ./cmd/parser

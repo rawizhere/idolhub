@@ -5,19 +5,12 @@ import (
 	"log/slog"
 )
 
-type PostMediaFile struct {
-	Filename     string `json:"filename"`
-	URL          string `json:"url"`
-	ThumbnailURL string `json:"thumbnail_url"`
-}
-
 type Post struct {
-	TweetID     string          `json:"tweet_id"`
-	Date        string          `json:"date"`
-	Text        string          `json:"text"`
-	MediaURLs   []string        `json:"media_urls"`
-	LocalFiles  []PostMediaFile `json:"local_files,omitempty"`
-	YoutubeURLs []string        `json:"youtube_urls,omitempty"`
+	TweetID     string   `json:"tweet_id"`
+	Date        string   `json:"date"`
+	Text        string   `json:"text"`
+	MediaURLs   []string `json:"media_urls"`
+	YoutubeURLs []string `json:"youtube_urls,omitempty"`
 }
 
 const postListLimit = 10000

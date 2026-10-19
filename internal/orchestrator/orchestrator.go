@@ -24,7 +24,8 @@ import (
 	"idolhub/internal/store"
 )
 
-const numScrapeWorkers = 3
+// maxScrapeWorkers is the worker pool size; the configured concurrency (config.Concurrency) gates how many of them scrape at once.
+const maxScrapeWorkers = 8
 
 type scrapeJob struct {
 	username      string
@@ -53,6 +54,7 @@ type TaskProgress struct {
 	MediaCount int       `json:"media_count"`
 	NewCount   int       `json:"new_count"`
 	AuthError  bool      `json:"auth_error"`
+	Paused     bool      `json:"paused"`
 
 	mediaCountCached   int       `json:"-"`
 	mediaCountCachedAt time.Time `json:"-"`
@@ -90,6 +92,11 @@ type Orchestrator struct {
 	twitterMu    sync.Mutex
 	jobCh        chan scrapeJob
 	logEvents    chan logEvent
+	runs         *store.RunStore
+
+	slotMu   sync.Mutex
+	slotCond *sync.Cond
+	active   int
 }
 
 type logEvent struct {
@@ -111,8 +118,16 @@ func InitOrchestrator(mediaIndex *gallery.Index, st *store.Store) {
 	autoSyncCtx, autoSyncCancel := context.WithCancel(context.Background())
 	sseServer := &sse.Server{
 		OnSession: func(w http.ResponseWriter, r *http.Request) ([]string, bool) {
+			// The body write below commits the headers, so the SSE content type must be set first or
+			// EventSource rejects the sniffed text/plain. go-sse hands us a writer whose Flush returns an
+			// error, which is not an http.Flusher.
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
 			_, _ = fmt.Fprintf(w, "event: hello\ndata: {}\n\n")
-			if f, ok := w.(http.Flusher); ok {
+			switch f := w.(type) {
+			case interface{ Flush() error }:
+				_ = f.Flush()
+			case http.Flusher:
 				f.Flush()
 			}
 			return nil, true
@@ -133,7 +148,9 @@ func InitOrchestrator(mediaIndex *gallery.Index, st *store.Store) {
 		fullResync:     loadFullResync(st.Settings),
 		jobCh:          make(chan scrapeJob, 100),
 		logEvents:      make(chan logEvent, 4096),
+		runs:           st.Runs,
 	}
+	orch.slotCond = sync.NewCond(&orch.slotMu)
 	GlobalOrchestrator = orch
 
 	go func() {
@@ -147,7 +164,7 @@ func InitOrchestrator(mediaIndex *gallery.Index, st *store.Store) {
 		orch:    orch,
 	}))
 
-	for i := 0; i < numScrapeWorkers; i++ {
+	for i := 0; i < maxScrapeWorkers; i++ {
 		go orch.worker()
 	}
 
@@ -368,12 +385,20 @@ func (o *Orchestrator) logTargetsLocked(platform, username string) []*TaskProgre
 	return all
 }
 
+// setProgress records a running target's percentage and pushes changes to the dashboard.
 func (o *Orchestrator) setProgress(key string, pct int) {
 	o.mu.Lock()
-	if p, exists := o.progress[key]; exists && (p.Status == "running" || p.Status == "queued") {
+	p, exists := o.progress[key]
+	changed := exists && (p.Status == "running" || p.Status == "queued") && p.Progress != pct
+	var evt SSEEvent
+	if changed {
 		p.Progress = pct
+		evt = SSEEvent{Type: "progress", Username: p.Username, Platform: p.Platform, Status: p.Status, Progress: pct}
 	}
 	o.mu.Unlock()
+	if changed {
+		o.broadcast(evt)
+	}
 }
 
 func (o *Orchestrator) GetGlobalLogs() []TaskLog {
@@ -477,15 +502,38 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 
 func (o *Orchestrator) worker() {
 	for job := range o.jobCh {
+		o.acquireSlot()
+		// re-check after waiting for a slot: the job may have been cancelled or its target removed meanwhile
 		o.mu.RLock()
 		p, ok := o.progress[taskKey(job.platform, job.username)]
-		skip := ok && p.Status != "queued"
+		skip := !ok || p.Status != "queued"
 		o.mu.RUnlock()
-		if skip {
-			continue
+		if !skip {
+			o.runScrape(job)
 		}
-		o.runScrape(job)
+		o.releaseSlot()
 	}
+}
+
+func (o *Orchestrator) acquireSlot() {
+	o.slotMu.Lock()
+	for o.active >= config.GetConfig().Concurrency() {
+		o.slotCond.Wait()
+	}
+	o.active++
+	o.slotMu.Unlock()
+}
+
+func (o *Orchestrator) releaseSlot() {
+	o.slotMu.Lock()
+	o.active--
+	o.slotMu.Unlock()
+	o.slotCond.Broadcast()
+}
+
+// ConcurrencyChanged wakes workers waiting for a slot after the limit was raised.
+func (o *Orchestrator) ConcurrencyChanged() {
+	o.slotCond.Broadcast()
 }
 
 func (o *Orchestrator) runScrape(job scrapeJob) {
@@ -538,6 +586,7 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	}
 
 	c := config.GetConfig()
+	SessionOptions(c, &opts)
 	for _, acc := range c.Accounts {
 		if acc.Platform == platform && strings.EqualFold(acc.Username, username) {
 			target.SkipRetweets = acc.SkipRetweets
@@ -546,22 +595,17 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 			dv := acc.ShouldDownloadVideos()
 			target.DownloadPhotos = &dp
 			target.DownloadVideos = &dv
-			// per-account token: one auth_token across all targets is the loudest ban signal X sees
-			if acc.TwitterAuthToken != "" {
-				opts.TwitterAuthToken = acc.TwitterAuthToken
+			AccountSession(acc, &opts)
+			if since, err := time.ParseInLocation(time.DateOnly, acc.SinceDate, time.Local); err == nil {
+				opts.Since = since
+			}
+			// the cap bounds how far back a first or full sync reaches; incremental syncs stop at the watermark anyway
+			if lastSync.IsZero() {
+				opts.MaxPosts = acc.MaxPosts
 			}
 			break
 		}
 	}
-
-	if opts.TwitterAuthToken == "" {
-		opts.TwitterAuthToken = c.TwitterAuthToken
-	}
-	opts.TwitterCookies = c.TwitterCookies
-	opts.InstagramSessionID = c.InstagramSessionID
-	opts.InstagramCookies = c.InstagramCookies
-	opts.InstagramSidecarURL = c.InstagramSidecarURL
-	opts.TikTokCookies = c.TikTokCookies
 	opts.Posts = o.posts
 
 	// watermark = start time: posts during a long scrape must not be skipped next run
@@ -641,6 +685,83 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 		}
 	} else {
 		slog.Info("Scraping completed successfully", "user", username, "platform", platform, "new_files", newCount, "total_files", afterCount)
+	}
+	o.recordRun(platform, username, scrapeStart, job.forceFullSync, newCount, err, ctx.Err() != nil)
+}
+
+func (o *Orchestrator) recordRun(platform, username string, started time.Time, full bool, newFiles int, err error, cancelled bool) {
+	if o.runs == nil {
+		return
+	}
+	run := store.Run{Platform: platform, Username: username, StartedAt: started, FinishedAt: time.Now(), Status: "completed", FullSync: full, NewFiles: newFiles}
+	switch {
+	case cancelled:
+		run.Status = "cancelled"
+	case err != nil:
+		run.Status = "failed"
+		run.Error = err.Error()
+	}
+	if rerr := o.runs.Add(context.Background(), run); rerr != nil {
+		slog.Warn("Failed to record sync run", "user", username, "error", rerr)
+	}
+}
+
+// SessionOptions fills the platform-wide credentials from the config.
+func SessionOptions(c config.Config, opts *scraper.Options) {
+	opts.TwitterAuthToken = c.TwitterAuthToken
+	opts.TwitterCookies = c.TwitterCookies
+	opts.InstagramSessionID = c.InstagramSessionID
+	opts.InstagramCookies = c.InstagramCookies
+	opts.InstagramSidecarURL = c.InstagramSidecarURL
+	opts.TikTokCookies = c.TikTokCookies
+}
+
+// AccountSession swaps in an account's own session. Its cookie export replaces the platform one whole: mixing one
+// account's auth cookie with another browser's device cookies is a stronger bot signal than either alone.
+func AccountSession(acc config.Account, opts *scraper.Options) {
+	if acc.Cookies != "" {
+		switch acc.Platform {
+		case "twitter":
+			opts.TwitterCookies = acc.Cookies
+			opts.TwitterAuthToken = ""
+		case "instagram":
+			opts.InstagramCookies = acc.Cookies
+			opts.InstagramSessionID = ""
+			// the sidecar holds one browser session; an account with its own cookies goes direct
+			opts.InstagramSidecarURL = ""
+		case "tiktok":
+			opts.TikTokCookies = acc.Cookies
+		}
+		return
+	}
+	// legacy per-account token: one auth_token across all targets is the loudest ban signal X sees
+	if acc.Platform == "twitter" && acc.TwitterAuthToken != "" {
+		opts.TwitterAuthToken = acc.TwitterAuthToken
+	}
+}
+
+// IsActive reports whether a target is running or queued.
+func (o *Orchestrator) IsActive(platform, username string) bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	p, ok := o.progress[taskKey(platform, username)]
+	return ok && (p.Status == "running" || p.Status == "queued")
+}
+
+// RenameTarget moves in-memory state of a target to its new handle; the store rows are renamed by the caller.
+func (o *Orchestrator) RenameTarget(platform, from, to string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	oldKey, newKey := taskKey(platform, from), taskKey(platform, to)
+	if p, ok := o.progress[oldKey]; ok {
+		delete(o.progress, oldKey)
+		p.Username = to
+		o.progress[newKey] = p
+	}
+	if o.fullResync[oldKey] {
+		delete(o.fullResync, oldKey)
+		o.fullResync[newKey] = true
+		o.saveFullResyncLocked()
 	}
 }
 
@@ -728,6 +849,7 @@ func (o *Orchestrator) GetAllProgress(accounts []config.Account) []TaskProgress 
 			entry = *v
 			entry.MediaCount = v.mediaCountCached
 		}
+		entry.Paused = acc.Paused
 		result = append(result, entry)
 	}
 	o.mu.RUnlock()
@@ -796,6 +918,10 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 		}
 
 		c := config.GetConfig()
+		if c.InQuietHours(time.Now()) {
+			slog.Info("Auto-sync window falls in quiet hours, skipping this run", "quiet_hours", c.QuietHours)
+			continue
+		}
 		slog.Info("Auto-sync interval reached, triggering sync for all accounts", "interval_hours", interval)
 		o.mu.RLock()
 		runningSet := make(map[string]bool)
@@ -810,6 +936,14 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 		accs := slices.Clone(c.Accounts)
 		rand.Shuffle(len(accs), func(i, j int) { accs[i], accs[j] = accs[j], accs[i] })
 		for _, acc := range accs {
+			if acc.Paused {
+				slog.Debug("Skipping auto-sync, target is paused", "user", acc.Username, "platform", acc.Platform)
+				continue
+			}
+			if config.GetConfig().InQuietHours(time.Now()) {
+				slog.Info("Quiet hours started, leaving the remaining targets for the next run")
+				break
+			}
 			if runningSet[taskKey(acc.Platform, acc.Username)] {
 				slog.Debug("Skipping auto-sync, task already running or queued", "user", acc.Username)
 				continue

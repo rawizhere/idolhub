@@ -4,83 +4,85 @@
   <meta charset="utf-8"/>
   <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
   <title>IdolHub — Media Archiver Studio</title>
-  <script>(() => {
-    const saved = localStorage.getItem('color-theme');
-    const dark = saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches);
-    document.documentElement.classList.toggle('dark', dark);
-  })();</script>
+  <script src="/static/js/theme.js"></script>
   <link as="font" crossorigin href="/static/fonts/inter-latin.woff2" rel="preload" type="font/woff2"/>
   <link as="font" crossorigin href="/static/fonts/jetbrains-mono-latin.woff2" rel="preload" type="font/woff2"/>
-  <link href="/static/app.css?v=6" rel="stylesheet"/>
-  <script defer src="/static/vendor/htmx.min.js"></script>
+  <link href="/static/app.css" rel="stylesheet"/>
   <link href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 120 44%22><text x=%228%22 y=%2232%22 font-family=%22Arial%22 font-weight=%22bold%22 font-size=%2224%22 fill=%22%231e293b%22>Idol</text><rect x=%2258%22 y=%228%22 width=%2254%22 height=%2228%22 rx=%226%22 fill=%22%23ff9900%22/><text x=%2264%22 y=%2229%22 font-family=%22Arial%22 font-weight=%22bold%22 font-size=%2220%22 fill=%22black%22>Hub</text></svg>" rel="icon"/>
 </head>
 <body class="bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 font-sans h-screen flex flex-col antialiased selection:bg-amber-500 selection:text-black overflow-hidden">
 
-<header class="bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md border-b border-slate-200 dark:border-zinc-800/80 px-4 lg:px-6 py-2.5 flex justify-between items-center flex-shrink-0 z-50 transition-colors">
-  <div class="flex items-center gap-3">
-    <button aria-label="Toggle sidebar" class="lg:hidden text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white p-1 rounded-lg transition-colors cursor-pointer" onclick="openSidebar()">
+<header class="bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md border-b border-slate-200 dark:border-zinc-800/80 px-3 lg:px-6 py-2.5 flex items-center gap-2 sm:gap-4 flex-shrink-0 z-50 transition-colors">
+  <div class="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+    <button aria-label="Open targets list" class="lg:hidden btn-icon p-1" data-action="open-sidebar">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><line x1="3" x2="21" y1="12" y2="12"></line><line x1="3" x2="21" y1="6" y2="6"></line><line x1="3" x2="21" y1="18" y2="18"></line></svg>
     </button>
-    <a href="/" onclick="event.preventDefault(); goToOverview()" class="flex items-center gap-1.5 hover:opacity-90 transition-opacity select-none cursor-pointer">
+    <a href="/" data-action="go-overview" class="flex items-center gap-1.5 hover:opacity-90 transition-opacity select-none">
       <span class="text-slate-900 dark:text-white font-bold text-lg tracking-tight">Idol</span>
       <span class="bg-[#ff9900] text-black font-bold text-xs px-1.5 py-0.5 rounded shadow-xs">Hub</span>
     </a>
-    <span class="hidden sm:inline-block text-slate-300 dark:text-zinc-700">/</span>
-    <button id="header-breadcrumb" onclick="goToOverview()" class="hidden sm:flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer">
+    <span class="hidden md:inline-block text-slate-300 dark:text-zinc-700">/</span>
+    <a href="/" id="header-breadcrumb" data-action="go-overview" class="hidden md:flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white transition-colors">
       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><rect height="9" width="7" x="3" y="3"></rect><rect height="5" width="7" x="14" y="3"></rect><rect height="9" width="7" x="14" y="12"></rect><rect height="5" width="7" x="3" y="16"></rect></svg>
       <span id="header-breadcrumb-label">Overview</span>
-    </button>
+    </a>
   </div>
 
-  <div class="hidden md:flex items-center flex-1 max-w-lg mx-6 relative">
+  <div class="flex items-center flex-1 min-w-0 max-w-lg mx-auto relative">
     <svg class="absolute left-3 w-4 h-4 text-slate-400 dark:text-zinc-500 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" x2="16.65" y1="21" y2="16.65"></line></svg>
-    <input id="global-search-input" type="text" oninput="handleGlobalSearch(this.value)" placeholder="Search posts, captions, #tags, files across library... (/)" class="w-full bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl pl-9 pr-9 py-2 text-xs outline-none focus:border-[#ff9900] text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500 transition-colors shadow-2xs" />
-    <button id="global-search-clear" onclick="clearGlobalSearch()" class="hidden absolute right-3 text-slate-400 hover:text-slate-600 dark:hover:text-white text-xs cursor-pointer font-bold">✕</button>
+    <input id="search-input" type="search" data-input-action="search" placeholder="Search library… (/)" autocomplete="off" class="input rounded-xl pl-9 pr-9 py-2" aria-label="Search"/>
+    <button id="search-clear" data-action="clear-search" aria-label="Clear search" class="hidden absolute right-3 text-slate-400 hover:text-slate-600 dark:hover:text-white text-xs cursor-pointer font-bold">✕</button>
   </div>
 
-  <div class="flex items-center gap-2">
-    <button onclick="toggleCmdPalette()" class="hidden sm:inline-flex items-center gap-1.5 bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer shadow-xs" title="Add Target Account (⌘K)">
+  <div class="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+    <button data-action="open-add" class="hidden sm:inline-flex btn btn-primary" title="Add target account">
       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" x2="12" y1="5" y2="19"></line><line x1="5" x2="19" y1="12" y2="12"></line></svg>
-      <span>Add Target</span>
-      <kbd class="text-[10px] font-mono bg-black/15 px-1 py-0.2 rounded">⌘K</kbd>
+      <span class="hidden lg:inline">Add Target</span>
     </button>
 
-    <div id="global-sync-status" class="hidden sm:flex items-center gap-2 text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-slate-100 dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-800 transition-all">
+    <div id="global-sync-status" class="hidden xl:flex items-center gap-2 text-[0.6875rem] font-semibold px-2.5 py-1 rounded-full border bg-slate-100 dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-800 transition-all">
       <span id="global-status-dot" class="w-2 h-2 rounded-full bg-slate-400"></span>
       <span id="global-status-text">Idle</span>
     </div>
 
-    <button id="theme-toggle" onclick="toggleTheme()" class="p-2 text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-900 transition-colors cursor-pointer" title="Toggle theme">
-      <svg id="theme-toggle-dark-icon" class="w-4 h-4 dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
-      <svg id="theme-toggle-light-icon" class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+    <button data-action="open-palette" class="hidden md:inline-flex btn-icon" title="Command palette (⌘K)" aria-label="Command palette">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"></path></svg>
     </button>
 
-    <button id="btn-settings" onclick="toggleSettingsModal()" class="p-2 text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-900 transition-colors cursor-pointer" title="Settings">
+    <button data-action="toggle-dock" class="md:hidden btn-icon" aria-label="Activity log">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+    </button>
+
+    <button data-action="toggle-theme" class="btn-icon" title="Toggle theme" aria-label="Toggle theme">
+      <svg class="w-4 h-4 dark:hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+      <svg class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+    </button>
+
+    <button data-action="open-settings" class="btn-icon" title="Settings" aria-label="Settings">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
     </button>
   </div>
 </header>
 
-<main class="flex-1 min-h-0 flex overflow-hidden w-full relative" id="main-container">
-  <aside class="fixed inset-y-0 left-0 z-40 w-80 -translate-x-full transition-transform duration-200 ease-out bg-white dark:bg-zinc-950 border-r border-slate-200 dark:border-zinc-800/80 p-3.5 flex flex-col gap-3 lg:translate-x-0 lg:static lg:flex-shrink-0" id="sidebar-container">
+<main class="flex-1 min-h-0 flex overflow-hidden w-full relative">
+  <aside class="fixed inset-y-0 left-0 z-40 w-80 max-w-[85vw] -translate-x-full transition-transform duration-200 ease-out bg-white dark:bg-zinc-950 border-r border-slate-200 dark:border-zinc-800/80 p-3.5 flex flex-col gap-3 lg:translate-x-0 lg:static lg:flex-shrink-0" id="sidebar-container">
     <div class="flex flex-col gap-2.5 flex-shrink-0">
-      <button onclick="toggleCmdPalette()" class="w-full bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold text-xs py-2 px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-xs">
+      <button data-action="open-add" class="btn btn-primary w-full rounded-xl py-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" x2="12" y1="5" y2="19"></line><line x1="5" x2="19" y1="12" y2="12"></line></svg>
-        <span>Add Target (⌘K)</span>
+        <span>Add Target</span>
       </button>
 
       <div class="relative flex items-center">
-        <svg class="absolute left-2.5 w-3.5 h-3.5 text-slate-400 dark:text-zinc-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" x2="16.65" y1="21" y2="16.65"></line></svg>
-        <input class="w-full bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg pl-8 pr-7 py-1.5 text-xs outline-none focus:border-[#ff9900] dark:focus:border-[#ff9900] transition-colors" id="target-search-input" oninput="filterTargets()" placeholder="Filter targets..." type="text"/>
-        <button id="target-search-clear" onclick="clearTargetSearch()" class="hidden absolute right-2 text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 text-xs">✕</button>
+        <svg class="absolute left-2.5 w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" x2="16.65" y1="21" y2="16.65"></line></svg>
+        <input class="input pl-8 pr-7 py-1.5" id="target-search-input" data-input-action="filter-targets" placeholder="Filter targets..." type="text" aria-label="Filter targets"/>
+        <button id="target-search-clear" data-action="clear-target-filter" aria-label="Clear filter" class="hidden absolute right-2 text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 text-xs">✕</button>
       </div>
 
-      <div class="flex items-center gap-1 bg-slate-100 dark:bg-zinc-900 p-1 rounded-lg border border-slate-200/80 dark:border-zinc-800/80 text-[11px]" id="target-platform-chips">
-        <button class="chip flex-1 py-1 rounded-md font-bold text-center transition-all cursor-pointer bg-[#ff9900] text-black shadow-2xs" data-platform="all" onclick="setPlatformFilter('all')">All</button>
-        <button class="chip flex-1 py-1 rounded-md font-semibold text-center transition-all cursor-pointer text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white" data-platform="instagram" onclick="setPlatformFilter('instagram')">IG</button>
-        <button class="chip flex-1 py-1 rounded-md font-semibold text-center transition-all cursor-pointer text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white" data-platform="twitter" onclick="setPlatformFilter('twitter')">X</button>
-        <button class="chip flex-1 py-1 rounded-md font-semibold text-center transition-all cursor-pointer text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white" data-platform="tiktok" onclick="setPlatformFilter('tiktok')">TT</button>
+      <div class="seg text-[0.6875rem]" id="target-platform-chips">
+        <button aria-pressed="true" data-action="platform-filter" data-platform="all">All</button>
+        <button aria-pressed="false" data-action="platform-filter" data-platform="instagram">IG</button>
+        <button aria-pressed="false" data-action="platform-filter" data-platform="twitter">X</button>
+        <button aria-pressed="false" data-action="platform-filter" data-platform="tiktok">TT</button>
       </div>
     </div>
 
@@ -88,148 +90,261 @@
       <p class="text-xs text-slate-500 dark:text-zinc-400 py-6 text-center">Loading targets...</p>
     </div>
 
-    <div class="flex-shrink-0 pt-2 border-t border-slate-200 dark:border-zinc-800/80 flex justify-between items-center text-[11px] text-slate-500 dark:text-zinc-400">
-      <div class="flex items-center gap-1.5" id="autoupdate-badge">
+    <div class="flex-shrink-0 pt-2 border-t border-slate-200 dark:border-zinc-800/80 flex justify-between items-center text-[0.6875rem] text-slate-500 dark:text-zinc-400">
+      <div class="flex items-center gap-1.5">
         <span class="w-2 h-2 rounded-full bg-emerald-500" id="autoupdate-dot"></span>
         <span id="autoupdate-text">Auto-Sync: Ready</span>
       </div>
-      <span class="font-mono text-[10px] opacity-75" id="sidebar-count-label"></span>
+      <button data-action="open-shortcuts" class="font-mono text-[0.625rem] opacity-75 hover:opacity-100 cursor-pointer" title="Keyboard shortcuts (?)"><span id="sidebar-count-label"></span> · <span class="kbd">?</span></button>
     </div>
   </aside>
 
-  <div class="fixed inset-0 bg-black/60 z-30 lg:hidden hidden backdrop-blur-xs transition-opacity" id="sidebar-overlay" onclick="closeSidebar()"></div>
+  <div class="fixed inset-0 bg-black/60 z-30 lg:hidden hidden backdrop-blur-xs" id="sidebar-overlay" data-action="close-sidebar"></div>
 
-  <section class="flex-1 min-h-0 h-full flex flex-col p-4 lg:p-6 pb-16 overflow-y-auto bg-slate-50 dark:bg-zinc-950 relative min-w-0" id="workspace-scroll-area">
-    <div class="flex flex-col gap-4 flex-shrink-0" id="dashboard-target-header" style="display: none">
+  <section class="flex-1 min-h-0 h-full flex flex-col p-3 sm:p-4 lg:p-6 pb-20 overflow-y-auto bg-slate-50 dark:bg-zinc-950 relative min-w-0" id="workspace-scroll-area">
+    <div class="flex-col gap-4 flex-shrink-0 hidden" id="dashboard-target-header">
       <div class="flex justify-between items-center flex-wrap gap-3 pb-2 border-b border-slate-200 dark:border-zinc-800/80">
         <div class="flex items-center gap-3 min-w-0">
-          <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded border" id="dashboard-platform-badge"></span>
+          <span class="text-[0.625rem] font-bold uppercase px-2 py-0.5 rounded border" id="dashboard-platform-badge"></span>
           <h1 class="text-base font-bold text-slate-900 dark:text-zinc-100 truncate" id="dashboard-username-label"></h1>
-          <span class="text-xs bg-slate-100 dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 px-2.5 py-0.5 rounded-full border border-slate-200 dark:border-zinc-800 font-mono font-medium flex items-center gap-1 whitespace-nowrap" id="dashboard-file-count"></span>
+          <span class="text-xs bg-slate-100 dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 px-2.5 py-0.5 rounded-full border border-slate-200 dark:border-zinc-800 font-mono font-medium whitespace-nowrap" id="dashboard-file-count"></span>
         </div>
 
-        <div class="flex items-center gap-2 flex-wrap">
-          <button aria-label="Sync now" class="bg-emerald-600 hover:bg-emerald-700 text-white dark:bg-[#ff9900] dark:hover:bg-[#e68a00] dark:text-black text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-xs" id="dashboard-btn-sync">
+        <div class="flex items-center gap-2">
+          <div id="dashboard-progress" class="hidden items-center gap-2 text-[0.6875rem] font-mono text-slate-500 dark:text-zinc-400">
+            <div class="w-24 h-1.5 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden"><div class="h-full bg-[#ff9900] transition-all duration-300" id="dashboard-progress-bar"></div></div>
+            <span id="dashboard-progress-label"></span>
+          </div>
+          <button class="btn btn-primary" data-action="sync-active" id="dashboard-btn-sync">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
             <span>Sync</span>
           </button>
-          <button aria-label="Cancel running sync" class="hidden bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer items-center gap-1.5 shadow-xs" id="dashboard-btn-cancel">
+          <button class="hidden btn btn-danger" data-action="cancel-active" id="dashboard-btn-cancel">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="15" x2="9" y1="9" y2="15"></line><line x1="9" x2="15" y1="9" y2="15"></line></svg>
             <span>Cancel</span>
           </button>
-
-          <span class="hidden sm:block w-px h-5 bg-slate-200 dark:bg-zinc-800 mx-0.5"></span>
-
-          <button aria-label="Edit target" class="bg-white hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-700 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white border border-slate-200 dark:border-zinc-800 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs" id="dashboard-btn-edit">
-            <svg class="w-3.5 h-3.5 text-slate-400 dark:text-zinc-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
-            <span>Edit</span>
+          <button class="btn btn-secondary" data-action="view" data-view="settings" title="Target settings">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+            <span class="hidden sm:inline">Edit</span>
           </button>
-
-          <button aria-label="Clear downloads folder" class="bg-white hover:bg-rose-50 dark:bg-zinc-900 dark:hover:bg-rose-950/40 text-slate-700 hover:text-rose-600 dark:text-zinc-300 dark:hover:text-rose-400 border border-slate-200 dark:border-zinc-800 hover:border-rose-200 dark:hover:border-rose-900 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs" id="dashboard-btn-clear" title="Delete downloaded media from disk">
-            <svg class="w-3.5 h-3.5 text-slate-400 dark:text-zinc-400 hover:text-rose-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-            <span>Clear</span>
+          <button class="btn btn-secondary px-2" popovertarget="target-menu" aria-label="More actions">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="19" cy="12" r="2"></circle></svg>
           </button>
-
-          <button aria-label="Delete target account" class="bg-white hover:bg-rose-50 dark:bg-zinc-900 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-slate-200 dark:border-zinc-800 hover:border-rose-200 dark:hover:border-rose-900 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs" id="dashboard-btn-delete" title="Remove account from config">
-            <svg class="w-3.5 h-3.5 text-rose-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg>
-            <span>Delete</span>
-          </button>
+          <div id="target-menu" popover class="menu w-56" data-align="end">
+            <button class="menu-item" data-action="toggle-pause-active" id="menu-pause">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16"></rect><rect x="14" y="4" width="4" height="16"></rect></svg>
+              <span>Pause auto-sync</span>
+            </button>
+            <button class="menu-item" data-action="full-resync-active">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg>
+              Force full resync
+            </button>
+            <div class="my-1 border-t border-slate-100 dark:border-zinc-800"></div>
+            <button class="menu-item danger" data-action="clear-active">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"></path><line x1="18" y1="9" x2="12" y2="15"></line><line x1="12" y1="9" x2="18" y2="15"></line></svg>
+              Erase all downloaded files…
+            </button>
+            <button class="menu-item danger" data-action="delete-active">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="18" y1="8" x2="23" y2="13"></line><line x1="23" y1="8" x2="18" y2="13"></line></svg>
+              Remove target (keep files)…
+            </button>
+          </div>
         </div>
       </div>
     </div>
 
-    <div class="flex flex-col gap-3 relative" id="dashboard-gallery-card" style="display: none">
-      <div class="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-2.5 rounded-xl shadow-2xs" id="horizontal-filter-bar">
-        <div class="flex items-center gap-2 flex-wrap">
-          <div class="flex items-center bg-slate-100 dark:bg-zinc-950 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800" id="gallery-view-tabs">
-            <button class="gallery-tab inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-md transition-all cursor-pointer bg-[#ff9900] text-black dark:text-black shadow-2xs" id="tab-grid" onclick="switchGalleryView('grid')">
-              <svg class="w-3.5 h-3.5 text-current" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect height="18" rx="2" ry="2" width="18" x="3" y="3"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+    <div class="flex-col gap-3 relative hidden mt-4" id="dashboard-gallery-card">
+      <div class="card p-2.5 flex items-center justify-between gap-2 overflow-x-auto md:flex-wrap md:overflow-visible" id="horizontal-filter-bar">
+        <div class="flex items-center gap-2 flex-shrink-0">
+          <div class="seg" id="gallery-view-tabs">
+            <button aria-pressed="true" data-action="view" data-view="grid">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect height="18" rx="2" ry="2" width="18" x="3" y="3"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
               <span>Media</span>
             </button>
-            <button class="gallery-tab inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-md transition-all cursor-pointer text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white bg-transparent" id="tab-posts" onclick="switchGalleryView('posts')" style="display:none">
-              <svg class="w-3.5 h-3.5 text-[#ff9900]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="8" x2="21" y1="6" y2="6"></line><line x1="8" x2="21" y1="12" y2="12"></line><line x1="8" x2="21" y1="18" y2="18"></line><line x1="3" x2="3.01" y1="6" y2="6"></line><line x1="3" x2="3.01" y1="12" y2="12"></line><line x1="3" x2="3.01" y1="18" y2="18"></line></svg>
+            <button aria-pressed="false" data-action="view" data-view="posts" id="tab-posts" class="hidden">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="8" x2="21" y1="6" y2="6"></line><line x1="8" x2="21" y1="12" y2="12"></line><line x1="8" x2="21" y1="18" y2="18"></line><line x1="3" x2="3.01" y1="6" y2="6"></line><line x1="3" x2="3.01" y1="12" y2="12"></line><line x1="3" x2="3.01" y1="18" y2="18"></line></svg>
               <span>Posts</span>
+            </button>
+            <button aria-pressed="false" data-action="view" data-view="settings">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+              <span>Settings</span>
             </button>
           </div>
 
-          <span class="w-px h-4 bg-slate-200 dark:bg-zinc-800"></span>
+          <span class="w-px h-4 bg-slate-200 dark:bg-zinc-800" data-gallery-only></span>
 
           <div class="flex items-center gap-1" id="media-type-pills">
-            <button class="gallery-filter-btn text-xs px-2.5 py-1 rounded-lg transition-all cursor-pointer bg-[#ff9900] text-black dark:text-black font-bold shadow-2xs border border-[#ff9900]" data-filter="all" onclick="applyGalleryFilter('all')">All</button>
-            <button class="gallery-filter-btn text-xs font-semibold px-2.5 py-1 rounded-lg transition-all cursor-pointer text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-800" data-filter="image" onclick="applyGalleryFilter('image')">Photos</button>
-            <button class="gallery-filter-btn text-xs font-semibold px-2.5 py-1 rounded-lg transition-all cursor-pointer text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-800" data-filter="video" onclick="applyGalleryFilter('video')">Videos</button>
+            <button class="pill" aria-pressed="true" data-action="type-filter" data-filter="all">All</button>
+            <button class="pill" aria-pressed="false" data-action="type-filter" data-filter="image">Photos</button>
+            <button class="pill" aria-pressed="false" data-action="type-filter" data-filter="video">Videos</button>
           </div>
         </div>
 
-        <div class="flex items-center gap-2 flex-wrap">
-          <div class="relative inline-block text-left" id="date-presets-container">
-            <button type="button" id="btn-date-filter" onclick="toggleDropdown('date-filter-dropdown')" class="text-xs font-semibold bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-800 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer">
-              <svg class="w-3.5 h-3.5 text-current opacity-80" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-              <span id="date-filter-label">Dates</span>
-              <svg class="w-3 h-3 text-current opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-            </button>
-            <div id="date-filter-dropdown" class="hidden absolute right-0 mt-2 w-64 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl z-50 p-3 flex flex-col gap-2.5">
+        <div class="flex items-center gap-2 flex-shrink-0" id="gallery-filter-controls" data-gallery-only>
+          <button type="button" id="btn-date-filter" class="pill" aria-pressed="false" popovertarget="date-filter-dropdown">
+            <svg class="w-3.5 h-3.5 opacity-80" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+            <span id="date-filter-label">Dates</span>
+          </button>
+          <div id="date-filter-dropdown" popover class="menu w-64 p-3" data-align="end">
+            <div class="flex flex-col gap-2.5">
               <div class="flex justify-between items-center border-b border-slate-100 dark:border-zinc-800 pb-2">
-                <span class="text-[11px] font-bold text-slate-400 uppercase">Date Range</span>
-                <button onclick="clearDateFilters()" class="text-[11px] font-bold text-[#ff9900] hover:underline cursor-pointer">Reset</button>
+                <span class="label">Date Range</span>
+                <button data-action="clear-dates" class="btn-link text-[0.6875rem]">Reset</button>
               </div>
-              <div class="flex flex-col gap-1" id="year-filter-section">
-                <span class="text-[10px] font-bold text-slate-400 uppercase">Years</span>
+              <div class="flex flex-col gap-1">
+                <span class="label">Years</span>
                 <div id="year-dropdown-list" class="flex flex-wrap gap-1 max-h-32 overflow-y-auto"></div>
               </div>
-              <div class="flex flex-col gap-1 border-t border-slate-100 dark:border-zinc-800 pt-2" id="month-filter-section">
-                <span class="text-[10px] font-bold text-slate-400 uppercase">Months</span>
+              <div class="flex flex-col gap-1 border-t border-slate-100 dark:border-zinc-800 pt-2">
+                <span class="label">Months</span>
                 <div id="month-dropdown-list" class="grid grid-cols-3 gap-1"></div>
               </div>
             </div>
           </div>
 
-          <div class="relative inline-block text-left" id="hashtag-filter-container" style="display:none">
-            <button type="button" id="btn-hashtag-filter" onclick="toggleDropdown('hashtag-dropdown')" class="text-xs font-semibold bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-800 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer">
-              <span id="hashtag-filter-label">#tags</span>
-              <svg class="w-3 h-3 text-current opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-            </button>
-            <div id="hashtag-dropdown" class="hidden absolute right-0 mt-2 w-52 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl z-50 p-2 max-h-60 overflow-y-auto flex flex-col gap-1"></div>
-          </div>
+          <button type="button" id="btn-hashtag-filter" class="pill hidden" aria-pressed="false" popovertarget="hashtag-dropdown">
+            <span id="hashtag-filter-label">#tags</span>
+          </button>
+          <div id="hashtag-dropdown" popover class="menu w-56 max-h-72 overflow-y-auto" data-align="end"></div>
 
-          <button id="btn-sort-toggle" onclick="togglePostsSort()" class="text-xs font-semibold bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-800 px-2.5 py-1 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer" title="Toggle sorting order">
-            <svg id="sort-order-icon" class="w-3.5 h-3.5 text-current" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>
+          <button id="btn-sort-toggle" data-action="toggle-sort" class="pill" aria-pressed="false" title="Toggle sorting order">
+            <svg id="sort-order-icon" class="w-3.5 h-3.5 transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>
             <span id="sort-order-label">Newest</span>
           </button>
 
-          <div class="relative flex items-center">
-            <svg class="absolute left-2.5 w-3 h-3 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" x2="16.65" y1="21" y2="16.65"></line></svg>
-            <input type="text" id="gallery-search-input" placeholder="Search caption... (/)" oninput="applyGallerySearch()" class="bg-slate-100 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg pl-7 pr-7 py-1 text-xs outline-none focus:border-[#ff9900] transition-colors text-slate-900 dark:text-white w-36 sm:w-44"/>
-            <button id="gallery-search-clear" onclick="clearGallerySearch()" class="hidden absolute right-2 text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 text-xs">✕</button>
-          </div>
+          <button id="btn-select-mode" data-action="toggle-select" class="pill" aria-pressed="false" title="Select files (Shift-click a tile)">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 11 12 14 22 4"></polyline><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+            <span>Select</span>
+          </button>
 
-          <button id="btn-density-toggle" onclick="toggleDensity()" class="p-1.5 text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg transition-colors cursor-pointer" title="Toggle grid density">
+          <button id="btn-density-toggle" data-action="toggle-density" class="pill px-1.5" aria-pressed="false" title="Toggle grid density" aria-label="Toggle grid density">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
           </button>
 
-          <button id="btn-reset-filters" onclick="resetAllFilters()" class="hidden text-xs font-semibold text-rose-600 dark:text-rose-400 hover:underline px-1.5 py-1 cursor-pointer">
-            Reset
-          </button>
+          <button id="btn-reset-filters" data-action="reset-filters" class="hidden text-xs font-semibold text-rose-600 dark:text-rose-400 hover:underline px-1.5 py-1 cursor-pointer">Reset</button>
         </div>
       </div>
 
-      <div class="flex-1 min-h-[400px]" id="gallery-scroll-container">
-        <div class="gallery-view active" id="gallery-grid-view">
-          <div class="density-relaxed gap-3.5" id="lg-container"></div>
+      <div class="flex-1 min-h-[25rem]">
+        <div class="pswp-gallery density-relaxed gap-3.5" id="lg-container"></div>
+        <div class="pswp-gallery flex-col gap-4 max-w-2xl mx-auto hidden" id="gallery-posts-list"></div>
+
+        <div id="target-settings" class="hidden flex-col gap-4 max-w-3xl">
+          <div class="card p-4 flex items-center justify-between gap-4">
+            <div>
+              <h3 class="text-xs font-bold">Automatic sync</h3>
+              <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400 mt-0.5" id="ts-pause-help">Included in every auto-sync run.</p>
+            </div>
+            <button type="button" role="switch" aria-checked="true" id="ts-pause" data-action="toggle-pause-active"
+                    class="relative w-10 h-6 rounded-full transition-colors bg-slate-300 dark:bg-zinc-700 aria-checked:bg-[#ff9900] cursor-pointer flex-shrink-0" aria-label="Include in auto-sync">
+              <span class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform"></span>
+            </button>
+          </div>
+
+          <form id="target-settings-form" class="flex flex-col gap-4" novalidate>
+            <section class="card p-4 flex flex-col gap-3">
+              <h3 class="text-xs font-bold">What to download</h3>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <label class="flex items-center gap-2 text-xs cursor-pointer"><input class="accent-[#ff9900]" name="save_text" type="checkbox"/><span>Post text &amp; captions <span class="text-slate-400">(enables Posts view and search)</span></span></label>
+                <label class="flex items-center gap-2 text-xs cursor-pointer" data-only="twitter"><input class="accent-[#ff9900]" name="skip_retweets" type="checkbox"/><span>Skip retweets</span></label>
+                <label class="flex items-center gap-2 text-xs cursor-pointer"><input class="accent-[#ff9900]" name="download_photos" type="checkbox"/><span>Photos</span></label>
+                <label class="flex items-center gap-2 text-xs cursor-pointer"><input class="accent-[#ff9900]" name="download_videos" type="checkbox"/><span>Videos</span></label>
+              </div>
+              <p class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="media">Pick at least photos or videos.</p>
+            </section>
+
+            <section class="card p-4 flex flex-col gap-2" data-only="twitter">
+              <h3 class="text-xs font-bold">Keyword filters</h3>
+              <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400">Only posts whose text contains <strong>at least one</strong> of these words are downloaded. Matching ignores case and also hits inside words (“cat” matches “catwalk”). Empty means everything.</p>
+              <div class="flex flex-col gap-2 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg p-2.5">
+                <div class="flex flex-wrap gap-1.5" data-chips="ts"></div>
+                <input class="input bg-white dark:bg-zinc-900 px-2.5 py-1.5" data-chip-input="ts" placeholder="Type a keyword and press Enter…" type="text" aria-label="Add keyword filter"/>
+              </div>
+              <p class="text-[0.6875rem] font-mono text-slate-500 dark:text-zinc-400" id="ts-filter-preview"></p>
+            </section>
+
+            <section class="card p-4 flex flex-col gap-3">
+              <h3 class="text-xs font-bold">How far back</h3>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <label class="flex flex-col gap-1">
+                  <span class="label">Oldest post date</span>
+                  <input type="date" name="since" class="input px-2.5 py-1.5 font-mono"/>
+                  <span class="text-[0.625rem] text-slate-400">Nothing older is downloaded. Empty = no limit.</span>
+                  <span class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="since"></span>
+                </label>
+                <label class="flex flex-col gap-1">
+                  <span class="label">Post limit for a full sync</span>
+                  <input type="number" name="max_posts" min="0" max="100000" placeholder="no limit" class="input px-2.5 py-1.5 font-mono"/>
+                  <span class="text-[0.625rem] text-slate-400">Caps the first sync and forced full resyncs. Regular syncs fetch everything new.</span>
+                  <span class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="max_posts"></span>
+                </label>
+              </div>
+            </section>
+
+            <div id="ts-savebar" class="hidden sticky bottom-14 z-30 items-center justify-between gap-3 card shadow-xl px-4 py-2.5 border-[#ff9900]/50">
+              <span class="text-xs font-semibold" id="ts-savebar-text">Unsaved changes</span>
+              <div class="flex gap-2">
+                <button type="button" class="btn btn-secondary" data-action="ts-discard">Discard</button>
+                <button type="submit" class="btn btn-primary" id="ts-save">Save changes</button>
+              </div>
+            </div>
+          </form>
+
+          <section class="card p-4 flex flex-col gap-2">
+            <h3 class="text-xs font-bold">Handle</h3>
+            <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400">If the account was renamed on the platform, update it here. Downloads, posts and history move along.</p>
+            <div class="flex gap-2">
+              <input type="text" id="ts-username" class="input px-2.5 py-1.5 font-mono" autocomplete="off" spellcheck="false" aria-label="Username"/>
+              <button type="button" class="btn btn-secondary" data-action="ts-rename" id="ts-rename-btn" disabled>Rename</button>
+            </div>
+            <span class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" id="ts-rename-error"></span>
+          </section>
+
+          <section class="card p-4 flex flex-col gap-2">
+            <div class="flex items-center justify-between gap-2">
+              <h3 class="text-xs font-bold">Own session <span class="font-normal text-slate-400">· optional</span></h3>
+              <span class="text-[0.6875rem] font-mono" id="ts-cookie-status"></span>
+            </div>
+            <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400">Paste a cookie export of a different logged-in account to scrape this target with it instead of the shared session from Settings. Useful for private accounts that only that login follows, and to spread load across accounts.</p>
+            <textarea id="ts-cookies" rows="3" spellcheck="false" class="input p-2.5 font-mono resize-y" placeholder="# Netscape HTTP Cookie File …  or  [ {&quot;domain&quot;: …} ]"></textarea>
+            <div class="flex flex-wrap gap-2 items-center">
+              <button type="button" class="btn btn-secondary" data-action="ts-cookies-save">Save session</button>
+              <button type="button" class="btn btn-secondary" data-action="ts-cookies-check" id="ts-cookies-check">Check</button>
+              <button type="button" class="btn-link text-rose-600 dark:text-rose-400 hidden" data-action="ts-cookies-remove" id="ts-cookies-remove">Remove own session</button>
+              <span class="text-[0.6875rem] font-mono" id="ts-cookies-result"></span>
+            </div>
+          </section>
+
+          <section class="card p-4 flex flex-col gap-2">
+            <h3 class="text-xs font-bold">Sync history</h3>
+            <div class="overflow-x-auto">
+              <table class="min-w-full text-left text-[0.6875rem]">
+                <thead class="text-[0.5625rem] font-bold text-slate-400 uppercase tracking-wider font-mono">
+                  <tr><th class="py-1.5 pr-4">Started</th><th class="py-1.5 pr-4">Took</th><th class="py-1.5 pr-4">Result</th><th class="py-1.5 pr-4">New</th><th class="py-1.5">Details</th></tr>
+                </thead>
+                <tbody id="ts-runs" class="divide-y divide-slate-100 dark:divide-zinc-800/60"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="card p-4 flex flex-col gap-3 border-rose-200 dark:border-rose-900/60">
+            <h3 class="text-xs font-bold text-rose-600 dark:text-rose-400">Danger zone</h3>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" class="btn btn-secondary" data-action="full-resync-active">Force full resync</button>
+              <button type="button" class="btn btn-secondary text-rose-600 dark:text-rose-400" data-action="clear-active">Erase downloaded files…</button>
+              <button type="button" class="btn btn-danger" data-action="delete-active">Remove target…</button>
+            </div>
+          </section>
         </div>
 
-        <div class="gallery-view" id="gallery-posts-view" style="display: none">
-          <div class="flex flex-col gap-4 max-w-2xl mx-auto" id="gallery-posts-list"></div>
-        </div>
-
-        <div class="flex-col items-center justify-center py-20 gap-3 text-slate-500 dark:text-zinc-400 text-xs font-medium" id="gallery-loading" style="display:none">
+        <div class="flex-col items-center justify-center py-20 gap-3 text-slate-500 dark:text-zinc-400 text-xs font-medium hidden" id="gallery-loading">
           <div class="w-7 h-7 border-2 border-slate-300 border-t-[#ff9900] rounded-full animate-spin"></div>
-          <span>Loading media stream...</span>
+          <span>Loading media…</span>
         </div>
 
-        <div class="flex-col items-center justify-center py-20 gap-3 text-slate-500 dark:text-zinc-400 text-xs font-medium" id="gallery-empty" style="display:none">
+        <div class="flex-col items-center justify-center py-20 gap-3 text-slate-500 dark:text-zinc-400 text-xs font-medium hidden" id="gallery-empty">
           <svg class="w-10 h-10 opacity-30" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="1" x2="23" y1="1" y2="23"></line><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34m-7.72-2.06a2 2 0 0 1-2.812-2.832"></path></svg>
-          <p>No media files match your filters</p>
+          <p id="gallery-empty-text">Nothing downloaded for this target yet</p>
         </div>
       </div>
     </div>
@@ -238,264 +353,358 @@
   </section>
 </main>
 
-<div class="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md border-t border-slate-200 dark:border-zinc-800 shadow-xl flex flex-col transition-all duration-200" id="bottom-dock-console">
-  <div class="px-4 py-2 flex justify-between items-center text-xs font-medium text-slate-600 dark:text-zinc-400 border-b border-transparent cursor-pointer select-none" onclick="toggleBottomConsole()">
-    <div class="flex items-center gap-3">
-      <div class="flex items-center gap-1.5">
-        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" id="dock-status-dot"></span>
-        <span class="font-bold text-slate-900 dark:text-zinc-200 text-[11px] uppercase tracking-wider">Activity Dock</span>
+<div id="selection-bar" class="hidden fixed bottom-14 left-1/2 -translate-x-1/2 z-[70] items-center gap-2 bg-zinc-900 text-zinc-100 border border-zinc-700 rounded-xl shadow-2xl px-3 py-2 text-xs max-w-[calc(100vw-1.5rem)] overflow-x-auto">
+  <span class="font-bold whitespace-nowrap"><span id="selection-count">0</span> selected</span>
+  <button class="btn-link whitespace-nowrap" data-action="select-all">Select loaded</button>
+  <span class="w-px h-4 bg-zinc-700"></span>
+  <button class="btn btn-primary py-1" data-action="download-selected">
+    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+    ZIP
+  </button>
+  <button class="btn btn-danger py-1" data-action="delete-selected">Delete</button>
+  <button class="btn-icon p-1 text-zinc-400 hover:bg-zinc-800" data-action="toggle-select" aria-label="Exit selection">✕</button>
+</div>
+
+<div class="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md border-t border-slate-200 dark:border-zinc-800 shadow-xl flex flex-col" id="bottom-dock-console">
+  <div class="px-4 py-2 flex justify-between items-center gap-3 text-xs font-medium text-slate-600 dark:text-zinc-400 cursor-pointer select-none" data-action="toggle-dock">
+    <div class="flex items-center gap-3 min-w-0">
+      <div class="flex items-center gap-1.5 flex-shrink-0">
+        <span class="w-2 h-2 rounded-full bg-emerald-500" id="dock-status-dot"></span>
+        <span class="font-bold text-slate-900 dark:text-zinc-200 text-[0.6875rem] uppercase tracking-wider">Activity</span>
       </div>
-      <span class="text-slate-300 dark:text-zinc-700">|</span>
-      <span class="font-mono text-[11px] text-slate-500 dark:text-zinc-400 truncate max-w-xs sm:max-w-md" id="dock-latest-log">Dashboard initialized.</span>
+      <span class="hidden sm:inline text-slate-300 dark:text-zinc-700">|</span>
+      <span class="hidden sm:inline font-mono text-[0.6875rem] text-slate-500 dark:text-zinc-400 truncate" id="dock-latest-log">Dashboard initialized.</span>
     </div>
 
-    <div class="flex items-center gap-2">
-      <div class="hidden items-center gap-0.5 bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-md p-0.5" id="dock-terminal-level-filters">
-        <button class="dock-filter-btn text-[10px] font-bold px-2 py-0.5 rounded text-slate-500 dark:text-zinc-400 active bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-2xs" data-level="all" onclick="event.stopPropagation(); setTerminalLevel('all')">ALL</button>
-        <button class="dock-filter-btn text-[10px] font-bold px-2 py-0.5 rounded text-slate-500 dark:text-zinc-400" data-level="info" onclick="event.stopPropagation(); setTerminalLevel('info')">INFO</button>
-        <button class="dock-filter-btn text-[10px] font-bold px-2 py-0.5 rounded text-slate-500 dark:text-zinc-400" data-level="error" onclick="event.stopPropagation(); setTerminalLevel('error')">ERR</button>
+    <div class="flex items-center gap-2 flex-shrink-0">
+      <div class="hidden seg p-0.5" id="dock-terminal-level-filters">
+        <button class="text-[0.625rem] px-2 py-0.5" aria-pressed="true" data-action="log-level" data-level="all">ALL</button>
+        <button class="text-[0.625rem] px-2 py-0.5" aria-pressed="false" data-action="log-level" data-level="info">INFO</button>
+        <button class="text-[0.625rem] px-2 py-0.5" aria-pressed="false" data-action="log-level" data-level="error">ERR</button>
       </div>
-
-      <button onclick="event.stopPropagation(); copyTerminalLogs()" class="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 rounded" title="Copy logs">
+      <button data-action="copy-logs" class="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 rounded" title="Copy logs" aria-label="Copy logs">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect height="13" rx="2" ry="2" width="13" x="9" y="9"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
       </button>
-
-      <button id="dock-toggle-chevron" class="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 rounded transition-transform" title="Toggle console (⌘J)">
+      <span id="dock-toggle-chevron" class="p-1 text-slate-400 transition-transform" title="Toggle console (⌘J)">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="18 15 12 9 6 15"></polyline></svg>
-      </button>
+      </span>
     </div>
   </div>
 
-  <div class="bg-slate-950 p-3 font-mono text-[11px] leading-relaxed text-zinc-300 overflow-y-auto flex flex-col gap-1 shadow-inner h-60 hidden" id="terminal-body">
-    <div class="text-zinc-500">[SYSTEM] Live logger initialized. Select a target or run sync.</div>
-  </div>
+  <div class="bg-slate-950 p-3 font-mono text-[0.6875rem] leading-relaxed text-zinc-300 overflow-y-auto flex-col gap-1 shadow-inner h-60 max-h-[60vh] hidden" id="terminal-body"></div>
 </div>
 
-<div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-xs p-4" id="cmd-palette-modal" style="display: none" tabindex="-1">
-  <div class="bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-lg flex flex-col gap-4 shadow-2xl">
-    <div class="flex justify-between items-center border-b border-slate-200 dark:border-zinc-800/80 pb-3">
-      <h3 class="text-sm font-bold text-slate-900 dark:text-zinc-100 uppercase tracking-wider flex items-center gap-2">
-        <svg class="w-4 h-4 text-[#ff9900]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" x2="12" y1="5" y2="19"></line><line x1="5" x2="19" y1="12" y2="12"></line></svg>
-        <span>Add Target Account</span>
-      </h3>
-      <button class="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 cursor-pointer" onclick="toggleCmdPalette()">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" x2="6" y1="6" y2="18"></line><line x1="6" x2="18" y1="6" y2="18"></line></svg>
-      </button>
+<!-- Command palette -->
+<dialog id="palette-dialog" class="modal max-w-lg p-0 mt-[12vh] mb-auto overflow-hidden" aria-label="Command palette">
+  <div class="flex items-center gap-2 px-4 border-b border-slate-200 dark:border-zinc-800">
+    <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><line x1="21" x2="16.65" y1="21" y2="16.65"></line></svg>
+    <input id="palette-input" type="text" autocomplete="off" placeholder="Jump to a target, run a command, or paste a profile link…" class="flex-1 bg-transparent py-3.5 text-sm outline-none placeholder-slate-400 dark:placeholder-zinc-500" role="combobox" aria-controls="palette-list" aria-expanded="true"/>
+    <span class="kbd">esc</span>
+  </div>
+  <ul id="palette-list" role="listbox" class="max-h-80 overflow-y-auto p-2 flex flex-col gap-0.5"></ul>
+</dialog>
+
+<!-- Keyboard shortcuts -->
+<dialog id="shortcuts-dialog" class="modal max-w-sm" aria-labelledby="shortcuts-title">
+  <div class="flex justify-between items-center border-b border-slate-200 dark:border-zinc-800/80 pb-3 mb-3">
+    <h3 id="shortcuts-title" class="modal-title">Keyboard shortcuts</h3>
+    <button class="btn-icon p-1" data-action="close-dialog" aria-label="Close">✕</button>
+  </div>
+  <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs items-center">
+    <dt><span class="kbd">⌘K</span></dt><dd>Command palette</dd>
+    <dt><span class="kbd">/</span></dt><dd>Search</dd>
+    <dt><span class="kbd">j</span> <span class="kbd">k</span></dt><dd>Next / previous target</dd>
+    <dt><span class="kbd">g</span></dt><dd>Switch Media / Posts</dd>
+    <dt><span class="kbd">s</span></dt><dd>Toggle file selection</dd>
+    <dt><span class="kbd">⇧</span> + click</dt><dd>Select a range of files</dd>
+    <dt><span class="kbd">⌘J</span></dt><dd>Activity log</dd>
+    <dt><span class="kbd">?</span></dt><dd>This help</dd>
+    <dt><span class="kbd">esc</span></dt><dd>Close / exit selection</dd>
+  </dl>
+</dialog>
+
+<!-- Add targets -->
+<dialog id="add-dialog" class="modal max-w-xl max-h-[92vh] overflow-y-auto" aria-labelledby="add-title">
+  <div class="flex justify-between items-center border-b border-slate-200 dark:border-zinc-800/80 pb-3 mb-4">
+    <h3 id="add-title" class="modal-title">
+      <svg class="w-4 h-4 text-[#ff9900]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" x2="12" y1="5" y2="19"></line><line x1="5" x2="19" y1="12" y2="12"></line></svg>
+      <span>Add Targets</span>
+    </h3>
+    <button type="button" class="btn-icon p-1" data-action="close-dialog" aria-label="Close">✕</button>
+  </div>
+
+  <form class="flex flex-col gap-4" id="add-account-form" novalidate>
+    <div class="flex flex-col gap-1.5">
+      <label class="label" for="add-input">Profile links or @handles</label>
+      <textarea id="add-input" rows="2" autocomplete="off" spellcheck="false" class="input px-3.5 py-2.5 font-mono resize-y" placeholder="x.com/name&#10;instagram.com/other&#10;@handle" data-input-action="add-input"></textarea>
+      <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500">Paste one or many — one per line. Links pick their platform; bare handles use the platform below.</p>
     </div>
-    
-    <form class="flex flex-col gap-4" id="add-account-form" onsubmit="return false">
-      <div class="flex flex-col gap-1.5">
-        <label class="text-[10px] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider" for="username">Profile Link or Username</label>
-        <input autocomplete="off" class="w-full bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3.5 py-2.5 text-xs outline-none focus:border-[#ff9900] transition-all font-mono" id="username" placeholder="e.g. instagram.com/name, x.com/name, or tiktok.com/@name" required="" type="text" oninput="handleUsernameInput(this)"/>
-        <p class="text-[10px] text-slate-400 dark:text-zinc-500">Paste any direct profile link — platform will be auto-detected instantly.</p>
+
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <span class="label">Platform for bare handles</span>
+      <div class="seg" id="add-platform-pills">
+        <button type="button" aria-pressed="true" data-action="add-platform" data-plat="instagram">Instagram</button>
+        <button type="button" aria-pressed="false" data-action="add-platform" data-plat="twitter">X</button>
+        <button type="button" aria-pressed="false" data-action="add-platform" data-plat="tiktok">TikTok</button>
       </div>
+    </div>
 
-      <div class="flex flex-col gap-1.5">
-        <label class="text-[10px] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">Platform</label>
-        <input type="hidden" id="platform" value="instagram"/>
-        <div class="grid grid-cols-3 gap-2" id="add-platform-pills">
-          <button type="button" data-plat="instagram" onclick="selectAddPlatform('instagram')" class="py-2 px-3 rounded-lg border text-xs font-bold transition-all cursor-pointer text-center bg-[#ff9900] text-black border-[#ff9900]">
-            Instagram
-          </button>
-          <button type="button" data-plat="twitter" onclick="selectAddPlatform('twitter')" class="py-2 px-3 rounded-lg border text-xs font-semibold transition-all cursor-pointer text-center bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-800">
-            Twitter / X
-          </button>
-          <button type="button" data-plat="tiktok" onclick="selectAddPlatform('tiktok')" class="py-2 px-3 rounded-lg border text-xs font-semibold transition-all cursor-pointer text-center bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-800">
-            TikTok
-          </button>
-        </div>
+    <ul id="add-rows" class="flex flex-col gap-1.5 empty:hidden"></ul>
+
+    <div class="flex flex-col gap-3 border-t border-slate-200 dark:border-zinc-800/80 pt-3">
+      <span class="label">Download</span>
+      <div class="grid grid-cols-2 gap-2">
+        <label class="flex items-center gap-2 text-xs cursor-pointer"><input checked class="accent-[#ff9900]" id="add-save-text" type="checkbox"/><span>Post text &amp; captions</span></label>
+        <label class="flex items-center gap-2 text-xs cursor-pointer" data-only="twitter"><input checked class="accent-[#ff9900]" id="add-skip-retweets" type="checkbox"/><span>Skip retweets</span></label>
+        <label class="flex items-center gap-2 text-xs cursor-pointer"><input checked class="accent-[#ff9900]" id="add-photos" type="checkbox"/><span>Photos</span></label>
+        <label class="flex items-center gap-2 text-xs cursor-pointer"><input checked class="accent-[#ff9900]" id="add-videos" type="checkbox"/><span>Videos</span></label>
       </div>
-
-      <div class="hidden flex-col gap-3 border-t border-slate-200 dark:border-zinc-800/80 pt-3" id="save-text-container">
-        <div class="grid grid-cols-2 gap-2">
-          <label class="flex items-center gap-2 text-xs text-slate-700 dark:text-zinc-300 cursor-pointer">
-            <input checked="" class="accent-[#ff9900] rounded" id="save-text" type="checkbox"/>
-            <span>Save Posts text</span>
-          </label>
-          <label class="flex items-center gap-2 text-xs text-slate-700 dark:text-zinc-300 cursor-pointer twitter-only-option">
-            <input checked="" class="accent-[#ff9900] rounded" id="skip-retweets" type="checkbox"/>
-            <span>Skip Retweets</span>
-          </label>
-          <label class="flex items-center gap-2 text-xs text-slate-700 dark:text-zinc-300 cursor-pointer">
-            <input checked="" class="accent-[#ff9900] rounded" id="download-photos" type="checkbox"/>
-            <span>Photos</span>
-          </label>
-          <label class="flex items-center gap-2 text-xs text-slate-700 dark:text-zinc-300 cursor-pointer">
-            <input checked="" class="accent-[#ff9900] rounded" id="download-videos" type="checkbox"/>
-            <span>Videos</span>
-          </label>
+      <div class="flex flex-col gap-1" data-only="twitter">
+        <label class="label" for="add-filter-input">Keyword filters <span class="normal-case font-normal tracking-normal">· X only</span></label>
+        <div class="flex flex-col gap-2 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg p-2.5">
+          <div class="flex flex-wrap gap-1.5" data-chips="add"></div>
+          <input class="input bg-white dark:bg-zinc-950 px-2.5 py-1.5" id="add-filter-input" data-chip-input="add" placeholder="Type a keyword and press Enter…" type="text"/>
         </div>
+        <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500">Only posts whose text contains at least one keyword are downloaded (case-insensitive). Leave empty to take everything.</p>
+      </div>
+    </div>
 
-        <div class="flex flex-col gap-1 twitter-only-option">
-          <label class="text-[10px] font-bold text-slate-500 dark:text-zinc-400 uppercase">Text Filters (Press Enter or Comma)</label>
-          <div class="flex flex-col gap-2 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg p-2.5">
-            <div class="flex flex-wrap gap-1.5" id="new-filters-list">
-              <span class="text-[11px] text-slate-400 dark:text-zinc-500" id="no-filters-label">No keyword filters</span>
+    <div class="flex flex-col gap-2 border-t border-slate-200 dark:border-zinc-800/80 pt-3">
+      <span class="label">How far back</span>
+      <div class="seg self-start" id="add-depth">
+        <button type="button" aria-pressed="true" data-action="add-depth" data-depth="all">Everything</button>
+        <button type="button" aria-pressed="false" data-action="add-depth" data-depth="last">Last N posts</button>
+        <button type="button" aria-pressed="false" data-action="add-depth" data-depth="since">Since date</button>
+      </div>
+      <div id="add-depth-last" class="hidden items-center gap-2 text-xs">
+        <input type="number" min="1" max="100000" value="200" id="add-max-posts" class="input w-28 px-2.5 py-1.5 font-mono"/>
+        <span class="text-slate-500 dark:text-zinc-400">newest posts on the first sync; later syncs fetch everything new</span>
+      </div>
+      <div id="add-depth-since" class="hidden items-center gap-2 text-xs">
+        <input type="date" id="add-since" class="input w-40 px-2.5 py-1.5 font-mono"/>
+        <span class="text-slate-500 dark:text-zinc-400">nothing older is ever downloaded</span>
+      </div>
+      <p class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" id="add-depth-error"></p>
+    </div>
+
+    <label class="flex items-center gap-2 text-xs cursor-pointer border-t border-slate-200 dark:border-zinc-800/80 pt-3">
+      <input checked class="accent-[#ff9900]" id="add-sync-now" type="checkbox"/><span>Start syncing right away</span>
+    </label>
+
+    <div class="flex gap-2">
+      <button class="btn btn-primary flex-1 py-2.5" type="submit" id="add-submit" disabled>Add target</button>
+      <button class="btn btn-secondary px-4 py-2.5" data-action="close-dialog" type="button">Cancel</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Settings -->
+<dialog id="settings-dialog" class="modal max-w-3xl p-0 max-h-[92vh] overflow-hidden" aria-labelledby="settings-title">
+  <form id="settings-form" class="flex flex-col max-h-[92vh]" novalidate>
+    <div class="flex justify-between items-center px-6 pt-5 pb-3">
+      <h3 id="settings-title" class="modal-title text-base">Settings</h3>
+      <button type="button" class="btn-icon p-1" data-action="close-dialog" aria-label="Close">✕</button>
+    </div>
+    <div class="px-6 border-b border-slate-200 dark:border-zinc-800 overflow-x-auto">
+      <div role="tablist" class="flex gap-1 text-xs font-semibold" id="settings-tabs">
+        <button type="button" role="tab" data-action="settings-tab" data-tab="sessions" aria-selected="true">Sessions</button>
+        <button type="button" role="tab" data-action="settings-tab" data-tab="sync" aria-selected="false">Sync</button>
+        <button type="button" role="tab" data-action="settings-tab" data-tab="storage" aria-selected="false">Storage</button>
+        <button type="button" role="tab" data-action="settings-tab" data-tab="backup" aria-selected="false">Backup</button>
+        <button type="button" role="tab" data-action="settings-tab" data-tab="interface" aria-selected="false">Interface</button>
+      </div>
+    </div>
+
+    <div class="flex-1 overflow-y-auto px-6 py-5">
+      <!-- Sessions -->
+      <section role="tabpanel" data-panel="sessions" class="flex flex-col gap-5">
+        <p class="text-xs text-slate-500 dark:text-zinc-400">Shared sessions used for every target without its own. Saved cookies never leave the server — paste a new export to replace them.</p>
+        <template id="cookie-field-template">
+          <div class="flex flex-col gap-1.5 cookie-field">
+            <div class="flex items-center justify-between gap-2">
+              <label class="text-xs font-bold text-slate-800 dark:text-zinc-200" data-slot="label"></label>
+              <span class="text-[0.625rem] text-slate-400 font-mono">Netscape or Cookie-Editor JSON</span>
             </div>
-            <input class="w-full bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-[#ff9900]" id="new-tag-input" onkeydown="handleTagInputKey(event)" placeholder="Type keyword and press Enter..." type="text"/>
+            <div class="flex flex-wrap items-center justify-between gap-2 text-[0.6875rem] font-mono">
+              <span data-slot="status"></span>
+              <span class="flex items-center gap-3">
+                <button type="button" class="btn-link text-[0.6875rem]" data-action="check-session">Check now</button>
+                <button type="button" class="hidden text-[0.6875rem] font-semibold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" data-action="remove-cookies">Remove saved</button>
+              </span>
+            </div>
+            <span class="text-[0.6875rem] font-mono" data-slot="check"></span>
+            <textarea class="input p-3 font-mono resize-y min-h-24 leading-relaxed" rows="4" spellcheck="false"></textarea>
+            <p class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-slot="error"></p>
+            <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500" data-slot="help"></p>
+          </div>
+        </template>
+        <div id="cookie-fields" class="flex flex-col gap-5"></div>
+        <p class="text-[0.625rem] font-mono text-slate-400 dark:text-zinc-500 -mt-3" id="ig-session-status"></p>
+        <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400" id="own-session-count"></p>
+      </section>
+
+      <!-- Sync -->
+      <section role="tabpanel" data-panel="sync" class="hidden flex-col gap-6">
+        <div class="flex flex-col gap-2">
+          <span class="text-xs font-bold">Automatic sync</span>
+          <div class="seg self-start flex-wrap" id="interval-presets">
+            <button type="button" data-action="interval-preset" data-hours="0">Off</button>
+            <button type="button" data-action="interval-preset" data-hours="1">1 h</button>
+            <button type="button" data-action="interval-preset" data-hours="3">3 h</button>
+            <button type="button" data-action="interval-preset" data-hours="6">6 h</button>
+            <button type="button" data-action="interval-preset" data-hours="12">12 h</button>
+            <button type="button" data-action="interval-preset" data-hours="24">24 h</button>
+            <button type="button" data-action="interval-preset" data-hours="custom">Custom</button>
+          </div>
+          <label class="hidden items-center gap-2 text-xs" id="interval-custom">
+            <span>Every</span>
+            <input class="input w-24 px-2.5 py-1.5 font-mono" id="auto-sync-interval" min="0" max="168" step="1" type="number"/>
+            <span>hours (1–168)</span>
+          </label>
+          <p class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="interval"></p>
+          <p class="text-[0.625rem] text-slate-400" id="interval-hint"></p>
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <label class="flex items-center gap-2 text-xs font-bold cursor-pointer"><input type="checkbox" id="quiet-enabled" class="accent-[#ff9900]"/>Quiet hours</label>
+          <div class="flex items-center gap-2 text-xs" id="quiet-range">
+            <span>No automatic syncs from</span>
+            <select id="quiet-from" class="input w-20 px-2 py-1.5 font-mono"></select>
+            <span>to</span>
+            <select id="quiet-to" class="input w-20 px-2 py-1.5 font-mono"></select>
+            <span class="text-slate-400">server time</span>
+          </div>
+          <p class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="quiet"></p>
+          <p class="text-[0.625rem] text-slate-400">Manual syncs still run. A run that reaches quiet hours leaves the remaining targets for the next one.</p>
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <label class="text-xs font-bold" for="max-concurrent">Parallel syncs</label>
+          <div class="flex items-center gap-2 text-xs">
+            <input type="number" id="max-concurrent" min="1" max="8" class="input w-20 px-2.5 py-1.5 font-mono"/>
+            <span class="text-slate-500 dark:text-zinc-400">targets at once (1–8). Lower is gentler on the platforms; X targets always run one at a time.</span>
+          </div>
+          <p class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="concurrency"></p>
+        </div>
+
+        <div class="flex items-center justify-between gap-4 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
+          <div>
+            <span class="text-xs font-bold">Force full resync of all targets</span>
+            <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500 mt-0.5">Rescans every feed from the start to pick up anything missed. Existing files are kept.</p>
+          </div>
+          <button class="btn btn-secondary" data-action="full-resync-all" type="button">Full Resync All</button>
+        </div>
+      </section>
+
+      <!-- Storage -->
+      <section role="tabpanel" data-panel="storage" class="hidden flex-col gap-5">
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3" id="storage-summary"></div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-left text-xs">
+            <thead class="text-[0.5625rem] font-bold text-slate-400 uppercase tracking-wider font-mono">
+              <tr><th class="py-1.5 pr-4">Target</th><th class="py-1.5 pr-4 text-right">Files</th><th class="py-1.5 pr-4 text-right">Media</th><th class="py-1.5 text-right">Thumbnails</th></tr>
+            </thead>
+            <tbody id="storage-targets" class="divide-y divide-slate-100 dark:divide-zinc-800/60"></tbody>
+          </table>
+        </div>
+        <div class="flex items-center justify-between gap-4 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
+          <div>
+            <span class="text-xs font-bold">Quarantine</span>
+            <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500 mt-0.5" id="quarantine-info">Truncated downloads set aside by the integrity check; their targets were already re-queued.</p>
+          </div>
+          <button class="btn btn-secondary text-rose-600 dark:text-rose-400" data-action="clear-quarantine" type="button" id="btn-clear-quarantine">Delete</button>
+        </div>
+        <label class="flex flex-col gap-1 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
+          <span class="text-xs font-bold">Thumbnails folder</span>
+          <input type="text" id="thumbnails-dir" spellcheck="false" placeholder="inside downloads/ (default)" class="input px-2.5 py-1.5 font-mono"/>
+          <span class="text-[0.625rem] text-slate-400">A folder on fast storage (SSD) makes grids load quicker. Missing previews are generated on demand; existing ones are copied over on the next restart.</span>
+        </label>
+        <label class="flex flex-col gap-1">
+          <span class="text-xs font-bold">Instagram browser sidecar URL <span class="font-normal text-slate-400">· advanced</span></span>
+          <input type="url" id="sidecar-url" spellcheck="false" placeholder="http://camoufox:8000" class="input px-2.5 py-1.5 font-mono"/>
+          <span class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="sidecar"></span>
+          <span class="text-[0.625rem] text-slate-400">When set, Instagram is scraped through the camoufox browser container instead of direct API calls.</span>
+        </label>
+      </section>
+
+      <!-- Backup -->
+      <section role="tabpanel" data-panel="backup" class="hidden flex-col gap-5">
+        <div class="flex items-center justify-between gap-4">
+          <div>
+            <span class="text-xs font-bold">Export targets</span>
+            <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500 mt-0.5">Downloads every target with its options plus the sync settings as JSON. Cookies and sessions are never included.</p>
+          </div>
+          <a class="btn btn-secondary" href="/api/accounts/export" download>Export</a>
+        </div>
+        <div class="flex flex-col gap-2 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
+          <span class="text-xs font-bold">Import targets</span>
+          <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500">Adds targets from an export. Targets that already exist are left as they are.</p>
+          <label class="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" id="import-settings" class="accent-[#ff9900]"/>Also replace sync settings (interval, quiet hours, parallel syncs)</label>
+          <div class="flex items-center gap-2">
+            <input type="file" id="import-file" accept="application/json,.json" class="text-xs file:mr-2 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-slate-200 file:bg-white file:font-semibold file:cursor-pointer dark:file:bg-zinc-900 dark:file:border-zinc-800 dark:file:text-zinc-300"/>
+          </div>
+          <p class="text-[0.6875rem] font-mono" id="import-result"></p>
+        </div>
+      </section>
+
+      <!-- Interface -->
+      <section role="tabpanel" data-panel="interface" class="hidden flex-col gap-5">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <span class="text-xs font-bold">Interface size</span>
+            <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500 mt-0.5">On top of automatic scaling for the window width. Saved in this browser.</p>
+          </div>
+          <div class="seg" role="group" aria-label="Interface size">
+            <button type="button" data-action="ui-scale" data-scale="0.875" aria-pressed="false">S</button>
+            <button type="button" data-action="ui-scale" data-scale="1" aria-pressed="true">M</button>
+            <button type="button" data-action="ui-scale" data-scale="1.125" aria-pressed="false">L</button>
+            <button type="button" data-action="ui-scale" data-scale="1.25" aria-pressed="false">XL</button>
           </div>
         </div>
-      </div>
-
-      <div class="flex gap-2 pt-2 border-t border-slate-200 dark:border-zinc-800/80">
-        <button class="flex-1 bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold text-xs py-2.5 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-xs" id="btn-add-account" type="submit">
-          Add Target Account
-        </button>
-        <button class="bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-semibold text-xs px-4 py-2.5 rounded-lg transition-all cursor-pointer" onclick="toggleCmdPalette()" type="button">
-          Cancel
-        </button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-xs p-4" id="edit-modal" style="display: none" tabindex="-1">
-  <div class="bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-md flex flex-col gap-4 shadow-2xl">
-    <div class="flex justify-between items-center border-b border-slate-200 dark:border-zinc-800/80 pb-3">
-      <h3 class="text-sm font-bold text-slate-900 dark:text-zinc-100 uppercase tracking-wider flex items-center gap-2">
-        <svg class="w-4 h-4 text-[#ff9900]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
-        <span>Edit Target Settings</span>
-      </h3>
-      <button class="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 cursor-pointer" onclick="closeEditModal()">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" x2="6" y1="6" y2="18"></line><line x1="6" x2="18" y1="6" y2="18"></line></svg>
-      </button>
-    </div>
-    <form class="flex flex-col gap-4" id="edit-account-form" onsubmit="return false">
-      <div class="flex items-center justify-between p-3 bg-slate-50 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800">
-        <div class="flex flex-col gap-0.5">
-          <label class="text-[9px] font-bold text-slate-400 uppercase">Target Username</label>
-          <input class="bg-transparent text-xs font-mono font-bold text-slate-900 dark:text-white outline-none cursor-default" disabled="" id="edit-username" type="text" value=""/>
-        </div>
-        <div class="flex flex-col items-end gap-0.5">
-          <label class="text-[9px] font-bold text-slate-400 uppercase">Platform</label>
-          <span id="edit-platform-badge" class="text-[10px] font-bold uppercase px-2 py-0.5 rounded border"></span>
-        </div>
-      </div>
-      <div class="flex flex-col gap-3 border-t border-slate-200 dark:border-zinc-800/80 pt-3" id="edit-options-container">
-        <div class="grid grid-cols-2 gap-2">
-          <label class="flex items-center gap-2 text-xs text-slate-700 dark:text-zinc-300 cursor-pointer">
-            <input class="accent-[#ff9900] rounded" id="edit-save-text" type="checkbox"/>
-            <span>Save Posts</span>
-          </label>
-          <label class="flex items-center gap-2 text-xs text-slate-700 dark:text-zinc-300 cursor-pointer edit-twitter-only-option">
-            <input class="accent-[#ff9900] rounded" id="edit-skip-retweets" type="checkbox"/>
-            <span>Skip Retweets</span>
-          </label>
-          <label class="flex items-center gap-2 text-xs text-slate-700 dark:text-zinc-300 cursor-pointer">
-            <input class="accent-[#ff9900] rounded" id="edit-download-photos" type="checkbox"/>
-            <span>Download Photos</span>
-          </label>
-          <label class="flex items-center gap-2 text-xs text-slate-700 dark:text-zinc-300 cursor-pointer">
-            <input class="accent-[#ff9900] rounded" id="edit-download-videos" type="checkbox"/>
-            <span>Download Videos</span>
-          </label>
-        </div>
-        <div class="flex flex-col gap-1 edit-twitter-only-option">
-          <label class="text-[10px] font-bold text-slate-500 dark:text-zinc-400 uppercase">Text Filters</label>
-          <div class="flex flex-col gap-2 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg p-2.5">
-            <div class="flex flex-wrap gap-1.5" id="edit-filters-list">
-              <span class="text-[11px] text-slate-400 dark:text-zinc-500" id="edit-no-filters">No filters added</span>
-            </div>
-            <input class="w-full bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-md px-2.5 py-1.5 text-xs outline-none focus:border-[#ff9900]" id="new-edit-tag-input" onkeydown="if(event.key==='Enter'){event.preventDefault(); addEditFilter();}" placeholder="Type keyword and press Enter..." type="text"/>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <span class="text-xs font-bold">Theme</span>
+          <div class="seg" role="group" aria-label="Theme">
+            <button type="button" data-action="set-theme" data-theme="system" aria-pressed="false">System</button>
+            <button type="button" data-action="set-theme" data-theme="light" aria-pressed="false">Light</button>
+            <button type="button" data-action="set-theme" data-theme="dark" aria-pressed="false">Dark</button>
           </div>
         </div>
-      </div>
-      <div class="flex flex-col gap-2 pt-2 border-t border-slate-200 dark:border-zinc-800/80">
-        <div class="flex gap-2">
-          <button class="flex-1 bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold text-xs py-2.5 rounded-lg transition-all cursor-pointer" id="btn-save-edit" onclick="saveEditChanges()" type="button">Save Changes</button>
-          <button class="bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-semibold text-xs px-4 py-2.5 rounded-lg transition-all cursor-pointer" onclick="closeEditModal()" type="button">Cancel</button>
-        </div>
-        <button class="w-full border border-red-300 dark:border-red-500/40 hover:bg-red-50 dark:hover:bg-red-500/10 text-red-600 dark:text-red-400 font-semibold text-xs py-2 rounded-lg transition-all cursor-pointer" onclick="fullResyncTarget()" type="button">Force Full Resync</button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<div class="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-xs p-4" id="settings-modal" style="display: none" tabindex="-1">
-  <div class="bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 md:p-8 w-full max-w-2xl flex flex-col gap-5 shadow-2xl max-h-[90vh] overflow-y-auto">
-    <div class="flex justify-between items-center border-b border-slate-200 dark:border-zinc-800/80 pb-3.5">
-      <div>
-        <h3 class="text-base font-bold text-slate-900 dark:text-zinc-100 uppercase tracking-wider flex items-center gap-2">
-          <svg class="w-5 h-5 text-[#ff9900]" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
-          <span>Platform & Authentication Settings</span>
-        </h3>
-        <p class="text-xs text-slate-500 dark:text-zinc-400 mt-1">Configure account cookies and session tokens for media downloading.</p>
-      </div>
-      <button class="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 cursor-pointer p-1" onclick="document.getElementById('settings-modal').style.display='none'">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" x2="6" y1="6" y2="18"></line><line x1="6" x2="18" y1="6" y2="18"></line></svg>
-      </button>
+      </section>
     </div>
-    <form class="flex flex-col gap-5" id="settings-form" onsubmit="return false">
-      <div class="flex flex-col gap-1.5">
-        <label class="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center justify-between" for="twitter-cookies">
-          <span>Twitter / X Cookies</span>
-          <span class="text-[10px] text-slate-400 font-mono font-normal">Netscape cookie format</span>
-        </label>
-        <textarea class="w-full bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg p-3 text-xs outline-none focus:border-[#ff9900] font-mono resize-y min-h-[120px] transition-colors leading-relaxed" id="twitter-cookies" placeholder="# Netscape HTTP Cookie File&#10;#HttpOnly_.x.com&#9;TRUE&#9;/&#9;TRUE&#9;1800000000&#9;auth_token&#9;..." rows="6"></textarea>
-        <p class="text-[10px] text-slate-400 dark:text-zinc-500">Full Netscape export (Cookie-Editor extension) of x.com cookies. The real <code class="font-mono text-[#ff9900]">ct0</code> replaces the generated one and device cookies (<code class="font-mono text-[#ff9900]">kdt</code>, <code class="font-mono text-[#ff9900]">twid</code>) keep the session looking like its browser.</p>
+
+    <div class="flex items-center justify-between gap-3 px-6 py-3 border-t border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60">
+      <span class="text-[0.6875rem] text-slate-500 dark:text-zinc-400" id="settings-dirty">No changes</span>
+      <div class="flex gap-2">
+        <button class="btn btn-secondary" data-action="close-dialog" type="button">Close</button>
+        <button class="btn btn-primary" type="submit" id="settings-save" disabled>Save</button>
       </div>
+    </div>
+  </form>
+</dialog>
 
-      <div class="flex flex-col gap-1.5 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
-        <label class="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center justify-between" for="instagram-cookies">
-          <span>Instagram Cookies</span>
-          <span class="text-[10px] text-slate-400 font-mono font-normal">Netscape cookie format</span>
-        </label>
-        <textarea class="w-full bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg p-3 text-xs outline-none focus:border-[#ff9900] font-mono resize-y min-h-[120px] transition-colors leading-relaxed" id="instagram-cookies" placeholder="# Netscape HTTP Cookie File&#10;#HttpOnly_.instagram.com&#9;TRUE&#9;/&#9;TRUE&#9;1801259143&#9;ig_did&#9;..." rows="6"></textarea>
-        <p class="text-[10px] text-slate-400 dark:text-zinc-500">Full Netscape export (Cookie-Editor extension) of instagram.com cookies. Device cookies (<code class="font-mono text-[#ff9900]">mid</code>, <code class="font-mono text-[#ff9900]">ig_did</code>, <code class="font-mono text-[#ff9900]">datr</code>) make the scraper look like the browser the session was created in and prevent automation flags.</p>
-        <p class="text-[10px] font-mono text-slate-400 dark:text-zinc-500" id="ig-session-status"></p>
+<!-- Confirm -->
+<dialog id="confirm-dialog" class="modal max-w-sm" aria-labelledby="confirm-title">
+  <form method="dialog" class="flex flex-col gap-4">
+    <div class="flex items-start gap-3">
+      <div class="p-2 rounded-xl flex-shrink-0" data-slot="icon"></div>
+      <div class="flex-1 min-w-0">
+        <h3 id="confirm-title" class="text-sm font-bold" data-slot="title"></h3>
+        <p class="text-xs text-slate-500 dark:text-zinc-400 mt-1 leading-relaxed whitespace-pre-line" data-slot="message"></p>
       </div>
+    </div>
+    <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 dark:border-zinc-800">
+      <button value="cancel" class="btn btn-secondary" data-slot="cancel">Cancel</button>
+      <button value="confirm" class="btn" data-slot="confirm">Confirm</button>
+    </div>
+  </form>
+</dialog>
 
+<div class="fixed bottom-14 right-4 sm:right-6 z-[200] flex flex-col gap-2 items-end pointer-events-none" id="toast-container" aria-live="polite"></div>
 
-      <div class="flex flex-col gap-1.5 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
-        <label class="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center justify-between" for="tiktok-cookies">
-          <span>TikTok Netscape Cookies</span>
-          <span class="text-[10px] text-slate-400 font-mono font-normal">Netscape cookie format</span>
-        </label>
-        <textarea class="w-full bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg p-3 text-xs outline-none focus:border-[#ff9900] font-mono resize-y min-h-[120px] transition-colors leading-relaxed" id="tiktok-cookies" placeholder="# Netscape HTTP Cookie File&#10;.tiktok.com&#9;TRUE&#9;/&#9;TRUE&#9;1789123456&#9;sessionid&#9;..." rows="6"></textarea>
-        <p class="text-[10px] text-slate-400 dark:text-zinc-500">Export Netscape format cookies via browser extension for TikTok video scraping.</p>
-      </div>
-
-      <div class="flex flex-col gap-1.5 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
-        <label class="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center justify-between" for="auto-sync-interval">
-          <span>Background Auto-Sync Interval</span>
-          <span class="text-[10px] text-slate-400 font-mono font-normal">0 = disabled</span>
-        </label>
-        <div class="flex items-center gap-3">
-          <input class="w-32 bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3.5 py-2.5 text-xs outline-none focus:border-[#ff9900] font-mono transition-colors" id="auto-sync-interval" max="168" min="0" required="" type="number"/>
-          <span class="text-xs text-slate-500 dark:text-zinc-400">hours between automatic updates</span>
-        </div>
-      </div>
-
-      <div class="flex items-center justify-between gap-4 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
-        <div>
-          <span class="text-xs font-bold text-slate-800 dark:text-zinc-200">Force Full Resync</span>
-          <p class="text-[10px] text-slate-400 dark:text-zinc-500 mt-0.5">Rescans entire timeline for all targets to fetch any missed media.</p>
-        </div>
-        <button class="bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-800 dark:text-zinc-200 border border-slate-300 dark:border-zinc-700 text-xs font-semibold px-3.5 py-2 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 whitespace-nowrap shadow-2xs" id="btn-full-resync-all" onclick="fullResyncAll()" type="button">
-          <svg class="w-3.5 h-3.5 text-slate-500 dark:text-zinc-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
-          <span>Full Resync All</span>
-        </button>
-      </div>
-
-      <div class="flex gap-3 pt-3 border-t border-slate-200 dark:border-zinc-800/80">
-        <button class="flex-1 bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold text-xs py-3 rounded-lg transition-all cursor-pointer flex items-center justify-center shadow-xs" id="btn-save-settings" type="submit">
-          Save Settings
-        </button>
-        <button class="bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-semibold text-xs px-6 py-3 rounded-lg transition-all cursor-pointer" onclick="document.getElementById('settings-modal').style.display='none'" type="button">
-          Cancel
-        </button>
-      </div>
-    </form>
-  </div>
-</div>
-
-<div id="confirm-mount"></div>
-<div class="fixed bottom-12 right-6 z-[200] flex flex-col gap-2 items-end pointer-events-none" id="toast-container"></div>
-
-<button aria-label="Back to top" class="fixed bottom-12 right-6 z-[60] bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold p-2.5 rounded-full shadow-lg transition-all duration-200 scale-0 opacity-0 cursor-pointer flex items-center justify-center" id="btn-back-to-top" onclick="scrollToTop()">
+<button aria-label="Back to top" class="fixed bottom-14 right-4 sm:right-6 z-[60] bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold p-2.5 rounded-full shadow-lg transition-all duration-200 scale-0 opacity-0 cursor-pointer flex items-center justify-center" id="btn-back-to-top" data-action="scroll-top">
   <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" x2="12" y1="5" y2="19"></line><polyline points="5 12 12 5 19 12"></polyline></svg>
 </button>
 
-<script type="module" src="/static/js/main.js?v=6"></script>
+<script type="module" src="/static/js/main.js"></script>
 </body>
 </html>

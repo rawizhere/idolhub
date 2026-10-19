@@ -133,7 +133,12 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 		})
 
 	if !lastSync.IsZero() {
-		cmd = cmd.DateAfter(lastSync.Format("20060102")).BreakOnExisting().PlaylistItems(":50")
+		cmd = cmd.BreakOnExisting().PlaylistItems(":50")
+	} else if opts.MaxPosts > 0 {
+		cmd = cmd.PlaylistItems(fmt.Sprintf(":%d", opts.MaxPosts))
+	}
+	if cutoff := opts.cutoff(); !cutoff.IsZero() {
+		cmd = cmd.DateAfter(cutoff.Format("20060102"))
 	}
 
 	if pc.cookie != "" {

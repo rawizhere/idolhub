@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +22,10 @@ type Account struct {
 	TwitterAuthToken string    `json:"twitter_auth_token,omitempty"` // per-account override of the global twitter_auth_token
 	DownloadPhotos   *bool     `json:"download_photos,omitempty"`
 	DownloadVideos   *bool     `json:"download_videos,omitempty"`
+	Paused           bool      `json:"paused,omitempty"`
+	Cookies          string    `json:"cookies,omitempty"`   // per-account Netscape export; replaces the platform session
+	SinceDate        string    `json:"since,omitempty"`     // YYYY-MM-DD lower bound for every sync
+	MaxPosts         int       `json:"max_posts,omitempty"` // cap for a sync without a watermark (first or full)
 	LastSyncStatus   string    `json:"last_sync_status,omitempty"`
 	LastSyncTime     time.Time `json:"last_sync_time,omitempty"`
 }
@@ -47,6 +54,48 @@ type Config struct {
 	ThumbnailsDir       string    `json:"thumbnails_dir"`
 	TikTokCookies       string    `json:"tiktok_cookies"`
 	AutoSyncInterval    int       `json:"auto_sync_interval"` // In hours
+	// QuietHours is "HH-HH" in server local time; auto-sync does not start inside the window. Empty disables it.
+	QuietHours string `json:"quiet_hours"`
+	// MaxConcurrent bounds simultaneous scrapes; 0 means DefaultMaxConcurrent.
+	MaxConcurrent int `json:"max_concurrent"`
+}
+
+// DefaultMaxConcurrent is the scrape parallelism when none is configured.
+const DefaultMaxConcurrent = 3
+
+// Concurrency returns the effective scrape parallelism.
+func (c Config) Concurrency() int {
+	if c.MaxConcurrent <= 0 {
+		return DefaultMaxConcurrent
+	}
+	return c.MaxConcurrent
+}
+
+// InQuietHours reports whether t falls inside the configured quiet window, which may wrap midnight.
+func (c Config) InQuietHours(t time.Time) bool {
+	from, to, ok := ParseQuietHours(c.QuietHours)
+	if !ok || from == to {
+		return false
+	}
+	h := t.Hour()
+	if from < to {
+		return h >= from && h < to
+	}
+	return h >= from || h < to
+}
+
+// ParseQuietHours parses "HH-HH"; ok is false for an empty or malformed value.
+func ParseQuietHours(v string) (from, to int, ok bool) {
+	a, b, found := strings.Cut(strings.TrimSpace(v), "-")
+	if !found {
+		return 0, 0, false
+	}
+	from, err1 := strconv.Atoi(strings.TrimSpace(a))
+	to, err2 := strconv.Atoi(strings.TrimSpace(b))
+	if err1 != nil || err2 != nil || from < 0 || from > 23 || to < 0 || to > 23 {
+		return 0, 0, false
+	}
+	return from, to, true
 }
 
 var (
@@ -91,6 +140,10 @@ func loadFromStoreLocked(st *store.Store) {
 			DownloadPhotos:   row.DownloadPhotos,
 			DownloadVideos:   row.DownloadVideos,
 			TwitterAuthToken: row.TwitterAuthToken,
+			Paused:           row.Paused,
+			Cookies:          row.Cookies,
+			SinceDate:        row.SinceDate,
+			MaxPosts:         row.MaxPosts,
 			LastSyncStatus:   info.Status,
 			LastSyncTime:     info.Time,
 		})
@@ -105,6 +158,8 @@ func loadFromStoreLocked(st *store.Store) {
 		ThumbnailsDir:       settingString(st, ctx, "thumbnails_dir"),
 		TikTokCookies:       settingString(st, ctx, "tiktok_cookies"),
 		AutoSyncInterval:    settingInt(st, ctx, "auto_sync_interval"),
+		QuietHours:          settingString(st, ctx, "quiet_hours"),
+		MaxConcurrent:       settingInt(st, ctx, "max_concurrent"),
 	}
 }
 
@@ -157,6 +212,10 @@ func saveToStore(st *store.Store) error {
 			DownloadVideos:   acc.DownloadVideos,
 			Filters:          acc.Filters,
 			TwitterAuthToken: acc.TwitterAuthToken,
+			Paused:           acc.Paused,
+			Cookies:          acc.Cookies,
+			SinceDate:        acc.SinceDate,
+			MaxPosts:         acc.MaxPosts,
 		})
 		if err != nil {
 			return err
@@ -184,6 +243,8 @@ func saveToStore(st *store.Store) error {
 		"thumbnails_dir":        globalConfig.ThumbnailsDir,
 		"tiktok_cookies":        globalConfig.TikTokCookies,
 		"auto_sync_interval":    globalConfig.AutoSyncInterval,
+		"quiet_hours":           globalConfig.QuietHours,
+		"max_concurrent":        globalConfig.MaxConcurrent,
 	}
 	for key, value := range settings {
 		b, err := json.Marshal(value)
@@ -195,6 +256,26 @@ func saveToStore(st *store.Store) error {
 		}
 	}
 	return nil
+}
+
+// UpdateAccounts applies fn to the account list and persists the result under the config lock, so concurrent
+// edits from several requests or tabs cannot overwrite each other.
+func UpdateAccounts(st *store.Store, fn func([]Account) ([]Account, error)) (Config, error) {
+	configMu.Lock()
+	defer configMu.Unlock()
+	next, err := fn(slices.Clone(globalConfig.Accounts))
+	if err != nil {
+		return globalConfig, err
+	}
+	prev := globalConfig.Accounts
+	globalConfig.Accounts = next
+	if st != nil {
+		if err := saveToStore(st); err != nil {
+			globalConfig.Accounts = prev
+			return globalConfig, err
+		}
+	}
+	return globalConfig, nil
 }
 
 func GetConfig() Config {

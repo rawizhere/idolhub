@@ -21,6 +21,7 @@ type Store struct {
 	Accounts *AccountStore
 	Settings *SettingsStore
 	Posts    *PostStore
+	Runs     *RunStore
 }
 
 // Open opens or creates the database at path and applies pending migrations.
@@ -43,6 +44,7 @@ func Open(path string) (*Store, error) {
 		Settings: &SettingsStore{db: db},
 	}
 	s.Posts = &PostStore{db: db}
+	s.Runs = &RunStore{db: db}
 	return s, nil
 }
 

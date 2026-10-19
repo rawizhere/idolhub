@@ -1,95 +1,63 @@
+function storedDensity() {
+  try { return localStorage.getItem("idolhub-density") || "relaxed"; } catch (_) { return "relaxed"; }
+}
+
 export const state = {
-  activeTerminalUser: null,
   // the same handle can be configured on several platforms; a target is the pair
-  activeTerminalPlatform: null,
+  target: null,
   cachedProgress: [],
   lastSyncTime: "",
   autoSyncInterval: 0,
+  cookieStatus: {},
 
   progressPollTimeout: null,
   countdownTicker: null,
   sseSource: null,
   sseConnected: false,
   sseReconnectTimeout: null,
+  // progress samples per target key, for the ETA estimate
+  progressStart: new Map(),
 
   terminalLevel: "all",
   globalLogs: [],
   dockConsoleOpen: false,
-  gridDensity: localStorage.getItem("idolhub-density") || "relaxed",
+  gridDensity: storedDensity(),
 
   targetSearchQuery: "",
   targetPlatformFilter: "all",
 
   galleryMeta: null,
-  galleryFilterMeta: null,
-  pswpGrid: null,
-  pswpPosts: null,
-  currentView: "grid",
-  currentFilter: "all",
-  selectedHashtags: new Set(),
-  selectedYears: new Set(),
-  selectedMonths: new Set(),
+  view: "grid",
+  filter: "all",
+  query: "",
+  sortAsc: false,
+  years: new Set(),
+  months: new Set(),
+  tags: new Set(),
 
-  activeGalleryUser: null,
-  activeGalleryPlatform: null,
-
-  gridSearchQuery: "",
-  postsSearchQuery: "",
-  postsSortAsc: false,
+  selecting: false,
+  selected: new Set(),
 
   newFilters: [],
-  editConfig: {
-    username: "",
-    platform: "instagram",
-    saveText: false,
-    skipRetweets: false,
-    downloadPhotos: true,
-    downloadVideos: true,
-    filters: []
-  }
+  editConfig: null
 };
 
-// findTarget looks a target up by username and platform; a missing platform (state saved by older builds) takes the first username match.
+export const targetKey = (t) => `${t.platform}/${t.username}`;
+
 export function findTarget(username, platform) {
   return state.cachedProgress.find(t => t.username === username && (!platform || t.platform === platform));
 }
 
 export function activeTarget() {
-  if (!state.activeTerminalUser) return null;
-  return findTarget(state.activeTerminalUser, state.activeTerminalPlatform);
+  if (!state.target) return null;
+  return findTarget(state.target.username, state.target.platform);
 }
 
 export function isActiveTarget(username, platform) {
-  return state.activeTerminalUser === username && (!platform || !state.activeTerminalPlatform || state.activeTerminalPlatform === platform);
+  return !!state.target && state.target.username === username && (!platform || state.target.platform === platform);
 }
 
-const UI_STATE_KEY = "idolhub-ui-state";
-
-export function saveUiState() {
-  try {
-    localStorage.setItem(UI_STATE_KEY, JSON.stringify({
-      activeTerminalUser: state.activeTerminalUser,
-      activeTerminalPlatform: state.activeTerminalPlatform,
-      activeGalleryUser: state.activeGalleryUser,
-      activeGalleryPlatform: state.activeGalleryPlatform,
-      currentView: state.currentView,
-      currentFilter: state.currentFilter,
-      gridSearchQuery: state.gridSearchQuery,
-      postsSearchQuery: state.postsSearchQuery,
-      postsSortAsc: state.postsSortAsc,
-      selectedYears: Array.from(state.selectedYears),
-      selectedMonths: Array.from(state.selectedMonths),
-      selectedHashtags: Array.from(state.selectedHashtags),
-      targetPlatformFilter: state.targetPlatformFilter
-    }));
-  } catch (_) {}
-}
-
-export function loadUiState() {
-  try {
-    const raw = localStorage.getItem(UI_STATE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch (_) {
-    return null;
-  }
+export function filtersDirty() {
+  return state.filter !== "all" || state.query !== "" || state.sortAsc ||
+    state.years.size > 0 || state.months.size > 0 || state.tags.size > 0;
 }

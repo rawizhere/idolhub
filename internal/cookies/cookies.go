@@ -1,6 +1,7 @@
 package cookies
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -59,4 +60,54 @@ func ParseNetscape(raw, domainSuffix string) ([]*fhttp.Cookie, error) {
 		return nil, fmt.Errorf("no %s cookies found in the netscape file", domainSuffix)
 	}
 	return cookies, nil
+}
+
+type jsonCookie struct {
+	Domain         string  `json:"domain"`
+	ExpirationDate float64 `json:"expirationDate"`
+	HostOnly       bool    `json:"hostOnly"`
+	HTTPOnly       bool    `json:"httpOnly"`
+	Name           string  `json:"name"`
+	Path           string  `json:"path"`
+	Secure         bool    `json:"secure"`
+	Value          string  `json:"value"`
+}
+
+// JSONToNetscape converts a Cookie-Editor JSON export (an array of cookie objects) to the Netscape format ParseNetscape reads.
+func JSONToNetscape(raw string) (string, error) {
+	var in []jsonCookie
+	if err := json.Unmarshal([]byte(raw), &in); err != nil {
+		return "", fmt.Errorf("cookie JSON export: %w", err)
+	}
+	if len(in) == 0 {
+		return "", fmt.Errorf("cookie JSON export is empty")
+	}
+	var b strings.Builder
+	b.WriteString("# Netscape HTTP Cookie File\n")
+	for _, c := range in {
+		if c.Name == "" || c.Domain == "" {
+			continue
+		}
+		if c.HTTPOnly {
+			b.WriteString("#HttpOnly_")
+		}
+		path := c.Path
+		if path == "" {
+			path = "/"
+		}
+		value := c.Value
+		if value == "" {
+			value = `""`
+		}
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+			c.Domain, boolFlag(!c.HostOnly), path, boolFlag(c.Secure), int64(c.ExpirationDate), c.Name, value)
+	}
+	return b.String(), nil
+}
+
+func boolFlag(v bool) string {
+	if v {
+		return "TRUE"
+	}
+	return "FALSE"
 }

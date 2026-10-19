@@ -28,6 +28,18 @@ type Options struct {
 	InstagramSidecarURL string
 	TikTokCookies       string
 	Posts               *store.PostStore
+	// Since is the oldest post date a sync fetches; zero means unbounded.
+	Since time.Time
+	// MaxPosts caps the number of posts taken; the orchestrator only sets it when there is no watermark.
+	MaxPosts int
+}
+
+// cutoff is the date before which a scrape stops: the later of the watermark and the account's Since bound.
+func (o Options) cutoff() time.Time {
+	if o.Since.After(o.LastSync) {
+		return o.Since
+	}
+	return o.LastSync
 }
 
 // scrapeFunc is a scrape function for a platform.

@@ -1,294 +1,187 @@
-import { state } from "./state.js";
-import { timeAgo, toast, confirmDialog, escapeHtml, platformBadgeClass } from "./utils.js";
-import { startSyncApi, cancelSyncApi, clearFolderApi, fetchConfig, postConfig } from "./api.js";
-import { updateTerminal } from "./dock.js";
-import { renderOverviewDashboard } from "./overview.js";
-import { loadUiState, saveUiState, findTarget, activeTarget, isActiveTarget } from "./state.js";
-import {
-  selectGalleryTarget,
-  switchGalleryView,
-  syncMediaTypePills,
-  populateDateDropdown,
-  populateHashtagDropdown,
-  updateDateFilterLabel,
-  updateHashtagLabel,
-  renderPostsSortState
-} from "./gallery.js";
+import { state, targetKey, activeTarget, isActiveTarget } from "./state.js";
+import { onClick, onInput } from "./actions.js";
+import { timeAgo, toast, confirmDialog, escapeHtml, platformBadgeClass, formatDuration } from "./utils.js";
+import { startSyncApi, cancelSyncApi, clearFolderApi, deleteAccountApi } from "./api.js";
+import { goTarget, goOverview } from "./nav.js";
+import { showTarget } from "./gallery.js";
+import { openSettings } from "./settings.js";
+import { renderPauseState } from "./target-settings.js";
+import { loadProgress } from "./sse.js";
 
-export function filterTargets() {
-  const input = document.getElementById("target-search-input");
-  const clearBtn = document.getElementById("target-search-clear");
-  state.targetSearchQuery = (input ? input.value : "").toLowerCase().trim();
-  if (clearBtn) clearBtn.classList.toggle("hidden", !state.targetSearchQuery);
-  renderDashboardSidebar();
-}
+const $ = (id) => document.getElementById(id);
+const isRunning = (t) => t.status === "running" || t.status === "queued";
 
-export function clearTargetSearch() {
-  const input = document.getElementById("target-search-input");
-  if (input) input.value = "";
-  filterTargets();
-}
-
-export function setPlatformFilter(platform) {
-  state.targetPlatformFilter = platform;
-  document.querySelectorAll("#target-platform-chips [data-platform]").forEach((btn) => {
-    const active = btn.dataset.platform === platform;
-    btn.className = active
-      ? "chip flex-1 py-1 rounded-md font-bold text-center transition-all cursor-pointer bg-[#ff9900] text-black dark:text-black shadow-2xs border border-[#ff9900]"
-      : "chip flex-1 py-1 rounded-md font-semibold text-center transition-all cursor-pointer text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800";
-  });
-  renderDashboardSidebar();
-}
-
-export function renderDashboardSidebar() {
-  const container = document.getElementById("dashboard-sidebar-list");
-  const countLabel = document.getElementById("sidebar-count-label");
-  if (!container) return;
-
-  const filtered = state.cachedProgress.filter(t => {
+export function visibleTargets() {
+  return state.cachedProgress.filter(t => {
     if (state.targetPlatformFilter !== "all" && t.platform !== state.targetPlatformFilter) return false;
-    if (state.targetSearchQuery && t.username.toLowerCase().indexOf(state.targetSearchQuery) === -1) return false;
+    if (state.targetSearchQuery && !t.username.toLowerCase().includes(state.targetSearchQuery)) return false;
     return true;
   });
+}
 
-  if (countLabel) countLabel.textContent = `${filtered.length}/${state.cachedProgress.length} targets`;
-
-  if (filtered.length === 0) {
-    container.innerHTML = `<p class="text-xs text-slate-500 dark:text-zinc-400 py-6 text-center">${state.cachedProgress.length === 0 ? "No targets configured" : "No matching targets"}</p>`;
-    return;
+// progressInfo estimates time left from the progress rate since the first sample of this run.
+export function progressInfo(target) {
+  if (!isRunning(target)) {
+    state.progressStart.delete(targetKey(target));
+    return null;
   }
+  const pct = Math.max(0, Math.min(100, target.progress || 0));
+  const key = targetKey(target);
+  let start = state.progressStart.get(key);
+  if (!start || pct < start.pct) {
+    start = { pct, at: Date.now() };
+    state.progressStart.set(key, start);
+  }
+  let eta = "";
+  const done = pct - start.pct;
+  const elapsed = Date.now() - start.at;
+  if (done >= 5 && elapsed > 10000 && pct < 100) eta = `~${formatDuration(elapsed / done * (100 - pct))} left`;
+  return { pct, eta, queued: target.status === "queued" };
+}
 
-  let html = "";
-  filtered.forEach(target => {
-    const isActive = isActiveTarget(target.username, target.platform);
-    const mediaCount = target.media_count || 0;
-    const isRunning = target.status === "running" || target.status === "queued";
+function cardHTML(target) {
+  const active = isActiveTarget(target.username, target.platform);
+  const running = isRunning(target);
+  const cardClass = active
+    ? "bg-[#ff9900]/15 border-[#ff9900]/50 text-slate-900 dark:text-white font-semibold shadow-xs"
+    : "bg-white hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800 border-slate-200 dark:border-zinc-800 text-slate-700 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white";
 
-    const cardClass = isActive
-      ? "bg-[#ff9900]/15 border-[#ff9900]/50 text-slate-900 dark:text-white font-semibold shadow-xs"
-      : "bg-white hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800 border-slate-200 dark:border-zinc-800 text-slate-700 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white";
+  let dot = "bg-slate-400";
+  if (target.status === "running") dot = "bg-[#ff9900] animate-pulse";
+  else if (target.status === "queued") dot = "bg-amber-500 animate-pulse";
+  else if (target.status === "failed" || target.auth_error) dot = "bg-rose-500";
+  else if (target.status === "completed") dot = "bg-emerald-500";
 
-    let statusDotClass = "bg-slate-400";
-    if (target.status === "running") statusDotClass = "bg-[#ff9900] animate-pulse";
-    else if (target.status === "queued") statusDotClass = "bg-amber-500 animate-pulse";
-    else if (target.status === "completed") statusDotClass = "bg-emerald-500";
-    else if (target.status === "failed" || target.auth_error) statusDotClass = "bg-rose-500";
+  const u = escapeHtml(target.username);
+  const p = escapeHtml(target.platform);
+  const lastSync = timeAgo(target.updated_at);
+  const prog = progressInfo(target);
 
-    const lastSync = timeAgo(target.updated_at);
+  const syncButton = running
+    ? `<button data-action="cancel-target" data-username="${u}" data-platform="${p}" class="w-6 h-6 rounded-md bg-amber-500/10 flex items-center justify-center text-[#ff9900] hover:bg-rose-500/15 hover:text-rose-500 cursor-pointer" title="Cancel sync" aria-label="Cancel sync for @${u}"><svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg></button>`
+    : `<button data-action="quick-sync" data-username="${u}" data-platform="${p}" class="opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-slate-200 dark:hover:bg-zinc-700 p-1 rounded-md text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer" title="Sync @${u}" aria-label="Sync @${u}">
+         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+       </button>`;
 
-    const syncButtonHTML = isRunning
-      ? `<div class="w-6 h-6 rounded-md bg-amber-500/10 flex items-center justify-center text-[#ff9900]"><svg class="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg></div>`
-      : `<button data-sidebar-action="quick-sync" data-username="${escapeHtml(target.username)}" data-platform="${escapeHtml(target.platform)}" class="opacity-0 group-hover:opacity-100 hover:bg-slate-200 dark:hover:bg-zinc-700 p-1 rounded-md text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer" title="Quick Sync (@${escapeHtml(target.username)})">
-           <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-         </button>`;
+  const authFix = target.auth_error
+    ? `<button data-action="fix-cookies" data-platform="${p}" class="flex-shrink-0 text-[0.5625rem] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/80 px-1.5 py-1 rounded-md hover:bg-rose-100 dark:hover:bg-rose-950 cursor-pointer" title="Authentication error — update cookies">Fix cookies</button>`
+    : "";
 
-    const authErrorShortcut = target.auth_error
-      ? `<button data-sidebar-action="open-token-settings" data-platform="${escapeHtml(target.platform)}" class="inline-flex items-center gap-1 flex-shrink-0 text-[9px] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/80 px-1.5 py-1 rounded-md hover:bg-rose-100 dark:hover:bg-rose-950 transition-all cursor-pointer" title="Authentication error - click to fix token">Fix Token</button>`
-      : "";
+  const progress = prog
+    ? `<div class="flex items-center gap-1.5 mt-1">
+         <div class="flex-1 h-1 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden"><div class="h-full bg-[#ff9900] transition-all duration-300" style="width:${prog.queued ? 0 : prog.pct}%"></div></div>
+         <span class="text-[0.5625rem] font-mono text-slate-500 dark:text-zinc-400 whitespace-nowrap">${prog.queued ? "queued" : `${prog.pct}%${prog.eta ? ` · ${prog.eta}` : ""}`}</span>
+       </div>`
+    : "";
 
-    html += `
-      <div class="group flex items-center justify-between p-2.5 rounded-xl border transition-all duration-150 cursor-pointer ${cardClass}" data-select-target="${escapeHtml(target.username)}" data-select-platform="${escapeHtml(target.platform)}">
-        <div class="flex items-center gap-2.5 min-w-0 flex-1 mr-2">
-          <span class="w-2 h-2 rounded-full ${statusDotClass} flex-shrink-0"></span>
+  return `
+    <div data-target-key="${escapeHtml(targetKey(target))}" class="group relative p-2.5 rounded-xl border transition-colors duration-150 ${cardClass} ${target.paused && !active ? "opacity-70" : ""}">
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2.5 min-w-0 flex-1">
+          <span class="w-2 h-2 rounded-full ${dot} flex-shrink-0"></span>
           <div class="flex flex-col gap-0.5 min-w-0">
             <div class="flex items-center gap-1.5 min-w-0">
-              <span class="text-xs font-bold tracking-tight truncate select-none">@${escapeHtml(target.username)}</span>
-              <span class="text-[9px] font-bold uppercase px-1 py-0.5 rounded border flex-shrink-0 leading-none ${platformBadgeClass(target.platform)}">${escapeHtml(target.platform)}</span>
+              <a href="/?t=${encodeURIComponent(`${target.platform}/${target.username}`)}" data-action="select-target" data-username="${u}" data-platform="${p}" ${active ? 'aria-current="page"' : ""} class="text-xs font-bold tracking-tight truncate outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-2 focus-visible:after:ring-[#ff9900]">@${u}</a>
+              <span class="text-[0.5625rem] font-bold uppercase px-1 py-0.5 rounded border flex-shrink-0 leading-none ${platformBadgeClass(target.platform)}">${p}</span>
             </div>
-            <div class="flex items-center gap-1.5 text-[10px] text-slate-400 dark:text-zinc-500 font-mono">
-              <span>${mediaCount} files</span>
-              ${target.new_count > 0 ? `<span class="text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-1 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/80">+${target.new_count}</span>` : ""}
+            <div class="flex items-center gap-1.5 text-[0.625rem] text-slate-400 dark:text-zinc-500 font-mono">
+              <span>${(target.media_count || 0).toLocaleString()} files</span>
+              ${target.new_count > 0 ? `<span class="text-emerald-600 dark:text-emerald-400 font-bold">+${target.new_count}</span>` : ""}
+              ${target.paused ? `<span class="text-amber-600 dark:text-amber-400 font-bold" title="Auto-sync paused">⏸ paused</span>` : ""}
               ${lastSync ? `<span>· ${lastSync}</span>` : ""}
             </div>
           </div>
         </div>
-        <div class="flex items-center gap-1.5 flex-shrink-0">
-          ${authErrorShortcut}
-          ${syncButtonHTML}
-        </div>
+        <div class="relative z-10 flex items-center gap-1.5 flex-shrink-0">${authFix}${syncButton}</div>
       </div>
-    `;
+      ${progress}
+    </div>`;
+}
+
+export function renderDashboardSidebar() {
+  const container = $("dashboard-sidebar-list");
+  if (!container) return;
+  const filtered = visibleTargets();
+  $("sidebar-count-label").textContent = `${filtered.length}/${state.cachedProgress.length} targets`;
+  if (filtered.length === 0) {
+    container.innerHTML = `<p class="text-xs text-slate-500 dark:text-zinc-400 py-6 text-center">${state.cachedProgress.length === 0 ? "No targets configured" : "No matching targets"}</p>`;
+    return;
+  }
+  container.innerHTML = filtered.map(cardHTML).join("");
+}
+
+// Status and progress events touch one target; batch them per frame and replace only those cards.
+const pendingCards = new Set();
+let cardFrame = 0;
+
+export function updateTargetCard(target) {
+  pendingCards.add(targetKey(target));
+  if (cardFrame) return;
+  cardFrame = requestAnimationFrame(() => {
+    cardFrame = 0;
+    pendingCards.forEach(key => {
+      const t = state.cachedProgress.find(x => targetKey(x) === key);
+      const el = document.querySelector(`[data-target-key="${CSS.escape(key)}"]`);
+      if (t && el) el.outerHTML = cardHTML(t);
+    });
+    pendingCards.clear();
   });
-
-  container.innerHTML = html;
 }
 
-export function selectTerminalUser(username, platform) {
-  const target = findTarget(username, platform);
-  state.activeTerminalUser = username;
-  state.activeTerminalPlatform = target ? target.platform : (platform || null);
-  renderDashboardSidebar();
-  closeSidebar();
+/* ---------- active target header ---------- */
 
+export function showTargetChrome(target) {
+  $("header-breadcrumb-label").textContent = `@${target.username}`;
+  $("dashboard-empty").classList.add("hidden");
+  for (const id of ["dashboard-target-header", "dashboard-gallery-card"]) {
+    $(id).classList.remove("hidden");
+    $(id).classList.add("flex");
+  }
+  $("dashboard-username-label").textContent = `@${target.username}`;
+  const badge = $("dashboard-platform-badge");
+  badge.textContent = target.platform.toUpperCase();
+  badge.className = `text-[0.625rem] font-bold uppercase px-2 py-0.5 rounded border ${platformBadgeClass(target.platform)}`;
+  document.title = `@${target.username} · IdolHub`;
+  updateDashboardDetails(target);
+  renderPauseState();
+}
+
+export function hideTargetChrome() {
+  $("header-breadcrumb-label").textContent = "Overview";
+  for (const id of ["dashboard-target-header", "dashboard-gallery-card"]) {
+    $(id).classList.add("hidden");
+    $(id).classList.remove("flex");
+  }
+  $("dashboard-empty").classList.remove("hidden");
+  $("selection-bar").classList.add("hidden");
+  $("selection-bar").classList.remove("flex");
+  document.title = "IdolHub — Media Archiver Studio";
+}
+
+export function updateDashboardDetails(target = activeTarget()) {
   if (!target) return;
-
-  const breadcrumb = document.getElementById("header-breadcrumb-label");
-  if (breadcrumb) breadcrumb.textContent = `@${target.username}`;
-
-  document.getElementById("dashboard-empty").style.display = "none";
-  document.getElementById("dashboard-target-header").style.display = "flex";
-  document.getElementById("dashboard-gallery-card").style.display = "flex";
-
-  document.getElementById("dashboard-username-label").textContent = `@${target.username}`;
-
-  const platformBadge = document.getElementById("dashboard-platform-badge");
-  platformBadge.textContent = target.platform.toUpperCase();
-  platformBadge.className = `text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${platformBadgeClass(target.platform)}`;
-
-  const syncBtn = document.getElementById("dashboard-btn-sync");
-  syncBtn.onclick = () => startSync(target.username, target.platform, true);
-
-  document.getElementById("dashboard-btn-edit").onclick = () => {
-    fetchConfig().then(cfg => {
-      const acc = cfg.accounts.find(a => a.platform === target.platform && a.username.toLowerCase() === target.username.toLowerCase());
-      if (acc) {
-        window.dispatchEvent(new CustomEvent("open-edit-modal", {
-          detail: {
-            username: acc.username,
-            platform: acc.platform,
-            save_text: acc.save_text || false,
-            skip_retweets: acc.skip_retweets || false,
-            download_photos: acc.download_photos !== false,
-            download_videos: acc.download_videos !== false,
-            filters: acc.filters || []
-          }
-        }));
-      }
-    }).catch(err => toast(`Failed to load config: ${err.message}`, "error"));
-  };
-
-  document.getElementById("dashboard-btn-delete").onclick = async () => {
-    const ok = await confirmDialog({
-      title: "Delete Target Account",
-      message: `Remove @${target.username} from active configuration? Downloaded files will remain safe on disk.`,
-      confirmText: "Delete",
-      tone: "danger",
-    });
-    if (!ok) return;
-    deleteAccount(target.username, target.platform);
-    goToOverview();
-  };
-
-  document.getElementById("dashboard-btn-clear").onclick = async () => {
-    const ok = await confirmDialog({
-      title: "Clear Downloaded Files",
-      message: `Permanently delete all downloaded media for @${target.username}? This action cannot be undone.`,
-      confirmText: "Clear Files",
-      tone: "danger",
-    });
-    if (!ok) return;
-    clearTargetFolder(target.platform, target.username);
-  };
-
-  document.getElementById("dashboard-btn-cancel").onclick = () => cancelSync(target.username, target.platform);
-
-  updateDashboardDetails();
-  updateTerminal();
-  saveUiState();
-  return selectGalleryTarget(target.platform, target.username);
-}
-
-let uiRestored = false;
-
-export async function restorePersistedView() {
-  if (uiRestored) return;
-  uiRestored = true;
-  const saved = loadUiState();
-  if (!saved || !saved.activeTerminalUser) return;
-  const target = findTarget(saved.activeTerminalUser, saved.activeTerminalPlatform);
-  if (!target) return;
-
-  await selectTerminalUser(target.username, target.platform);
-
-  state.currentView = saved.currentView === "posts" ? "posts" : "grid";
-  state.currentFilter = saved.currentFilter || "all";
-  state.gridSearchQuery = saved.gridSearchQuery || "";
-  state.postsSearchQuery = saved.postsSearchQuery || "";
-  state.targetPlatformFilter = saved.targetPlatformFilter || "all";
-  (Array.isArray(saved.selectedYears) ? saved.selectedYears : []).forEach(y => state.selectedYears.add(String(y)));
-  (Array.isArray(saved.selectedMonths) ? saved.selectedMonths : []).forEach(m => state.selectedMonths.add(String(m)));
-  (Array.isArray(saved.selectedHashtags) ? saved.selectedHashtags : []).forEach(t => state.selectedHashtags.add(String(t)));
-
-  populateDateDropdown();
-  populateHashtagDropdown();
-  updateDateFilterLabel();
-  updateHashtagLabel();
-  renderPostsSortState();
-  switchGalleryView(state.currentView);
-  syncMediaTypePills();
-
-  const galleryInput = document.getElementById("gallery-search-input");
-  if (galleryInput && state.gridSearchQuery) galleryInput.value = state.gridSearchQuery;
-}
-
-export function goToOverview() {
-  state.activeTerminalUser = null;
-  state.activeTerminalPlatform = null;
-  state.activeGalleryUser = null;
-  saveUiState();
-  const breadcrumb = document.getElementById("header-breadcrumb-label");
-  if (breadcrumb) breadcrumb.textContent = "Overview";
-
-  document.getElementById("dashboard-target-header").style.display = "none";
-  document.getElementById("dashboard-gallery-card").style.display = "none";
-  document.getElementById("dashboard-empty").style.display = "flex";
-
-  renderDashboardSidebar();
-  renderOverviewDashboard();
-}
-
-export function updateDashboardDetails() {
-  const target = activeTarget();
-  if (!target) return;
-
-  const countEl = document.getElementById("dashboard-file-count");
-  if (countEl) countEl.innerHTML = `<svg class="w-3 h-3 text-slate-400 inline mr-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5" rx="1"/><line x1="10" y1="13" x2="14" y2="13"/></svg> ${target.media_count || 0} files`;
-
-  const isRunning = target.status === "running" || target.status === "queued";
-  const syncBtn = document.getElementById("dashboard-btn-sync");
-  const cancelBtn = document.getElementById("dashboard-btn-cancel");
-  if (syncBtn) syncBtn.disabled = isRunning;
-  if (cancelBtn) {
-    cancelBtn.classList.toggle("hidden", !isRunning);
-    cancelBtn.classList.toggle("flex", isRunning);
+  $("dashboard-file-count").textContent = `${(target.media_count || 0).toLocaleString()} files`;
+  const running = isRunning(target);
+  $("dashboard-btn-sync").disabled = running;
+  $("dashboard-btn-cancel").classList.toggle("hidden", !running);
+  const prog = progressInfo(target);
+  const box = $("dashboard-progress");
+  box.classList.toggle("hidden", !prog);
+  box.classList.toggle("flex", !!prog);
+  if (prog) {
+    $("dashboard-progress-bar").style.width = `${prog.queued ? 0 : prog.pct}%`;
+    $("dashboard-progress-label").textContent = prog.queued ? "queued" : `${prog.pct}%${prog.eta ? ` · ${prog.eta}` : ""}`;
   }
 }
 
-export async function quickSyncTarget(username, platform) {
-  try {
-    await startSyncApi(username, false, platform);
-    toast(`Sync started for @${username}`, "success", 2000);
-  } catch (err) {
-    toast(`Failed to sync @${username}: ${err.message}`, "error");
-  }
-}
+/* ---------- actions ---------- */
 
-export async function startSync(username, platform, shouldSelect = false) {
+export async function startSync(username, platform, forceFull = false) {
   try {
-    await startSyncApi(username, false, platform);
-    if (shouldSelect) selectTerminalUser(username, platform);
-    toast(`Sync started for @${username}`, "success", 2000);
+    await startSyncApi(username, forceFull, platform);
+    toast(forceFull ? `Full resync started for @${username}` : `Sync started for @${username}`, "success", 2000);
   } catch (err) {
     toast(`Failed to start sync: ${err.message}`, "error");
-  }
-}
-
-export async function fullResyncAll() {
-  const ok = await confirmDialog({
-    title: "Force Full Resync All Targets",
-    message: "This will fully rescan all configured targets from the beginning of their feeds. Existing files will be preserved. Proceed?",
-    confirmText: "Start Full Resync",
-    tone: "primary",
-  });
-  if (!ok) return;
-
-  try {
-    const modal = document.getElementById("settings-modal");
-    if (modal) modal.style.display = "none";
-    await startSyncApi("all", true);
-    toast("Full resync started for all targets.", "success", 2500);
-  } catch (err) {
-    toast(`Failed to start full resync: ${err.message}`, "error");
   }
 }
 
@@ -296,7 +189,8 @@ export async function cancelSync(username, platform) {
   const ok = await confirmDialog({
     title: "Cancel Active Sync",
     message: `Stop the running sync for @${username}? Downloaded files will be kept.`,
-    confirmText: "Cancel Sync",
+    confirmText: "Stop sync",
+    cancelText: "Keep running",
     tone: "danger",
   });
   if (!ok) return;
@@ -308,37 +202,102 @@ export async function cancelSync(username, platform) {
   }
 }
 
-export async function deleteAccount(username, platform) {
+export async function fullResync(username, platform) {
+  const ok = await confirmDialog({
+    title: "Force Full Resync",
+    message: `Fully rescan @${username} from the beginning of its feed? Existing files will be preserved.`,
+    confirmText: "Start Full Resync",
+    tone: "primary",
+  });
+  if (ok) startSync(username, platform, true);
+}
+
+async function deleteAccount(target) {
+  const ok = await confirmDialog({
+    title: "Remove Target",
+    message: `Stop archiving @${target.username} (${target.platform})? Downloaded files stay on disk.`,
+    confirmText: "Remove target",
+    tone: "danger",
+  });
+  if (!ok) return;
   try {
-    const current = await fetchConfig();
-    current.accounts = current.accounts.filter(acc => !(acc.platform === platform && acc.username.toLowerCase() === username.toLowerCase()));
-    await postConfig(current);
-    toast(`Removed @${username}`, "success");
+    await deleteAccountApi(target.platform, target.username);
+    toast(`Removed @${target.username}`, "success");
+    goOverview();
+    loadProgress();
   } catch (err) {
-    toast(`Failed to delete @${username}: ${err.message}`, "error");
+    toast(`Failed to remove @${target.username}: ${err.message}`, "error");
   }
 }
 
-export async function clearTargetFolder(platform, username) {
+async function clearTargetFolder(target) {
+  const ok = await confirmDialog({
+    title: "Erase Downloaded Files",
+    message: `Permanently delete every downloaded file for @${target.username}?\nThe target stays configured. This cannot be undone.`,
+    confirmText: "Erase files",
+    tone: "danger",
+  });
+  if (!ok) return;
   try {
-    await clearFolderApi(platform, username);
-    toast(`Cleared downloads for @${username}`, "success");
-    selectGalleryTarget(platform, username);
+    await clearFolderApi(target.platform, target.username);
+    toast(`Erased downloads for @${target.username}`, "success");
+    state.target = null;
+    showTarget(target);
+    loadProgress();
   } catch (err) {
-    toast(`Failed to clear folder: ${err.message}`, "error");
+    toast(`Failed to erase files: ${err.message}`, "error");
   }
+}
+
+function withActive(fn) {
+  return () => {
+    document.querySelectorAll("[popover]:popover-open").forEach(p => p.hidePopover());
+    const t = state.target;
+    if (t) fn(t);
+  };
 }
 
 export function openSidebar() {
-  const sb = document.getElementById("sidebar-container");
-  const ov = document.getElementById("sidebar-overlay");
-  if (sb) sb.classList.remove("-translate-x-full");
-  if (ov) ov.classList.remove("hidden");
+  $("sidebar-container").classList.remove("-translate-x-full");
+  $("sidebar-overlay").classList.remove("hidden");
 }
 
 export function closeSidebar() {
-  const sb = document.getElementById("sidebar-container");
-  const ov = document.getElementById("sidebar-overlay");
-  if (sb) sb.classList.add("-translate-x-full");
-  if (ov) ov.classList.add("hidden");
+  $("sidebar-container").classList.add("-translate-x-full");
+  $("sidebar-overlay").classList.add("hidden");
 }
+
+export function setPlatformFilter(platform) {
+  state.targetPlatformFilter = platform;
+  document.querySelectorAll("#target-platform-chips [data-platform]").forEach(b => b.setAttribute("aria-pressed", b.dataset.platform === platform ? "true" : "false"));
+  renderDashboardSidebar();
+}
+
+onClick({
+  "select-target": (el) => goTarget(el.dataset.username, el.dataset.platform),
+  "quick-sync": (el) => startSync(el.dataset.username, el.dataset.platform),
+  "cancel-target": (el) => cancelSync(el.dataset.username, el.dataset.platform),
+  "fix-cookies": (el) => openSettings(el.dataset.platform),
+  "sync-active": withActive(t => startSync(t.username, t.platform)),
+  "cancel-active": withActive(t => cancelSync(t.username, t.platform)),
+  "full-resync-active": withActive(t => fullResync(t.username, t.platform)),
+  "clear-active": withActive(clearTargetFolder),
+  "delete-active": withActive(deleteAccount),
+  "open-sidebar": openSidebar,
+  "close-sidebar": closeSidebar,
+  "platform-filter": (el) => setPlatformFilter(el.dataset.platform),
+  "clear-target-filter": () => {
+    $("target-search-input").value = "";
+    state.targetSearchQuery = "";
+    $("target-search-clear").classList.add("hidden");
+    renderDashboardSidebar();
+  }
+});
+
+onInput({
+  "filter-targets": (el) => {
+    state.targetSearchQuery = el.value.toLowerCase().trim();
+    $("target-search-clear").classList.toggle("hidden", !state.targetSearchQuery);
+    renderDashboardSidebar();
+  }
+});

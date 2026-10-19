@@ -27,7 +27,7 @@ func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
 	if opts.Posts == nil {
 		return fmt.Errorf("post store is not configured")
 	}
-	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.LastSync, opts.ForceFull, sessionID, opts.InstagramCookies, opts.InstagramSidecarURL, opts.Posts, opts.OnProgress)
+	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.cutoff(), opts.MaxPosts, opts.ForceFull, sessionID, opts.InstagramCookies, opts.InstagramSidecarURL, opts.Posts, opts.OnProgress)
 }
 
 // igFeedItem is one media node from the graphql user timeline response.
@@ -99,7 +99,7 @@ func bestVideoURL(vs []igVideoVersion) string {
 }
 
 // scrapeInstagramDirect pulls timeline media via the private Instagram web API
-func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, forceFull bool, sessionID, cookieExport, sidecarURL string, posts *store.PostStore, onProgress func(pct int, msg string)) error {
+func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, maxPosts int, forceFull bool, sessionID, cookieExport, sidecarURL string, posts *store.PostStore, onProgress func(pct int, msg string)) error {
 	if sessionID == "" && cookieExport == "" && sidecarURL == "" {
 		return fmt.Errorf("instagram session is not configured")
 	}
@@ -165,6 +165,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	page := 0
 	reachedOldPosts := false
 	consecutiveExistingPosts := 0
+	taken := 0
 	for {
 		if ctx.Err() != nil {
 			return abort(ctx.Err())
@@ -256,6 +257,12 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 				}
 			}
 
+			if maxPosts > 0 && taken >= maxPosts {
+				slog.Info("Reached the post limit for this sync, stopping pagination", "user", username, "max_posts", maxPosts)
+				reachedOldPosts = true
+				break
+			}
+
 			if isOlderThanLastSync || allExisting {
 				consecutiveExistingPosts++
 				// Require 3 consecutive existing/older posts to safely bypass pinned posts
@@ -266,6 +273,11 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 			} else {
 				consecutiveExistingPosts = 0
 			}
+			// posts past the cutoff only count towards the pinned-post allowance above; they are never fetched
+			if isOlderThanLastSync {
+				continue
+			}
+			taken++
 
 			for _, entry := range postEntries {
 				select {

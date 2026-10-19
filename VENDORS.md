@@ -2,12 +2,6 @@
 
 Pinned frontend vendor files. Update together with the sha256 checksums.
 
-## htmx 2.0.4
-
-- `cmd/parser/web/static/vendor/htmx.min.js`
-- Source: https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js
-- sha256: `e209dda5c8235479f3166defc7750e1dbcd5a5c1808b7792fc2e6733768fb447`
-
 ## PhotoSwipe 5.4.4
 
 - `cmd/parser/web/static/vendor/photoswipe-lightbox.esm.min.js`

@@ -24,6 +24,13 @@
 }
 
 @layer base {
+  /* Everything is sized in rem, so the root size scales the whole UI: 16px up to a 1600px-wide window
+     (MacBook built-in displays), growing to 24px at 3840px (a 4K panel at native resolution).
+     --ui-scale is the viewer's own multiplier from Settings, applied on top so it keeps adapting per screen. */
+  :root {
+    --ui-scale: 1;
+    font-size: calc(clamp(16px, 16px + (100vw - 1600px) * 0.00357, 24px) * var(--ui-scale));
+  }
   body {
     @apply bg-slate-50 text-slate-900 dark:bg-zinc-950 dark:text-zinc-100 transition-colors duration-150 antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
@@ -34,47 +41,112 @@
   ::-webkit-scrollbar-thumb:hover { @apply bg-slate-400 dark:bg-zinc-700; }
 }
 
-/* Gallery Grid Density modes */
-.density-relaxed {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-@media (min-width: 640px) {
-  .density-relaxed { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-}
-@media (min-width: 1024px) {
-  .density-relaxed { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-}
-@media (min-width: 1440px) {
-  .density-relaxed { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-}
-@media (min-width: 1920px) {
-  .density-relaxed { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary { @apply bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold border-[#ff9900] shadow-xs; }
+  .btn-secondary { @apply bg-white hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-700 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white border-slate-200 dark:border-zinc-800 shadow-2xs; }
+  .btn-danger { @apply bg-rose-600 hover:bg-rose-700 text-white border-rose-600 shadow-xs; }
+  .btn-link { @apply text-xs font-bold text-[#ff9900] hover:underline cursor-pointer; }
+  .btn-icon { @apply inline-flex items-center justify-center p-2 rounded-lg text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-900 transition-colors cursor-pointer; }
+
+  /* toggle buttons: JS only flips aria-pressed */
+  .pill {
+    @apply inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold px-2.5 py-1 rounded-lg border cursor-pointer transition-colors bg-slate-100 dark:bg-zinc-900 hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-700 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white border-slate-200 dark:border-zinc-800;
+  }
+  .pill[aria-pressed="true"] { @apply bg-[#ff9900] hover:bg-[#ff9900] text-black dark:text-black hover:text-black border-[#ff9900] font-bold shadow-2xs; }
+  .seg { @apply flex items-center gap-0.5 bg-slate-100 dark:bg-zinc-950 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800; }
+  .seg > button {
+    @apply inline-flex flex-1 items-center justify-center gap-1 whitespace-nowrap text-xs font-semibold px-2.5 py-1 rounded-md cursor-pointer transition-colors text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white;
+  }
+  .seg > button[aria-pressed="true"] { @apply bg-[#ff9900] text-black dark:text-black hover:text-black font-bold shadow-2xs; }
+
+  .input {
+    @apply w-full bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg text-xs outline-none focus:border-[#ff9900] transition-colors text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-zinc-500;
+  }
+  .label { @apply text-[0.625rem] font-bold text-slate-500 dark:text-zinc-400 uppercase tracking-wider; }
+  .card { @apply bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-2xs; }
+  .kbd { @apply font-mono text-[0.625rem] px-1 py-px rounded border border-slate-300 dark:border-zinc-700 bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300; }
+
+  /* popover menus are positioned by JS next to their invoker */
+  .menu {
+    @apply fixed m-0 bg-white dark:bg-zinc-900 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl p-2;
+    inset: auto;
+  }
+  .menu-item { @apply flex w-full items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-left cursor-pointer text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-white; }
+  .menu-item.danger { @apply text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40; }
+
+  .modal {
+    @apply bg-white dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 border border-slate-200 dark:border-zinc-800 rounded-2xl p-6 w-[calc(100%-2rem)] shadow-2xl m-auto;
+  }
+  .modal::backdrop { @apply bg-black/70 backdrop-blur-xs; }
+  .modal-title { @apply text-sm font-bold uppercase tracking-wider flex items-center gap-2; }
 }
 
+/* switches and tabs */
+[role="switch"][aria-checked="true"] > span { transform: translateX(1rem); }
+[role="tab"] {
+  @apply px-3 py-2 -mb-px border-b-2 border-transparent text-slate-500 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white cursor-pointer whitespace-nowrap;
+}
+[role="tab"][aria-selected="true"] { @apply border-[#ff9900] text-slate-900 dark:text-white; }
+[aria-invalid="true"] { @apply border-rose-500 dark:border-rose-500; }
+
+/* Gallery selection mode */
+.select-check {
+  @apply absolute top-2 left-2 z-30 w-6 h-6 rounded-full border-2 border-white bg-black/40 text-transparent items-center justify-center shadow-md hidden;
+}
+.selecting .select-check { display: flex; }
+.selecting .gallery-item.is-selected { @apply border-[#ff9900] ring-2 ring-[#ff9900]; }
+.selecting .gallery-item.is-selected .select-check { @apply bg-[#ff9900] border-[#ff9900] text-black; }
+
+/* On phones the activity dock only appears when opened from the header */
+@media (max-width: 767px) {
+  #bottom-dock-console:not(.is-open) { display: none; }
+}
+
+/* Gallery grid density: tiles have a rem-based minimum width, so column count follows window size and UI scale */
+.density-relaxed {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(11rem, 42vw), 1fr));
+}
 .density-compact {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-@media (min-width: 640px) {
-  .density-compact { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-}
-@media (min-width: 1024px) {
-  .density-compact { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-}
-@media (min-width: 1440px) {
-  .density-compact { grid-template-columns: repeat(7, minmax(0, 1fr)); }
-}
-@media (min-width: 1920px) {
-  .density-compact { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  grid-template-columns: repeat(auto-fill, minmax(min(7rem, 28vw), 1fr));
 }
 
 /* Gallery Grid Item */
 .gallery-item {
   width: 100%;
   content-visibility: auto;
-  contain-intrinsic-size: auto 160px;
+  contain-intrinsic-size: auto 11rem;
 }
+.post-card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 20rem;
+}
+
+/* PhotoSwipe caption and toolbar links */
+.pswp__caption {
+  position: absolute;
+  left: 50%;
+  bottom: 1rem;
+  transform: translateX(-50%);
+  max-width: min(45rem, calc(100% - 2rem));
+  max-height: 30vh;
+  overflow-y: auto;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.75rem;
+  background: rgba(0, 0, 0, 0.7);
+  color: #e4e4e7;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.pswp__caption time { display: block; font-family: var(--font-mono); font-size: 0.6875rem; color: #ff9900; }
+.pswp__caption[hidden] { display: none; }
+a.pswp__button { display: flex; align-items: center; justify-content: center; color: #fff; }
 
 /* Video Hover Preview */
 .video-preview-tile video {
