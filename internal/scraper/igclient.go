@@ -434,12 +434,7 @@ func isRateLimitBody(body string) bool {
 func buildGraphQLForm(username, userID, after string, count int, ownUserID, csrf, docID string) *url.Values {
 	v := url.Values{}
 	vars := map[string]any{
-		"username":               username,
-		"first":                  count,
-		"after":                  after,
-		"before":                 nil,
-		"last":                   nil,
-		"include_multi_captions": true,
+		"username": username,
 		"data": map[string]any{
 			"count":                             count,
 			"include_reel_media_seen_timestamp": true,
@@ -448,8 +443,12 @@ func buildGraphQLForm(username, userID, after string, count int, ownUserID, csrf
 			"latest_reel_media":                 true,
 		},
 		"__relay_internal__pv__PolarisMultiCaptionCarouselEnabledrelayprovider":  true,
-		"__relay_internal__pv__PolarisShortDramaEnabledrelayprovider":            false,
+		"__relay_internal__pv__PolarisShortDramaEnabledrelayprovider":            true,
+		"__relay_internal__pv__PolarisThreadsStyleCommentsEnabledrelayprovider":  false,
 		"__relay_internal__pv__PolarisReelsRecoDebugOverlayEnabledrelayprovider": false,
+	}
+	if after != "" {
+		vars["after"] = after
 	}
 	varsJSON, err := json.Marshal(vars)
 	if err != nil {

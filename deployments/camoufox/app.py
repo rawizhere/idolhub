@@ -15,7 +15,7 @@ import asyncio
 import os
 import time
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from camoufox.async_api import AsyncCamoufox
 from fastapi import FastAPI, HTTPException, Request
@@ -112,6 +112,50 @@ async def snapshot() -> None:
     state["last_snapshot"] = time.time()
 
 
+async def capture_request(req) -> None:
+    """Page-network level capture: instagram's own code does not always go
+    through the wrapped window.fetch, so record the profile-posts graphql
+    request straight from the browser network events."""
+    try:
+        url = req.url
+        if "/api/graphql" not in url and "/graphql/query" not in url:
+            return
+        post = req.post_data
+        if not post or "PolarisProfilePostsQuery" not in post or "__dyn=" not in post:
+            return
+        post = req.post_data
+        if isinstance(post, bytes):
+            post = post.decode("utf-8", "replace")
+        if not post or "PolarisProfilePostsQuery" not in post or "__dyn=" not in post:
+            return
+        hdrs = req.headers
+        body_pieces = post.split("&")
+        parsed = {}
+        for piece in body_pieces:
+            if "=" in piece:
+                k, v = piece.split("=", 1)
+                parsed[k] = unquote(v)
+        if parsed.get("doc_id"):
+            state["doc_id"] = parsed["doc_id"]
+        if parsed.get("fb_dtsg"):
+            state["fb_dtsg"] = parsed["fb_dtsg"]
+        if hdrs.get("x-asbd-id") or hdrs.get("X-ASBD-ID"):
+            state["asbd_id"] = hdrs.get("x-asbd-id") or hdrs.get("X-ASBD-ID")
+    except Exception as e:  # noqa: BLE001 - capture must never break the request flow
+        state["capture_error"] = str(e)
+
+
+async def capture_response(resp) -> None:
+    try:
+        if "/api/graphql" not in resp.url and "/graphql/query" not in resp.url:
+            return
+        claim = resp.headers.get("x-ig-set-www-claim")
+        if claim:
+            state["www_claim"] = claim
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def harvest() -> None:
     """Wait until instagram's own page JS fires the profile-posts graphql
     request, then take the request identity from it."""
@@ -120,6 +164,8 @@ async def harvest() -> None:
         return
     deadline = time.time() + HARVEST_TIMEOUT_S
     while time.time() < deadline:
+        if state["doc_id"] and state["fb_dtsg"]:
+            return
         cap = await page.evaluate("() => window.__igcap")
         if cap:
             hdrs = cap.get("headers") or {}
@@ -130,7 +176,7 @@ async def harvest() -> None:
                 if piece.startswith("doc_id="):
                     state["doc_id"] = piece[len("doc_id="):]
                 elif piece.startswith("fb_dtsg=") and len(piece) > len("fb_dtsg="):
-                    state["fb_dtsg"] = urllib.parse.unquote(piece[len("fb_dtsg="):])
+                    state["fb_dtsg"] = unquote(piece[len("fb_dtsg="):])
             return
         await asyncio.sleep(0.5)
 
@@ -161,6 +207,8 @@ async def launch_browser() -> None:
     state["context"] = await launch.__aenter__()
     page = await state["context"].new_page()
     await page.add_init_script(CAPTURE_JS)
+    page.on("request", lambda r: asyncio.ensure_future(capture_request(r)))
+    page.on("response", lambda r: asyncio.ensure_future(capture_response(r)))
     await page.goto("https://www.instagram.com/", wait_until="domcontentloaded",
                     timeout=PAGE_TIMEOUT_MS)
     state["page"] = page
@@ -211,7 +259,8 @@ async def status() -> dict:
     out = {"ready": state["ready"], "last_error": state["last_error"],
            "last_snapshot": state["last_snapshot"],
            "doc_id": state["doc_id"], "asbd_id": state["asbd_id"],
-           "www_claim": state["www_claim"], "fb_dtsg": state["fb_dtsg"]}
+           "www_claim": state["www_claim"], "fb_dtsg": state["fb_dtsg"],
+           "capture_error": state.get("capture_error")}
     if ctx is None:
         out["session"] = "no-context"
         return out
