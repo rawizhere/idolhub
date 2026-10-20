@@ -372,7 +372,8 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 	}
 	switch resp.StatusCode {
 	case fhttp.StatusOK:
-		if len(body) > 0 && body[0] == '<' {
+		// the legacy "for (;;);{"__ar":1,...}" envelope means stale fb_dtsg/doc_id or a rejected session, same handling as HTML
+		if len(body) > 0 && (body[0] == '<' || strings.HasPrefix(string(body), "for (;;);")) {
 			// Stale doc_id or rejected session: re-read doc_id once.
 			if !c.docIDRefreshed {
 				c.docIDRefreshed = true

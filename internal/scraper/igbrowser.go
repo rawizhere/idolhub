@@ -136,8 +136,10 @@ func handleBrowserStatus(res *igbrowser.FetchResult, what string) ([]byte, error
 	}
 	switch {
 	case res.Status == 200:
-		if strings.HasPrefix(strings.TrimSpace(res.Body), "<") {
-			return nil, fmt.Errorf("%w: %s returned HTML instead of JSON (session rejected)", ErrAuthExpired, what)
+		trimmed := strings.TrimSpace(res.Body)
+		// "for (;;);{"__ar":1,...}" is the legacy envelope instagram serves for stale fb_dtsg/doc_id or a rejected session
+		if strings.HasPrefix(trimmed, "<") || strings.HasPrefix(trimmed, "for (;;);") {
+			return nil, fmt.Errorf("%w: %s returned a non-JSON response (stale request identity or session rejected)", ErrAuthExpired, what)
 		}
 		return []byte(res.Body), nil
 	case res.Status == 429:

@@ -13,9 +13,10 @@ runtime from instagram's own in-page requests, never hardcoded.
 
 import asyncio
 import os
+import re
 import time
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import quote_plus, unquote, urlparse
 
 from camoufox.async_api import AsyncCamoufox
 from fastapi import FastAPI, HTTPException, Request
@@ -308,6 +309,13 @@ async def fetch(req: FetchReq) -> dict:
                     raise HTTPException(400, "only instagram.com urls are allowed")
                 await navigate(req.navigate)
                 await harvest()
+            # the body was built before the navigation that harvested the fresh identity; substitute it
+            body = req.body
+            if body:
+                if state["fb_dtsg"] and "fb_dtsg=" in body:
+                    body = re.sub(r"fb_dtsg=[^&]*", "fb_dtsg=" + quote_plus(state["fb_dtsg"]), body)
+                if state["doc_id"] and "doc_id=" in body:
+                    body = re.sub(r"doc_id=[^&]*", "doc_id=" + state["doc_id"], body)
             # bound the whole in-page fetch so a stuck page returns 502 and releases the lock
             result = await asyncio.wait_for(page.evaluate(
                 """async ({url, method, body, asbd, claim}) => {
@@ -331,7 +339,7 @@ async def fetch(req: FetchReq) -> dict:
                     return {status: r.status, body: text,
                             www_claim: r.headers.get("x-ig-set-www-claim")};
                 }""",
-                {"url": req.url, "method": req.method, "body": req.body,
+                {"url": req.url, "method": req.method, "body": body,
                  "asbd": state["asbd_id"], "claim": state["www_claim"]},
             ), timeout=PAGE_TIMEOUT_MS / 1000 + 5)
             if result.get("www_claim"):
