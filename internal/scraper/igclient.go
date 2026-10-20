@@ -34,7 +34,7 @@ const igASBDID = "129477"
 
 // Built-in graphql doc_id and frontend build revision. The doc_id refreshes itself from the js bundles when instagram starts answering with HTML.
 const (
-	defaultIGGraphQLDocID = "39535953862670189"
+	defaultIGGraphQLDocID = "29658130283778926"
 	defaultIGSpinR        = "1046911589"
 )
 
@@ -44,6 +44,9 @@ var igSrcRe = regexp.MustCompile(`src="([^"]+\.js)"`)
 // igOpDocIDRe extracts the profile-posts doc_id from the Relay operation definition inside a JS bundle. Instagram stopped embedding doc_id in the page HTML; the mapping now lives in a bundle next to the query name.
 var igOpDocIDRe = regexp.MustCompile(
 	`PolarisProfilePostsTabContentQuery_connection_instagramRelayOperation",\[\],\(function\([^)]*\)\{[a-z]\.exports="([0-9]{10,21})"`)
+
+// igDTSGRe extracts the fb_dtsg token (DTSGInitData) from the page HTML; the /api/graphql endpoint rejects graphql posts without it.
+var igDTSGRe = regexp.MustCompile(`DTSGInitData",\[\],\{"token":"([^"]+)"`)
 
 // refreshDocID harvests the current doc_id from the JS bundles referenced by the profile page.
 func (c *igClient) refreshDocID(ctx context.Context, username string) error {
@@ -64,6 +67,9 @@ func (c *igClient) refreshDocID(ctx context.Context, username string) error {
 		bundles++
 		if dm := igOpDocIDRe.FindStringSubmatch(string(bundle)); dm != nil {
 			c.docID = dm[1]
+			if tm := igDTSGRe.FindStringSubmatch(string(page)); tm != nil {
+				c.dtsg = tm[1]
+			}
 			slog.Info("Refreshed Instagram doc_id from js bundle", "doc_id", c.docID, "bundles", bundles)
 			return nil
 		}
@@ -92,6 +98,7 @@ type igClient struct {
 	csrf   string
 	userID string
 	docID  string
+	dtsg   string
 
 	docIDRefreshed bool
 	bootMu         sync.Mutex
@@ -201,9 +208,13 @@ func (c *igClient) bootstrap(ctx context.Context) error {
 	c.bootMu.Lock()
 	defer c.bootMu.Unlock()
 
-	if c.csrf == "" {
-		if _, err := c.fetchPage(ctx, "https://www.instagram.com/"); err != nil {
+	if c.csrf == "" || c.dtsg == "" {
+		home, err := c.fetchPage(ctx, "https://www.instagram.com/")
+		if err != nil {
 			return fmt.Errorf("fetch instagram home: %w", err)
+		}
+		if tm := igDTSGRe.FindStringSubmatch(string(home)); tm != nil {
+			c.dtsg = tm[1]
 		}
 	}
 	if c.userID == "" {
@@ -328,8 +339,9 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 	}
 	form := buildGraphQLForm(username, userID, after, count, c.userID, c.csrf, c.docID)
 	form.Set("__spin_t", strconv.FormatInt(time.Now().Unix(), 10))
+	form.Set("fb_dtsg", c.dtsg)
 
-	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodPost, "https://www.instagram.com/graphql/query", strings.NewReader(form.Encode()))
+	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodPost, "https://www.instagram.com/api/graphql", strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}
@@ -449,7 +461,8 @@ func buildGraphQLForm(username, userID, after string, count int, ownUserID, csrf
 	}
 	v.Set("av", user)
 	v.Set("__d", "www")
-	v.Set("__user", user)
+	// the new /api/graphql endpoint treats a non-zero __user that does not match the session actor as logged out
+	v.Set("__user", "0")
 	v.Set("__a", "1")
 	v.Set("__ccg", "EXCELLENT")
 	v.Set("__comet_req", "7")
@@ -457,7 +470,7 @@ func buildGraphQLForm(username, userID, after string, count int, ownUserID, csrf
 	v.Set("__spin_b", "trunk")
 	v.Set("__crn", "comet.igweb.PolarisProfilePostsTabRoute")
 	v.Set("fb_api_caller_class", "RelayModern")
-	v.Set("fb_api_req_friendly_name", "PolarisProfilePostsTabContentQuery_connection")
+	v.Set("fb_api_req_friendly_name", "PolarisProfilePostsQuery")
 	v.Set("server_timestamps", "true")
 	v.Set("variables", string(varsJSON))
 	v.Set("doc_id", docID)

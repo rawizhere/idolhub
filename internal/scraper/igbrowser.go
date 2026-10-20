@@ -64,6 +64,7 @@ type igBrowserClient struct {
 	sc       *igbrowser.Client
 	ownID    string
 	docID    string
+	dtsg     string
 	Resolved bool
 }
 
@@ -92,15 +93,33 @@ func (b *igBrowserClient) doGet(ctx context.Context, apiURL, username string) ([
 }
 
 func (b *igBrowserClient) doGraphQL(ctx context.Context, username, userID, after string, count int) ([]byte, error) {
-	form := buildGraphQLForm(username, userID, after, count, b.ownID, "", b.docID)
-	body := form.Encode()
-	// Navigate to the profile first: the page's own JS fires the same graphql operation, and the sidecar harvests the fresh doc_id / asbd-id / www-claim from it before we send ours.
-	res, err := b.sc.Fetch(ctx, "https://www.instagram.com/graphql/query", "POST", body,
-		"https://www.instagram.com/"+username+"/")
-	if err != nil {
-		return nil, err
+	send := func() ([]byte, error) {
+		form := buildGraphQLForm(username, userID, after, count, b.ownID, "", b.docID)
+		form.Set("fb_dtsg", b.dtsg)
+		body := form.Encode()
+		// Navigate to the profile first: the page's own JS fires the same graphql operation, and the sidecar harvests the fresh doc_id / fb_dtsg / asbd-id / www-claim from it before we send ours.
+		res, err := b.sc.Fetch(ctx, "https://www.instagram.com/api/graphql", "POST", body,
+			"https://www.instagram.com/"+username+"/")
+		if err != nil {
+			return nil, err
+		}
+		return handleBrowserStatus(res, "graphql")
 	}
-	return handleBrowserStatus(res, "graphql")
+	out, err := send()
+	if err == nil || !errors.Is(err, ErrAuthExpired) {
+		return out, err
+	}
+	// Instagram rotates fb_dtsg / doc_id with page loads; re-read them from the sidecar once and retry.
+	if st, serr := b.sc.Status(ctx); serr == nil {
+		if st.FbDTSG != "" {
+			b.dtsg = st.FbDTSG
+		}
+		if st.DocID != "" {
+			b.docID = st.DocID
+		}
+		return send()
+	}
+	return out, err
 }
 
 // handleBrowserStatus maps page fetch statuses to scraper errors.
@@ -164,6 +183,9 @@ func (b *igBrowserClient) OwnID(ctx context.Context) error {
 	b.ownID = st.DsUserID
 	if st.DocID != "" {
 		b.docID = st.DocID
+	}
+	if st.FbDTSG != "" {
+		b.dtsg = st.FbDTSG
 	}
 	return nil
 }

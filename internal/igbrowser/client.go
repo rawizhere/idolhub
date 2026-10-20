@@ -72,6 +72,7 @@ type Status struct {
 	DocID            string  `json:"doc_id,omitempty"`
 	AsbdID           string  `json:"asbd_id,omitempty"`
 	WwwClaim         string  `json:"www_claim,omitempty"`
+	FbDTSG           string  `json:"fb_dtsg,omitempty"`
 	LastError        *string `json:"last_error"`
 }
 

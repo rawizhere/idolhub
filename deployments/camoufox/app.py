@@ -26,15 +26,15 @@ SNAPSHOT_PATH = os.environ.get("IG_SNAPSHOT_PATH", "/data/profile-snapshot.json"
 PAGE_TIMEOUT_MS = int(os.environ.get("IG_PAGE_TIMEOUT_MS", "45000"))
 HARVEST_TIMEOUT_S = float(os.environ.get("IG_HARVEST_TIMEOUT_S", "8"))
 
-# init script: wrap fetch in the page and record the identity instagram's own code sends on the profile-posts graphql operation.
+# init script: wrap fetch in the page and record the identity instagram's own code sends on the profile-posts graphql operation (/api/graphql).
 CAPTURE_JS = """
 window.__igcap = null;
 const _of = window.fetch;
 window.fetch = async function(input, init) {
     try {
         const url = typeof input === "string" ? input : (input && input.url) || "";
-        if (url.includes("/graphql/query") && init && typeof init.body === "string"
-            && init.body.includes("PolarisProfilePostsTabContentQuery_connection")) {
+        if (url.includes("/graphql") && init && typeof init.body === "string"
+            && init.body.includes("PolarisProfilePostsQuery") && init.body.includes("__dyn=")) {
             const hdrs = {};
             const h = init.headers || {};
             if (h instanceof Headers) { h.forEach((v, k) => hdrs[k] = v); }
@@ -63,6 +63,7 @@ state = {
     "asbd_id": None,
     "doc_id": None,
     "www_claim": None,
+    "fb_dtsg": None,
 }
 
 
@@ -128,6 +129,8 @@ async def harvest() -> None:
             for piece in body.split("&"):
                 if piece.startswith("doc_id="):
                     state["doc_id"] = piece[len("doc_id="):]
+                elif piece.startswith("fb_dtsg=") and len(piece) > len("fb_dtsg="):
+                    state["fb_dtsg"] = urllib.parse.unquote(piece[len("fb_dtsg="):])
             return
         await asyncio.sleep(0.5)
 
@@ -208,7 +211,7 @@ async def status() -> dict:
     out = {"ready": state["ready"], "last_error": state["last_error"],
            "last_snapshot": state["last_snapshot"],
            "doc_id": state["doc_id"], "asbd_id": state["asbd_id"],
-           "www_claim": state["www_claim"]}
+           "www_claim": state["www_claim"], "fb_dtsg": state["fb_dtsg"]}
     if ctx is None:
         out["session"] = "no-context"
         return out
