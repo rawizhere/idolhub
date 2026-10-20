@@ -118,7 +118,15 @@ func (d configDTO) merge(old config.Config) (config.Config, error) {
 		if v == nil {
 			return cur
 		}
-		return strings.TrimSpace(*v)
+		val := strings.TrimSpace(*v)
+		// heal the double-encoded exports the old settings screen stored: a JSON-quoted string with literal \n
+		if strings.HasPrefix(val, `"`) && strings.HasSuffix(val, `"`) {
+			var unquoted string
+			if err := json.Unmarshal([]byte(val), &unquoted); err == nil {
+				val = strings.TrimSpace(unquoted)
+			}
+		}
+		return val
 	}
 	cfg.TwitterAuthToken = pick(d.TwitterAuthToken, old.TwitterAuthToken)
 	cfg.InstagramSessionID = pick(d.InstagramSessionID, old.InstagramSessionID)
