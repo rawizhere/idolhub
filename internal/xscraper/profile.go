@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -83,22 +84,25 @@ func parseProfile(body []byte) (Profile, error) {
 	return p, nil
 }
 
+// xOwnScreenNameRe reads the logged-in user out of the home page embedded state.
+var xOwnScreenNameRe = regexp.MustCompile(`"screen_name":"([A-Za-z0-9_]{1,20})"`)
+
 // Viewer returns the screen name the session is logged in as; it doubles as a live session check.
+// The 1.1 settings/verify_credentials endpoints are retired (code 34 for any caller), so it reads the
+// screen name out of the logged-in home page state instead.
 func (s *Scraper) Viewer(ctx context.Context) (string, error) {
 	if err := s.limiter.Wait(ctx); err != nil {
 		return "", err
 	}
-	body, err := s.client.get(ctx, "https://x.com/i/api/1.1/account/settings.json", "https://x.com/home")
+	html, err := s.client.page(ctx, "https://x.com/home?lang=en")
 	if err != nil {
 		return "", err
 	}
-	var st struct {
-		ScreenName string `json:"screen_name"`
+	m := xOwnScreenNameRe.FindSubmatch(html)
+	if m == nil {
+		return "", fmt.Errorf("%w: x.com served a logged-out home page", ErrAuthExpired)
 	}
-	if err := json.Unmarshal(body, &st); err != nil || st.ScreenName == "" {
-		return "", fmt.Errorf("unexpected account settings response")
-	}
-	return st.ScreenName, nil
+	return string(m[1]), nil
 }
 
 func firstNonEmpty(vals ...string) string {

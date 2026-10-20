@@ -138,6 +138,47 @@ func (c *xClient) get(ctx context.Context, rawURL, referer string) ([]byte, erro
 	return body, nil
 }
 
+// page fetches an HTML document with browser-like navigation headers; the api
+// headers (bearer, OAuthWebSession) on an html route answer 401.
+func (c *xClient) page(ctx context.Context, rawURL string) ([]byte, error) {
+	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header = fhttp.Header{
+		"user-agent":      []string{c.ua},
+		"accept":          []string{"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
+		"accept-language": []string{"en-US,en;q=0.9"},
+		"cookie":          []string{c.cookieHdr},
+		"sec-fetch-dest":  []string{"document"},
+		"sec-fetch-mode":  []string{"navigate"},
+		"sec-fetch-site":  []string{"none"},
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) == 0 {
+		return nil, fmt.Errorf("x.com returned an empty body with status %d", resp.StatusCode)
+	}
+	if resp.StatusCode == fhttp.StatusTooManyRequests {
+		return nil, &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
+	}
+	if resp.StatusCode == fhttp.StatusUnauthorized || resp.StatusCode == fhttp.StatusForbidden {
+		return nil, fmt.Errorf("%w: response status %s", ErrAuthExpired, resp.Status)
+	}
+	if resp.StatusCode != fhttp.StatusOK {
+		return nil, fmt.Errorf("response status %s: %s", resp.Status, body)
+	}
+	return body, nil
+}
+
 func parseRetryAfter(v string) time.Duration {
 	secs, err := strconv.Atoi(strings.TrimSpace(v))
 	if err != nil || secs < 0 {
