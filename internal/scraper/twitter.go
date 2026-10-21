@@ -64,7 +64,11 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	}
 
 	jobs := make(chan twitterItem, 10000)
-	client := &http.Client{Timeout: 45 * time.Second}
+	// A stalled CDN still fails fast on the response headers, but the body gets time: a 4K video at 20 Mbit/s runs
+	// to hundreds of MB, and a whole-request limit of 45s failed it on every attempt, pinning the sync watermark.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 45 * time.Second
+	client := &http.Client{Transport: transport, Timeout: 20 * time.Minute}
 	pool := download.Start(ctx, jobs, numWorkers, func(ctx context.Context, item twitterItem) download.Result {
 		return downloadTwitterMedia(ctx, item, outputDir, client, username)
 	})
