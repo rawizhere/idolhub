@@ -239,6 +239,10 @@ func main() {
 		}
 	}()
 
+	// Before any sync: a scrape of an unmigrated account would adopt and rename the same files concurrently.
+	for _, u := range scraper.MigrateInstagramVideoNames(context.Background(), st.Posts, config.GetConfig().ThumbnailsDir) {
+		mediaIndex.Invalidate("instagram", u)
+	}
 	orch.SyncTargets(cfg.Accounts)
 
 	go func() {

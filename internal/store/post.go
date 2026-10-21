@@ -160,3 +160,12 @@ func (s *PostStore) attachMedia(ctx context.Context, posts []Post) error {
 	}
 	return nil
 }
+
+// RenameMedia repoints one media row of a post at a new url.
+func (s *PostStore) RenameMedia(ctx context.Context, postID int64, oldURL, newURL string) error {
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE post_media SET url = ? WHERE post_id = ? AND url = ?`, newURL, postID, oldURL); err != nil {
+		return fmt.Errorf("store: media rename: %w", err)
+	}
+	return nil
+}

@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -46,6 +48,9 @@ type igDirectItem struct {
 	Date    time.Time
 	MediaID string
 	IsVideo bool
+	// SoleVideo marks the only video of its post. Its MediaID is then the post id, so the startup migration, which
+	// knows posts but not carousel slides, names it the same way, and a legacy CDN-token file can be adopted as it.
+	SoleVideo bool
 }
 
 // igRendition is one size of an image or video.
@@ -160,22 +165,7 @@ func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
 			if item.Caption != nil {
 				caption = item.Caption.Text
 			}
-			nodes := []igMediaNode{item.igMediaNode}
-			if item.MediaType == 8 && len(item.CarouselMedia) > 0 {
-				nodes = item.CarouselMedia
-			}
-			var postEntries []igDirectItem
-			for _, n := range nodes {
-				// media_type 2 is a video; anything else is shown by its image
-				isVideo := n.MediaType == 2
-				u := bestURL(n.ImageVersions.Candidates)
-				if isVideo {
-					u = bestURL(n.VideoVersions)
-				}
-				if u != "" {
-					postEntries = append(postEntries, igDirectItem{URL: u, Date: itemTime, MediaID: n.ID, IsVideo: isVideo})
-				}
-			}
+			postEntries := igPostEntries(item)
 
 			// Check if this post is older than lastSync or already exists on disk
 			isOlderThanLastSync := !lastSync.IsZero() && itemTime.Before(lastSync)
@@ -228,7 +218,7 @@ func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
 					if pe.IsVideo {
 						kind = "video"
 					}
-					media = append(media, store.PostMedia{URL: pe.URL, Kind: kind})
+					media = append(media, store.PostMedia{URL: igMediaKey(pe), Kind: kind})
 				}
 				if err := opts.Posts.UpsertPost(ctx, store.Post{
 					Platform:   "instagram",
@@ -277,18 +267,52 @@ func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
 	return nil
 }
 
+// igPostEntries lists the downloadable media of a post: the post itself, or each carousel slide.
+func igPostEntries(item igFeedItem) []igDirectItem {
+	itemTime := time.Unix(item.TakenAt, 0).UTC()
+	nodes := []igMediaNode{item.igMediaNode}
+	if item.MediaType == 8 && len(item.CarouselMedia) > 0 {
+		nodes = item.CarouselMedia
+	}
+	var postEntries []igDirectItem
+	videos := 0
+	for _, n := range nodes {
+		// media_type 2 is a video; anything else is shown by its image
+		isVideo := n.MediaType == 2
+		u := bestURL(n.ImageVersions.Candidates)
+		if isVideo {
+			u = bestURL(n.VideoVersions)
+		}
+		// the post's own pk shadows the embedded node pk, so a single-media post carries its id on the item
+		id := cmp.Or(n.ID, item.ID)
+		if u != "" {
+			postEntries = append(postEntries, igDirectItem{URL: u, Date: itemTime, MediaID: id, IsVideo: isVideo})
+			if isVideo {
+				videos++
+			}
+		}
+	}
+	for i := range postEntries {
+		if postEntries[i].IsVideo && videos == 1 {
+			postEntries[i].MediaID, postEntries[i].SoleVideo = item.ID, true
+		}
+	}
+	return postEntries
+}
+
 // resolveUserID resolves the numeric user ID from username, doubling as a session check.
 func (c *igClient) resolveUserID(ctx context.Context, username string) (string, error) {
 	return resolveUserIDShared(ctx, c, username)
 }
 
 type igFileIndex struct {
+	dir   string
 	mu    sync.RWMutex
 	files map[string]bool
 }
 
 func newIgFileIndex(outputDir string) *igFileIndex {
-	idx := &igFileIndex{files: make(map[string]bool)}
+	idx := &igFileIndex{dir: outputDir, files: make(map[string]bool)}
 	if entries, err := os.ReadDir(outputDir); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() {
@@ -299,24 +323,41 @@ func newIgFileIndex(outputDir string) *igFileIndex {
 	return idx
 }
 
-// igFilename names a downloaded item: <date>_<cdn file name>, falling back to the media id. baseName is the part after the date.
+// igFilename names a downloaded item <date>_<baseName>. Videos use the media id, since their CDN URL token rotates
+// between syncs; photos keep the CDN file name, which is stable.
 func igFilename(item igDirectItem) (filename, baseName string, ok bool) {
-	parsed, err := url.Parse(item.URL)
-	if err != nil {
-		return "", "", false
-	}
-	baseName = parsed.Path[strings.LastIndex(parsed.Path, "/")+1:]
-	if baseName == "" {
-		baseName = item.MediaID
-	}
-	if filepath.Ext(baseName) == "" {
-		if item.IsVideo {
-			baseName += ".mp4"
-		} else {
-			baseName += ".jpg"
+	if item.IsVideo && item.MediaID != "" {
+		baseName = item.MediaID + ".mp4"
+	} else {
+		parsed, err := url.Parse(item.URL)
+		if err != nil {
+			return "", "", false
+		}
+		baseName = parsed.Path[strings.LastIndex(parsed.Path, "/")+1:]
+		if baseName == "" {
+			baseName = item.MediaID
+		}
+		if filepath.Ext(baseName) == "" {
+			if item.IsVideo {
+				baseName += ".mp4"
+			} else {
+				baseName += ".jpg"
+			}
 		}
 	}
-	return item.Date.Format("2006-01-02_15-04-05") + "_" + baseName, baseName, true
+	return igDatePrefix(item.Date) + baseName, baseName, true
+}
+
+func igDatePrefix(t time.Time) string {
+	return t.UTC().Format("2006-01-02_15-04-05") + "_"
+}
+
+// igMediaKey is what post_media stores for an item: the gallery resolves it to the local file by its base name.
+func igMediaKey(item igDirectItem) string {
+	if _, baseName, ok := igFilename(item); ok && item.IsVideo {
+		return baseName
+	}
+	return item.URL
 }
 
 func (idx *igFileIndex) exists(item igDirectItem) bool {
@@ -324,21 +365,69 @@ func (idx *igFileIndex) exists(item igDirectItem) bool {
 	if !ok {
 		return false
 	}
-
 	idx.mu.RLock()
-	defer idx.mu.RUnlock()
+	found := idx.has(filename, baseName, item.MediaID)
+	idx.mu.RUnlock()
+	return found || (item.SoleVideo && idx.adoptLegacyVideo(item, filename))
+}
 
+// has needs idx.mu held.
+func (idx *igFileIndex) has(filename, baseName, mediaID string) bool {
 	if idx.files[filename] {
 		return true
 	}
-
 	for existingName := range idx.files {
-		if strings.Contains(existingName, baseName) || (item.MediaID != "" && strings.Contains(existingName, item.MediaID)) {
+		if strings.Contains(existingName, baseName) || (mediaID != "" && strings.Contains(existingName, mediaID)) {
 			return true
 		}
 	}
 	return false
 }
+
+// adoptLegacyVideo renames a video saved under its old CDN-token name (<date>_AQ….mp4) to the media-id name, so an
+// existing download is recognised instead of fetched again. Only a post's sole video is adopted: a carousel with
+// several videos gives no way to tell which old file belongs to which slide.
+func (idx *igFileIndex) adoptLegacyVideo(item igDirectItem, filename string) bool {
+	idx.mu.Lock()
+	defer idx.mu.Unlock()
+	if idx.files[filename] {
+		return true
+	}
+	legacy := igLegacyVideos(idx.dir, slices.Collect(maps.Keys(idx.files)), igDatePrefix(item.Date))
+	if len(legacy) == 0 {
+		return false
+	}
+	old := legacy[len(legacy)-1]
+	if err := os.Rename(filepath.Join(idx.dir, old), filepath.Join(idx.dir, filename)); err != nil {
+		slog.Warn("Failed to adopt legacy Instagram video", "file", old, "error", err)
+		return false
+	}
+	delete(idx.files, old)
+	idx.files[filename] = true
+	download.ThumbnailAsync(filepath.Join(idx.dir, filename))
+	slog.Info("Adopted legacy Instagram video under its media id", "from", old, "to", filename)
+	return true
+}
+
+// igLegacyVideos returns the videos of dir among names that carry the date prefix and a CDN-token name instead of a
+// media id, oldest first by modification time.
+func igLegacyVideos(dir string, names []string, prefix string) []string {
+	var out []string
+	mtime := map[string]time.Time{}
+	for _, name := range names {
+		if rest, ok := strings.CutPrefix(name, prefix); ok && strings.HasSuffix(rest, ".mp4") && !igIDName.MatchString(rest) {
+			out = append(out, name)
+			if info, err := os.Stat(filepath.Join(dir, name)); err == nil {
+				mtime[name] = info.ModTime()
+			}
+		}
+	}
+	slices.SortFunc(out, func(a, b string) int { return cmp.Or(mtime[a].Compare(mtime[b]), strings.Compare(a, b)) })
+	return out
+}
+
+// igIDName matches a media-id video name (the part after the date).
+var igIDName = regexp.MustCompile(`^\d+\.mp4$`)
 
 func (idx *igFileIndex) add(filename string) {
 	idx.mu.Lock()
