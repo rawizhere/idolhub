@@ -315,6 +315,7 @@ let anchorItem = null;
 
 export function setSelecting(on) {
   state.selecting = on;
+  if (on) stopHoverPreview(activePreview);
   if (!on) {
     state.selected.clear();
     anchorItem = null;
@@ -537,6 +538,8 @@ function addVideoHandling(lb) {
 }
 
 function openLightbox(galleryEl, item) {
+  // the tile under the cursor may be previewing the same video; it would keep decoding and downloading behind the viewer
+  stopHoverPreview(activePreview);
   const idx = [...galleryEl.querySelectorAll("a.pswp-item")].indexOf(item);
   if (idx >= 0) lightbox.loadAndOpen(idx, { gallery: galleryEl });
 }
@@ -577,18 +580,25 @@ document.addEventListener("click", (e) => {
 /* ---------- hover previews ---------- */
 
 const hoverPreviews = new WeakMap();
+// at most one preview plays: each one streams a whole file and holds a video decoder
+let activePreview = null;
 
 function stopHoverPreview(tile) {
-  const p = hoverPreviews.get(tile);
+  const p = tile && hoverPreviews.get(tile);
   if (!p) return;
+  if (activePreview === tile) activePreview = null;
   clearTimeout(p.hoverTimer);
   if (!p.previewEl) return;
   const el = p.previewEl;
   p.previewEl = null;
   el.pause();
   el.classList.add("opacity-0");
-  clearTimeout(p.removeTimer);
-  p.removeTimer = setTimeout(() => el.remove(), 200);
+  setTimeout(() => {
+    // dropping the src is what aborts the download and frees the decoder; removing the element alone leaves both to GC
+    el.removeAttribute("src");
+    el.load();
+    el.remove();
+  }, 200);
 }
 
 const tileObserver = new IntersectionObserver(entries => {
@@ -603,13 +613,14 @@ export function initVideoHoverPreviews(root = document) {
   root.querySelectorAll(".video-preview-tile[data-video-src]").forEach(tile => {
     if (hoverPreviews.has(tile)) return;
     tileObserver.observe(tile);
-    const p = { previewEl: null, hoverTimer: null, removeTimer: null };
+    const p = { previewEl: null, hoverTimer: null };
     hoverPreviews.set(tile, p);
 
     tile.addEventListener("mouseenter", () => {
       if (tile.dataset.inViewport !== "1" || state.selecting) return;
-      clearTimeout(p.removeTimer);
       p.hoverTimer = setTimeout(() => {
+        if (activePreview !== tile) stopHoverPreview(activePreview);
+        activePreview = tile;
         let el = p.previewEl;
         if (!el) {
           el = document.createElement("video");

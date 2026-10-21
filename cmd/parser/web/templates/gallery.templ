@@ -35,17 +35,17 @@ templ GalleryGridItem(f GalleryFileData) {
 		>
 			<img src={ f.ThumbnailURL } alt={ f.Filename } loading="lazy" decoding="async" class="w-full h-full object-cover group-hover:scale-103 transition-transform duration-200 block"/>
 			if f.Date != "" {
-				<span class="absolute top-2 right-2 text-[0.6875rem] font-mono font-bold bg-black/75 text-white px-1.5 py-0.5 rounded backdrop-blur-xs z-20">
+				<span class="absolute top-2 right-2 text-[0.6875rem] font-mono font-bold bg-black/75 text-white px-1.5 py-0.5 rounded z-20">
 					{ f.Date }
 				</span>
 			}
 			if f.Type == "video" {
 				<div class="absolute inset-0 flex items-center justify-center bg-black/15 group-hover:bg-black/25 transition-all duration-200 pointer-events-none">
-					<div class="bg-black/75 backdrop-blur-xs text-white p-2.5 rounded-full shadow-md scale-95 group-hover:scale-105 transition-all duration-200 flex items-center justify-center">
+					<div class="bg-black/75 text-white p-2.5 rounded-full shadow-md scale-95 group-hover:scale-105 transition-all duration-200 flex items-center justify-center">
 						<svg viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4"><path d="M8 5v14l11-7z"></path></svg>
 					</div>
 				</div>
-				<span class="absolute bottom-2 right-2 text-[0.6875rem] font-mono font-bold bg-black/80 text-white px-1.5 py-0.5 rounded backdrop-blur-xs">
+				<span class="absolute bottom-2 right-2 text-[0.6875rem] font-mono font-bold bg-black/80 text-white px-1.5 py-0.5 rounded">
 					VIDEO
 				</span>
 			}
