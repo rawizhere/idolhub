@@ -226,91 +226,108 @@
         <div class="pswp-gallery density-relaxed gap-3.5" id="lg-container"></div>
         <div class="pswp-gallery flex-col gap-4 max-w-2xl mx-auto hidden" id="gallery-posts-list"></div>
 
-        <div id="target-settings" class="hidden flex-col gap-4 max-w-3xl">
-          <div class="card p-4 flex items-center justify-between gap-4">
-            <div>
-              <h3 class="text-xs font-bold">Automatic sync</h3>
-              <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400 mt-0.5" id="ts-pause-help">Included in every auto-sync run.</p>
+        <div id="target-settings" class="hidden flex-col gap-4">
+          <!-- two columns once the window is wide enough, so the page uses the screen instead of a narrow strip -->
+          <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+            <div class="flex flex-col gap-4 min-w-0">
+              <div class="card p-4 flex items-center justify-between gap-4">
+                <div>
+                  <h3 class="text-xs font-bold">Automatic sync</h3>
+                  <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400 mt-0.5" id="ts-pause-help">Included in every auto-sync run.</p>
+                </div>
+                <button type="button" role="switch" aria-checked="true" id="ts-pause" data-action="toggle-pause-active"
+                        class="relative w-10 h-6 rounded-full transition-colors bg-slate-300 dark:bg-zinc-700 aria-checked:bg-[#ff9900] cursor-pointer flex-shrink-0" aria-label="Include in auto-sync">
+                  <span class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform"></span>
+                </button>
+              </div>
+
+              <form id="target-settings-form" class="flex flex-col gap-4" novalidate>
+                <section class="card p-4 flex flex-col gap-3">
+                  <h3 class="text-xs font-bold">What to download</h3>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <label class="flex items-center gap-2 text-xs cursor-pointer"><input class="accent-[#ff9900]" name="save_text" type="checkbox"/><span>Post text &amp; captions <span class="text-slate-400">(enables Posts view and search)</span></span></label>
+                    <label class="flex items-center gap-2 text-xs cursor-pointer" data-only="twitter"><input class="accent-[#ff9900]" name="skip_retweets" type="checkbox"/><span>Skip retweets</span></label>
+                    <label class="flex items-center gap-2 text-xs cursor-pointer"><input class="accent-[#ff9900]" name="download_photos" type="checkbox"/><span>Photos</span></label>
+                    <label class="flex items-center gap-2 text-xs cursor-pointer"><input class="accent-[#ff9900]" name="download_videos" type="checkbox"/><span>Videos</span></label>
+                  </div>
+                  <p class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="media">Pick at least photos or videos.</p>
+                </section>
+
+                <section class="card p-4 flex flex-col gap-2" data-only="twitter">
+                  <h3 class="text-xs font-bold">Keyword filters</h3>
+                  <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400">Only posts whose text contains <strong>at least one</strong> of these words are downloaded. Matching ignores case and also hits inside words (“cat” matches “catwalk”). Empty means everything.</p>
+                  <div class="flex flex-col gap-2 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg p-2.5">
+                    <div class="flex flex-wrap gap-1.5" data-chips="ts"></div>
+                    <input class="input bg-white dark:bg-zinc-900 px-2.5 py-1.5" data-chip-input="ts" placeholder="Type a keyword and press Enter…" type="text" aria-label="Add keyword filter"/>
+                  </div>
+                  <p class="text-[0.6875rem] font-mono text-slate-500 dark:text-zinc-400" id="ts-filter-preview"></p>
+                </section>
+
+                <section class="card p-4 flex flex-col gap-3">
+                  <h3 class="text-xs font-bold">How far back</h3>
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <label class="flex flex-col gap-1">
+                      <span class="label">Oldest post date</span>
+                      <input type="date" name="since" class="input px-2.5 py-1.5 font-mono"/>
+                      <span class="text-[0.625rem] text-slate-400">Nothing older is downloaded. Empty = no limit.</span>
+                      <span class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="since"></span>
+                    </label>
+                    <label class="flex flex-col gap-1">
+                      <span class="label">Post limit for a full sync</span>
+                      <input type="number" name="max_posts" min="0" max="100000" placeholder="no limit" class="input px-2.5 py-1.5 font-mono"/>
+                      <span class="text-[0.625rem] text-slate-400">Caps the first sync and forced full resyncs. Regular syncs fetch everything new.</span>
+                      <span class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="max_posts"></span>
+                    </label>
+                  </div>
+                </section>
+
+                <div id="ts-savebar" class="hidden sticky bottom-14 z-30 items-center justify-between gap-3 card shadow-xl px-4 py-2.5 border-[#ff9900]/50">
+                  <span class="text-xs font-semibold" id="ts-savebar-text">Unsaved changes</span>
+                  <div class="flex gap-2">
+                    <button type="button" class="btn btn-secondary" data-action="ts-discard">Discard</button>
+                    <button type="submit" class="btn btn-primary" id="ts-save">Save changes</button>
+                  </div>
+                </div>
+              </form>
             </div>
-            <button type="button" role="switch" aria-checked="true" id="ts-pause" data-action="toggle-pause-active"
-                    class="relative w-10 h-6 rounded-full transition-colors bg-slate-300 dark:bg-zinc-700 aria-checked:bg-[#ff9900] cursor-pointer flex-shrink-0" aria-label="Include in auto-sync">
-              <span class="absolute top-1 left-1 w-4 h-4 rounded-full bg-white shadow transition-transform"></span>
-            </button>
+
+            <div class="flex flex-col gap-4 min-w-0">
+              <section class="card p-4 flex flex-col gap-2">
+                <h3 class="text-xs font-bold">Handle</h3>
+                <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400">If the account was renamed on the platform, update it here. Downloads, posts and history move along.</p>
+                <div class="flex gap-2">
+                  <input type="text" id="ts-username" class="input px-2.5 py-1.5 font-mono" autocomplete="off" spellcheck="false" aria-label="Username"/>
+                  <button type="button" class="btn btn-secondary" data-action="ts-rename" id="ts-rename-btn" disabled>Rename</button>
+                </div>
+                <span class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" id="ts-rename-error"></span>
+              </section>
+
+              <section class="card p-4 flex flex-col gap-2">
+                <div class="flex items-center justify-between gap-2">
+                  <h3 class="text-xs font-bold">Own session <span class="font-normal text-slate-400">· optional</span></h3>
+                  <span class="text-[0.6875rem] font-mono" id="ts-cookie-status"></span>
+                </div>
+                <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400">Paste a cookie export of a different logged-in account to scrape this target with it instead of the shared session from Settings. Useful for private accounts that only that login follows, and to spread load across accounts.</p>
+                <textarea id="ts-cookies" rows="3" spellcheck="false" class="input p-2.5 font-mono resize-y" placeholder="# Netscape HTTP Cookie File …  or  [ {&quot;domain&quot;: …} ]"></textarea>
+                <div class="flex flex-wrap gap-2 items-center">
+                  <button type="button" class="btn btn-secondary" data-action="ts-cookies-save">Save session</button>
+                  <button type="button" class="btn btn-secondary" data-action="ts-cookies-check" id="ts-cookies-check">Check</button>
+                  <button type="button" class="btn-link text-rose-600 dark:text-rose-400 hidden" data-action="ts-cookies-remove" id="ts-cookies-remove">Remove own session</button>
+                  <span class="text-[0.6875rem] font-mono" id="ts-cookies-result"></span>
+                </div>
+              </section>
+
+              <section class="card p-4 flex flex-col gap-3 border-rose-200 dark:border-rose-900/60">
+                <h3 class="text-xs font-bold text-rose-600 dark:text-rose-400">Danger zone</h3>
+                <div class="flex flex-wrap gap-2">
+                  <button type="button" class="btn btn-secondary" data-action="full-resync-active">Force full resync</button>
+                  <button type="button" class="btn btn-secondary text-rose-600 dark:text-rose-400" data-action="clear-active">Erase downloaded files…</button>
+                  <button type="button" class="btn btn-danger" data-action="delete-active">Remove target…</button>
+                </div>
+              </section>
+        
+            </div>
           </div>
-
-          <form id="target-settings-form" class="flex flex-col gap-4" novalidate>
-            <section class="card p-4 flex flex-col gap-3">
-              <h3 class="text-xs font-bold">What to download</h3>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <label class="flex items-center gap-2 text-xs cursor-pointer"><input class="accent-[#ff9900]" name="save_text" type="checkbox"/><span>Post text &amp; captions <span class="text-slate-400">(enables Posts view and search)</span></span></label>
-                <label class="flex items-center gap-2 text-xs cursor-pointer" data-only="twitter"><input class="accent-[#ff9900]" name="skip_retweets" type="checkbox"/><span>Skip retweets</span></label>
-                <label class="flex items-center gap-2 text-xs cursor-pointer"><input class="accent-[#ff9900]" name="download_photos" type="checkbox"/><span>Photos</span></label>
-                <label class="flex items-center gap-2 text-xs cursor-pointer"><input class="accent-[#ff9900]" name="download_videos" type="checkbox"/><span>Videos</span></label>
-              </div>
-              <p class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="media">Pick at least photos or videos.</p>
-            </section>
-
-            <section class="card p-4 flex flex-col gap-2" data-only="twitter">
-              <h3 class="text-xs font-bold">Keyword filters</h3>
-              <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400">Only posts whose text contains <strong>at least one</strong> of these words are downloaded. Matching ignores case and also hits inside words (“cat” matches “catwalk”). Empty means everything.</p>
-              <div class="flex flex-col gap-2 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg p-2.5">
-                <div class="flex flex-wrap gap-1.5" data-chips="ts"></div>
-                <input class="input bg-white dark:bg-zinc-900 px-2.5 py-1.5" data-chip-input="ts" placeholder="Type a keyword and press Enter…" type="text" aria-label="Add keyword filter"/>
-              </div>
-              <p class="text-[0.6875rem] font-mono text-slate-500 dark:text-zinc-400" id="ts-filter-preview"></p>
-            </section>
-
-            <section class="card p-4 flex flex-col gap-3">
-              <h3 class="text-xs font-bold">How far back</h3>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <label class="flex flex-col gap-1">
-                  <span class="label">Oldest post date</span>
-                  <input type="date" name="since" class="input px-2.5 py-1.5 font-mono"/>
-                  <span class="text-[0.625rem] text-slate-400">Nothing older is downloaded. Empty = no limit.</span>
-                  <span class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="since"></span>
-                </label>
-                <label class="flex flex-col gap-1">
-                  <span class="label">Post limit for a full sync</span>
-                  <input type="number" name="max_posts" min="0" max="100000" placeholder="no limit" class="input px-2.5 py-1.5 font-mono"/>
-                  <span class="text-[0.625rem] text-slate-400">Caps the first sync and forced full resyncs. Regular syncs fetch everything new.</span>
-                  <span class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="max_posts"></span>
-                </label>
-              </div>
-            </section>
-
-            <div id="ts-savebar" class="hidden sticky bottom-14 z-30 items-center justify-between gap-3 card shadow-xl px-4 py-2.5 border-[#ff9900]/50">
-              <span class="text-xs font-semibold" id="ts-savebar-text">Unsaved changes</span>
-              <div class="flex gap-2">
-                <button type="button" class="btn btn-secondary" data-action="ts-discard">Discard</button>
-                <button type="submit" class="btn btn-primary" id="ts-save">Save changes</button>
-              </div>
-            </div>
-          </form>
-
-          <section class="card p-4 flex flex-col gap-2">
-            <h3 class="text-xs font-bold">Handle</h3>
-            <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400">If the account was renamed on the platform, update it here. Downloads, posts and history move along.</p>
-            <div class="flex gap-2">
-              <input type="text" id="ts-username" class="input px-2.5 py-1.5 font-mono" autocomplete="off" spellcheck="false" aria-label="Username"/>
-              <button type="button" class="btn btn-secondary" data-action="ts-rename" id="ts-rename-btn" disabled>Rename</button>
-            </div>
-            <span class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" id="ts-rename-error"></span>
-          </section>
-
-          <section class="card p-4 flex flex-col gap-2">
-            <div class="flex items-center justify-between gap-2">
-              <h3 class="text-xs font-bold">Own session <span class="font-normal text-slate-400">· optional</span></h3>
-              <span class="text-[0.6875rem] font-mono" id="ts-cookie-status"></span>
-            </div>
-            <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400">Paste a cookie export of a different logged-in account to scrape this target with it instead of the shared session from Settings. Useful for private accounts that only that login follows, and to spread load across accounts.</p>
-            <textarea id="ts-cookies" rows="3" spellcheck="false" class="input p-2.5 font-mono resize-y" placeholder="# Netscape HTTP Cookie File …  or  [ {&quot;domain&quot;: …} ]"></textarea>
-            <div class="flex flex-wrap gap-2 items-center">
-              <button type="button" class="btn btn-secondary" data-action="ts-cookies-save">Save session</button>
-              <button type="button" class="btn btn-secondary" data-action="ts-cookies-check" id="ts-cookies-check">Check</button>
-              <button type="button" class="btn-link text-rose-600 dark:text-rose-400 hidden" data-action="ts-cookies-remove" id="ts-cookies-remove">Remove own session</button>
-              <span class="text-[0.6875rem] font-mono" id="ts-cookies-result"></span>
-            </div>
-          </section>
 
           <section class="card p-4 flex flex-col gap-2">
             <h3 class="text-xs font-bold">Sync history</h3>
@@ -321,15 +338,6 @@
                 </thead>
                 <tbody id="ts-runs" class="divide-y divide-slate-100 dark:divide-zinc-800/60"></tbody>
               </table>
-            </div>
-          </section>
-
-          <section class="card p-4 flex flex-col gap-3 border-rose-200 dark:border-rose-900/60">
-            <h3 class="text-xs font-bold text-rose-600 dark:text-rose-400">Danger zone</h3>
-            <div class="flex flex-wrap gap-2">
-              <button type="button" class="btn btn-secondary" data-action="full-resync-active">Force full resync</button>
-              <button type="button" class="btn btn-secondary text-rose-600 dark:text-rose-400" data-action="clear-active">Erase downloaded files…</button>
-              <button type="button" class="btn btn-danger" data-action="delete-active">Remove target…</button>
             </div>
           </section>
         </div>
