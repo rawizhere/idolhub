@@ -150,7 +150,6 @@ const CONFIRM_ICONS = {
 
 export function confirmDialog({ title = "Confirm", message = "", confirmText = "Confirm", cancelText = "Cancel", tone = "danger" } = {}) {
   const d = document.getElementById("confirm-dialog");
-  if (!d) return Promise.resolve(window.confirm(message));
   const slot = (name) => d.querySelector(`[data-slot="${name}"]`);
   slot("title").textContent = title;
   slot("message").textContent = message;

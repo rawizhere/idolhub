@@ -1,7 +1,6 @@
 package gallery
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -11,7 +10,6 @@ type File struct {
 	Type         string `json:"type"`
 	Date         string `json:"date"`
 	Size         int64  `json:"size"`
-	SizeHuman    string `json:"size_human"`
 	URL          string `json:"url"`
 	ThumbnailURL string `json:"thumbnail_url"`
 }
@@ -32,24 +30,9 @@ func (idx *Index) View(platform, username string) []File {
 			Type:         e.Type,
 			Date:         date,
 			Size:         e.Size,
-			SizeHuman:    humanBytes(e.Size),
 			URL:          base + "/" + e.Filename,
 			ThumbnailURL: base + "/thumbnails/" + thumb,
 		})
 	}
 	return files
-}
-
-// humanBytes formats a byte count in SI units (like humanize.Bytes).
-func humanBytes(b int64) string {
-	const unit = 1000
-	if b < unit {
-		return fmt.Sprintf("%d B", b)
-	}
-	div, exp := int64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "kMGTPE"[exp])
 }

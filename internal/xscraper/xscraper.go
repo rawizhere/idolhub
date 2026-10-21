@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	mrand "math/rand"
 	"net/url"
 	"strings"
@@ -34,15 +35,6 @@ var defaultQueryIDs = map[string]string{
 	opUserMedia:        "2tLOJWwGuCTytDrGBg8VwQ",
 }
 
-// Session carries X credentials and metadata; zero values use built-ins.
-type Session struct {
-	AuthToken string
-	CSRFToken string            // ct0; generated when empty
-	Cookies   string            // full Netscape cookie export from the logged-in browser; preferred
-	QueryIDs  map[string]string // operation name -> queryId
-	Features  map[string]any    // graphql features dictionary
-}
-
 // Scraper fetches user timelines from the x.com frontend GraphQL API.
 type Scraper struct {
 	client      *xClient
@@ -59,15 +51,15 @@ var (
 	xSharedKey string
 )
 
-// New creates a scraper bound to an X session. Repeated calls with the same credentials return the shared instance.
-func New(sess Session) (*Scraper, error) {
-	key := fmt.Sprintf("%x", sha256.Sum256([]byte(sess.AuthToken+"\x00"+sess.Cookies+"\x00"+sess.CSRFToken)))
+// New creates a scraper bound to an x.com cookie export. Repeated calls with the same export return the shared instance.
+func New(cookies string) (*Scraper, error) {
+	key := fmt.Sprintf("%x", sha256.Sum256([]byte(cookies)))
 	xSharedMu.Lock()
 	defer xSharedMu.Unlock()
 	if xShared != nil && xSharedKey == key {
 		return xShared, nil
 	}
-	s, err := newScraper(sess)
+	s, err := newScraper(cookies)
 	if err != nil {
 		return nil, err
 	}
@@ -75,35 +67,24 @@ func New(sess Session) (*Scraper, error) {
 	return s, nil
 }
 
-func newScraper(sess Session) (*Scraper, error) {
-	if sess.AuthToken == "" && sess.Cookies == "" {
-		return nil, errors.New("twitter auth token is empty")
+func newScraper(cookies string) (*Scraper, error) {
+	if cookies == "" {
+		return nil, errors.New("twitter cookie export is empty")
 	}
-	csrf := sess.CSRFToken
-	if csrf == "" {
-		b := make([]byte, 16)
-		if _, err := rand.Read(b); err != nil {
-			return nil, err
-		}
-		csrf = hex.EncodeToString(b)
+	// ct0 is a client-chosen csrf token; X only checks that the header and the cookie match
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return nil, err
 	}
-	queryIDs := sess.QueryIDs
-	if queryIDs == nil {
-		queryIDs = defaultQueryIDs
-	}
-	features := sess.Features
-	if features == nil {
-		features = timelineFeatures()
-	}
-	client, err := newXClient(sess.AuthToken, csrf, sess.Cookies)
+	client, err := newXClient(hex.EncodeToString(b), cookies)
 	if err != nil {
 		return nil, err
 	}
 	return &Scraper{
 		client:   client,
 		limiter:  rate.NewLimiter(rate.Every(5*time.Second), 1),
-		queryIDs: queryIDs,
-		features: features,
+		queryIDs: maps.Clone(defaultQueryIDs),
+		features: timelineFeatures(),
 	}, nil
 }
 
@@ -113,7 +94,7 @@ type TweetResult struct {
 	Error error
 }
 
-func (s *Scraper) timeline(ctx context.Context, op string, vars map[string]interface{}, max int, referer string) <-chan *TweetResult {
+func (s *Scraper) timeline(ctx context.Context, op string, vars map[string]any, max int, referer string) <-chan *TweetResult {
 	ch := make(chan *TweetResult)
 	go func() {
 		defer close(ch)
@@ -179,7 +160,7 @@ func (s *Scraper) userTimeline(ctx context.Context, op, screenName string, max i
 			ch <- &TweetResult{Error: err}
 			return
 		}
-		vars := map[string]interface{}{
+		vars := map[string]any{
 			"userId":                 uid,
 			"count":                  50,
 			"includePromotedContent": false,
@@ -206,21 +187,21 @@ func (s *Scraper) userTimeline(ctx context.Context, op, screenName string, max i
 }
 
 func (s *Scraper) userID(ctx context.Context, screenName, referer string) (string, error) {
-	vars := map[string]interface{}{"screen_name": screenName}
-	body, err := s.doGet(ctx, opUserByScreenName, vars, referer)
+	body, err := s.doGet(ctx, opUserByScreenName, map[string]any{"screen_name": screenName}, referer)
 	if err != nil {
 		return "", err
 	}
-	return parseUserID(body)
+	p, err := parseProfile(body)
+	return p.ID, err
 }
 
 const maxRateLimitRetries = 5
 
-func (s *Scraper) doGet(ctx context.Context, op string, vars map[string]interface{}, referer string) ([]byte, error) {
+func (s *Scraper) doGet(ctx context.Context, op string, vars map[string]any, referer string) ([]byte, error) {
 	body, err := s.doGetOnce(ctx, op, vars, referer)
 	// Deploy rotated the hashes: re-harvest once and retry.
 	if err != nil && isUnknownQueryErr(err) && s.harvestDue() {
-		if _, herr := s.refreshQueryIDs(ctx); herr == nil {
+		if herr := s.refreshQueryIDs(ctx); herr == nil {
 			body, err = s.doGetOnce(ctx, op, vars, referer)
 		} else {
 			slog.Warn("Twitter queryId harvest failed", "operation", op, "error", herr)
@@ -229,7 +210,7 @@ func (s *Scraper) doGet(ctx context.Context, op string, vars map[string]interfac
 	return body, err
 }
 
-func (s *Scraper) doGetOnce(ctx context.Context, op string, vars map[string]interface{}, referer string) ([]byte, error) {
+func (s *Scraper) doGetOnce(ctx context.Context, op string, vars map[string]any, referer string) ([]byte, error) {
 	if err := s.limiter.Wait(ctx); err != nil {
 		return nil, err
 	}
@@ -255,7 +236,7 @@ func isUnknownQueryErr(err error) bool {
 }
 
 // doTimelinePage fetches one timeline page, retrying rate limits and transient failures; auth errors are final.
-func (s *Scraper) doTimelinePage(ctx context.Context, op string, vars map[string]interface{}, referer string) ([]*Tweet, string, error) {
+func (s *Scraper) doTimelinePage(ctx context.Context, op string, vars map[string]any, referer string) ([]*Tweet, string, error) {
 	backoff := 15 * time.Second
 	for attempt := 0; ; attempt++ {
 		body, err := s.doGet(ctx, op, vars, referer)

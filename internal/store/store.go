@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"database/sql"
 	"embed"
 	"fmt"
@@ -38,14 +37,13 @@ func Open(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	s := &Store{
+	return &Store{
 		DB:       db,
 		Accounts: &AccountStore{db: db},
 		Settings: &SettingsStore{db: db},
-	}
-	s.Posts = &PostStore{db: db}
-	s.Runs = &RunStore{db: db}
-	return s, nil
+		Posts:    &PostStore{db: db},
+		Runs:     &RunStore{db: db},
+	}, nil
 }
 
 func migrate(db *sql.DB) error {
@@ -63,9 +61,4 @@ func migrate(db *sql.DB) error {
 // Close closes the underlying database.
 func (s *Store) Close() error {
 	return s.DB.Close()
-}
-
-func execContext(ctx context.Context, db *sql.DB, query string, args ...any) error {
-	_, err := db.ExecContext(ctx, query, args...)
-	return err
 }

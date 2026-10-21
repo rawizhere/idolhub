@@ -1,55 +1,33 @@
 package xscraper
 
-import "time"
-
-type Photo struct {
-	ID  string
-	URL string
-}
-
-type Video struct {
-	ID  string
-	URL string
-}
-
-type GIF struct {
-	ID  string
-	URL string
-}
-
+// Tweet is one timeline item; the media lists hold download URLs.
 type Tweet struct {
-	ID         string
-	Text       string
-	IsRetweet  bool
-	TimeParsed time.Time
-	Photos     []Photo
-	Videos     []Video
-	GIFs       []GIF
-	URLs       []string
+	ID        string
+	Text      string
+	IsRetweet bool
+	Photos    []string
+	Videos    []string
+	GIFs      []string
+	URLs      []string
+}
+
+// gqlTimeline is the timeline shape under both "timeline" and "timeline_v2".
+type gqlTimeline struct {
+	Timeline struct {
+		Instructions []struct {
+			Type        string  `json:"type"`
+			Entries     []entry `json:"entries"`
+			ModuleItems []item  `json:"moduleItems"`
+		} `json:"instructions"`
+	} `json:"timeline"`
 }
 
 type gqlResponse struct {
 	Data struct {
 		User struct {
 			Result struct {
-				Timeline struct {
-					Timeline struct {
-						Instructions []struct {
-							Type        string  `json:"type"`
-							Entries     []entry `json:"entries"`
-							ModuleItems []item  `json:"moduleItems"`
-						} `json:"instructions"`
-					} `json:"timeline"`
-				} `json:"timeline"`
-				TimelineV2 struct {
-					Timeline struct {
-						Instructions []struct {
-							Type        string  `json:"type"`
-							Entries     []entry `json:"entries"`
-							ModuleItems []item  `json:"moduleItems"`
-						} `json:"instructions"`
-					} `json:"timeline"`
-				} `json:"timeline_v2"`
+				Timeline   gqlTimeline `json:"timeline"`
+				TimelineV2 gqlTimeline `json:"timeline_v2"`
 			} `json:"result"`
 		} `json:"user"`
 	} `json:"data"`
@@ -60,7 +38,6 @@ type gqlResponse struct {
 }
 
 type entry struct {
-	EntryID string `json:"entryId"`
 	Content struct {
 		CursorType  string `json:"cursorType"`
 		Value       string `json:"value"`
@@ -74,8 +51,7 @@ type entry struct {
 }
 
 type item struct {
-	EntryID string `json:"entryId"`
-	Item    struct {
+	Item struct {
 		ItemContent struct {
 			TweetResults struct {
 				Result result `json:"result"`
@@ -121,11 +97,9 @@ type result struct {
 }
 
 type legacyTweet struct {
-	FullText  string `json:"full_text"`
-	IDStr     string `json:"id_str"`
-	CreatedAt string `json:"created_at"`
-	UserIDStr string `json:"user_id_str"`
-	Entities  struct {
+	FullText string `json:"full_text"`
+	IDStr    string `json:"id_str"`
+	Entities struct {
 		URLs []struct {
 			ExpandedURL string `json:"expanded_url"`
 		} `json:"urls"`
@@ -142,7 +116,6 @@ type videoVariant struct {
 }
 
 type extendedMedia struct {
-	IDStr         string `json:"id_str"`
 	Type          string `json:"type"`
 	MediaURLHTTPS string `json:"media_url_https"`
 	VideoInfo     struct {

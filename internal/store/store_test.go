@@ -2,10 +2,14 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/pressly/goose/v3"
 )
 
 func openTestStore(t *testing.T) *Store {
@@ -131,8 +135,8 @@ func TestAccountStoreRoundTrip(t *testing.T) {
 				Platform: "twitter", Username: "alice",
 				SaveText: true, SkipRetweets: true,
 				DownloadPhotos: boolPtr(false), DownloadVideos: boolPtr(true),
-				Filters:          []string{"giveaway", "art"},
-				TwitterAuthToken: "tok",
+				Filters: []string{"giveaway", "art"},
+				Cookies: "x.com\tTRUE\t/\tTRUE\t0\tauth_token\ttok\n",
 			},
 		},
 		{
@@ -178,8 +182,8 @@ func TestAccountStoreRoundTrip(t *testing.T) {
 				!sameBoolPtr(found.DownloadVideos, tt.in.DownloadVideos) {
 				t.Errorf("nullable bools mismatch: got %+v, want %+v", found, tt.in)
 			}
-			if found.TwitterAuthToken != tt.in.TwitterAuthToken {
-				t.Errorf("twitter token = %q, want %q", found.TwitterAuthToken, tt.in.TwitterAuthToken)
+			if found.Cookies != tt.in.Cookies {
+				t.Errorf("cookies = %q, want %q", found.Cookies, tt.in.Cookies)
 			}
 			if !equalStrings(found.Filters, tt.in.Filters) {
 				t.Errorf("filters = %v, want %v", found.Filters, tt.in.Filters)
@@ -261,7 +265,7 @@ func TestSearchFullText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if len(got) != 1 || got[0].ExternalID != "1" {
+	if len(got) != 1 || got[0] != "1" {
 		t.Fatalf("search = %+v, want only alice's brown fox", got)
 	}
 }
@@ -301,5 +305,82 @@ func TestSetSyncInfoDoesNotResurrectAccount(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Errorf("accounts = %+v, want none", rows)
+	}
+}
+
+// 00005 turns the bare-token settings into cookie lines without changing which session a scraper uses.
+func TestLegacyTokensMigrate(t *testing.T) {
+	cases := []struct {
+		export, name, value string
+		override            bool
+		want                string
+	}{
+		{"", "auth_token", "tok", true, "# Netscape HTTP Cookie File\n.x.com\tTRUE\t/\tTRUE\t2147483647\tauth_token\ttok\n"},
+		{".x.com\tTRUE\t/\tTRUE\t1\tauth_token\told\n.x.com\tTRUE\t/\tTRUE\t1\tkdt\tk\n", "auth_token", "new", true,
+			".x.com\tTRUE\t/\tTRUE\t1\tauth_token\tnew\n.x.com\tTRUE\t/\tTRUE\t1\tkdt\tk\n"},
+		{".instagram.com\tTRUE\t/\tTRUE\t1\tsessionid\tkeep\n", "sessionid", "legacy", false, ".instagram.com\tTRUE\t/\tTRUE\t1\tsessionid\tkeep\n"},
+	}
+	for _, c := range cases {
+		domain := ".x.com"
+		if c.name == "sessionid" {
+			domain = ".instagram.com"
+		}
+		if got := withCookie(c.export, domain, c.name, c.value, c.override); got != c.want {
+			t.Errorf("withCookie(%q) = %q, want %q", c.export, got, c.want)
+		}
+	}
+}
+
+func TestLegacyTokensMigration(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(t.TempDir(), "old.db")+"?"+dsnOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	goose.SetBaseFS(migrations)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, "migrations", 4); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`INSERT INTO settings (key, value) VALUES ('twitter_auth_token', '"TW"'), ('instagram_session_id', '"IG"')`,
+		`INSERT INTO accounts (platform, username, twitter_auth_token) VALUES ('twitter', 'own', 'ACC')`,
+		`INSERT INTO accounts (platform, username) VALUES ('twitter', 'shared')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{DB: db, Accounts: &AccountStore{db: db}, Settings: &SettingsStore{db: db}}
+	ctx := context.Background()
+	if v, _ := s.Settings.Get(ctx, "twitter_cookies"); !strings.Contains(v, `auth_token\tTW`) {
+		t.Errorf("twitter_cookies = %s", v)
+	}
+	if v, _ := s.Settings.Get(ctx, "instagram_cookies"); !strings.Contains(v, `sessionid\tIG`) {
+		t.Errorf("instagram_cookies = %s", v)
+	}
+	if _, err := s.Settings.Get(ctx, "twitter_auth_token"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("legacy key left behind: %v", err)
+	}
+	accs, err := s.Accounts.List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range accs {
+		switch a.Username {
+		case "own":
+			if !strings.Contains(a.Cookies, "auth_token\tACC") || strings.Contains(a.Cookies, "TW") {
+				t.Errorf("own cookies = %q", a.Cookies)
+			}
+		case "shared":
+			if a.Cookies != "" {
+				t.Errorf("shared account got cookies %q", a.Cookies)
+			}
+		}
 	}
 }

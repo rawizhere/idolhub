@@ -35,71 +35,52 @@ func (e *RateLimitError) Error() string {
 // xClient issues requests with a stable browser TLS fingerprint.
 type xClient struct {
 	http      tls_client.HttpClient
-	ua        string
 	cookieHdr string
 	csrfToken string
 }
 
-// newXClient builds the client. When a Netscape cookie export is provided it carries the full device context (auth_token, ct0, kdt, twid, guest_id); a bare auth_token with a fabricated ct0 is a weak bot signature.
-func newXClient(authToken, csrfToken, cookiesRaw string) (*xClient, error) {
-	tp := browser.FirefoxProfile
-	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), []tls_client.HttpClientOption{
+// newXClient builds the client from a Netscape cookie export: it carries the full device context (auth_token, kdt,
+// twid, guest_id). ct0 is replaced by csrfToken, which the client also sends as the csrf header.
+func newXClient(csrfToken, cookiesRaw string) (*xClient, error) {
+	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
 		tls_client.WithTimeoutSeconds(30),
-		tls_client.WithClientProfile(tp.Profile),
-	}...)
+		tls_client.WithClientProfile(browser.TLS),
+	)
 	if err != nil {
 		return nil, err
 	}
+	parsed, err := cookies.ParseNetscape(cookiesRaw, "x.com")
+	if err != nil {
+		return nil, fmt.Errorf("twitter cookie export: %w", err)
+	}
+	slog.Info("Loaded twitter cookie export into client", "cookies", len(parsed))
 	// keep the cookie header in the export's jar order; a hand-sorted header is a subtle automation tell
 	var pairs []string
 	sawAuth, sawCt0 := false, false
-	if cookiesRaw != "" {
-		parsed, err := cookies.ParseNetscape(cookiesRaw, "x.com")
-		if err != nil {
-			slog.Warn("Ignoring invalid twitter cookie export, falling back to auth_token only", "error", err)
-		} else {
-			slog.Info("Loaded twitter cookie export into client", "cookies", len(parsed))
-			for _, ck := range parsed {
-				if ck.Name == "auth_token" {
-					sawAuth = true
-					if authToken != "" {
-						pairs = append(pairs, "auth_token="+authToken)
-						continue
-					}
-					authToken = ck.Value
-				}
-				if ck.Name == "ct0" {
-					sawCt0 = true
-					if csrfToken != "" {
-						pairs = append(pairs, "ct0="+csrfToken)
-						continue
-					}
-					csrfToken = ck.Value
-				}
-				pairs = append(pairs, ck.Name+"="+ck.Value)
-			}
+	for _, ck := range parsed {
+		switch ck.Name {
+		case "auth_token":
+			sawAuth = ck.Value != ""
+		case "ct0":
+			sawCt0 = true
+			pairs = append(pairs, "ct0="+csrfToken)
+			continue
 		}
-	}
-	if authToken == "" {
-		return nil, errors.New("no x.com auth_token in cookie export")
+		pairs = append(pairs, ck.Name+"="+ck.Value)
 	}
 	if !sawAuth {
-		pairs = append(pairs, "auth_token="+authToken)
+		return nil, errors.New("no x.com auth_token in cookie export")
 	}
-	if csrfToken != "" && !sawCt0 {
+	if !sawCt0 {
 		pairs = append(pairs, "ct0="+csrfToken)
 	}
-	slog.Info("Twitter client TLS profile", "tls_fingerprint", tp.Profile.GetClientHelloStr())
-	return &xClient{http: client, ua: tp.UA, cookieHdr: strings.Join(pairs, "; "), csrfToken: csrfToken}, nil
+	slog.Info("Twitter client TLS profile", "tls_fingerprint", browser.TLS.GetClientHelloStr())
+	return &xClient{http: client, cookieHdr: strings.Join(pairs, "; "), csrfToken: csrfToken}, nil
 }
 
 func (c *xClient) get(ctx context.Context, rawURL, referer string) ([]byte, error) {
-	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodGet, rawURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header = fhttp.Header{
-		"user-agent":                []string{c.ua},
+	return c.do(ctx, rawURL, fhttp.Header{
+		"user-agent":                []string{browser.UA},
 		"accept":                    []string{"*/*"},
 		"accept-language":           []string{"en-US,en;q=0.9"},
 		"authorization":             []string{"Bearer " + bearer},
@@ -112,48 +93,29 @@ func (c *xClient) get(ctx context.Context, rawURL, referer string) ([]byte, erro
 		"x-twitter-client-language": []string{"en"},
 		"x-twitter-auth-type":       []string{"OAuthWebSession"},
 		"referer":                   []string{referer},
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	if len(body) == 0 {
-		return nil, fmt.Errorf("x.com returned an empty body with status %d", resp.StatusCode)
-	}
-	if resp.StatusCode == fhttp.StatusTooManyRequests {
-		return nil, &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
-	}
-	if resp.StatusCode == fhttp.StatusUnauthorized || resp.StatusCode == fhttp.StatusForbidden {
-		return nil, fmt.Errorf("%w: response status %s", ErrAuthExpired, resp.Status)
-	}
-	if resp.StatusCode != fhttp.StatusOK {
-		return nil, fmt.Errorf("response status %s: %s", resp.Status, body)
-	}
-	return body, nil
+	})
 }
 
 // page fetches an HTML document with browser-like navigation headers; the api
 // headers (bearer, OAuthWebSession) on an html route answer 401.
 func (c *xClient) page(ctx context.Context, rawURL string) ([]byte, error) {
-	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodGet, rawURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header = fhttp.Header{
-		"user-agent":      []string{c.ua},
+	return c.do(ctx, rawURL, fhttp.Header{
+		"user-agent":      []string{browser.UA},
 		"accept":          []string{"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"},
 		"accept-language": []string{"en-US,en;q=0.9"},
 		"cookie":          []string{c.cookieHdr},
 		"sec-fetch-dest":  []string{"document"},
 		"sec-fetch-mode":  []string{"navigate"},
 		"sec-fetch-site":  []string{"none"},
+	})
+}
+
+func (c *xClient) do(ctx context.Context, rawURL string, header fhttp.Header) ([]byte, error) {
+	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
 	}
+	req.Header = header
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, err
@@ -164,16 +126,14 @@ func (c *xClient) page(ctx context.Context, rawURL string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(body) == 0 {
+	switch {
+	case len(body) == 0:
 		return nil, fmt.Errorf("x.com returned an empty body with status %d", resp.StatusCode)
-	}
-	if resp.StatusCode == fhttp.StatusTooManyRequests {
+	case resp.StatusCode == fhttp.StatusTooManyRequests:
 		return nil, &RateLimitError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
-	}
-	if resp.StatusCode == fhttp.StatusUnauthorized || resp.StatusCode == fhttp.StatusForbidden {
+	case resp.StatusCode == fhttp.StatusUnauthorized || resp.StatusCode == fhttp.StatusForbidden:
 		return nil, fmt.Errorf("%w: response status %s", ErrAuthExpired, resp.Status)
-	}
-	if resp.StatusCode != fhttp.StatusOK {
+	case resp.StatusCode != fhttp.StatusOK:
 		return nil, fmt.Errorf("response status %s: %s", resp.Status, body)
 	}
 	return body, nil

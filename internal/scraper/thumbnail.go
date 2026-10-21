@@ -149,16 +149,12 @@ func pruneMisplacedThumbs(thumbsDir string) {
 }
 
 func isThumbSource(name string) bool {
-	if name == "posts.json" || strings.HasSuffix(name, ".bak") || name == ".DS_Store" {
-		return false
-	}
 	if strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".tmp.mp4") || strings.Contains(name, ".transcoding.") {
 		return false
 	}
-	ext := strings.ToLower(filepath.Ext(name))
-	switch ext {
-	case ".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".m4v":
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jpg", ".jpeg", ".png", ".webp":
 		return true
 	}
-	return false
+	return download.IsVideo(name)
 }

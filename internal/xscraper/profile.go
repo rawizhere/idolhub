@@ -19,14 +19,13 @@ type Profile struct {
 	Name       string
 	Avatar     string
 	Tweets     int
-	Media      int
 	Followers  int
 	Protected  bool
 }
 
 // Profile looks up a screen name; it costs one rate-limited GraphQL request.
 func (s *Scraper) Profile(ctx context.Context, screenName string) (Profile, error) {
-	body, err := s.doGet(ctx, opUserByScreenName, map[string]interface{}{"screen_name": screenName}, "https://x.com/"+screenName)
+	body, err := s.doGet(ctx, opUserByScreenName, map[string]any{"screen_name": screenName}, "https://x.com/"+screenName)
 	if err != nil {
 		return Profile{}, err
 	}
@@ -55,7 +54,6 @@ func parseProfile(body []byte) (Profile, error) {
 						ScreenName           string `json:"screen_name"`
 						ProfileImageURLHTTPS string `json:"profile_image_url_https"`
 						StatusesCount        int    `json:"statuses_count"`
-						MediaCount           int    `json:"media_count"`
 						FollowersCount       int    `json:"followers_count"`
 						Protected            bool   `json:"protected"`
 					} `json:"legacy"`
@@ -77,7 +75,6 @@ func parseProfile(body []byte) (Profile, error) {
 		Name:       firstNonEmpty(r.Core.Name, r.Legacy.Name),
 		Avatar:     firstNonEmpty(r.Avatar.ImageURL, r.Legacy.ProfileImageURLHTTPS),
 		Tweets:     r.Legacy.StatusesCount,
-		Media:      r.Legacy.MediaCount,
 		Followers:  r.Legacy.FollowersCount,
 		Protected:  r.Privacy.Protected || r.Legacy.Protected,
 	}

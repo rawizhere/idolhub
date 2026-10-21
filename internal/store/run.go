@@ -30,12 +30,12 @@ type RunStore struct {
 
 func (s *RunStore) Add(ctx context.Context, r Run) error {
 	query := `INSERT INTO sync_runs (platform, username, started_at, finished_at, status, full_sync, new_files, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-	if err := execContext(ctx, s.db, query, r.Platform, r.Username, r.StartedAt.UTC(), r.FinishedAt.UTC(), r.Status, boolInt(r.FullSync), r.NewFiles, nullString(r.Error)); err != nil {
+	if _, err := s.db.ExecContext(ctx, query, r.Platform, r.Username, r.StartedAt.UTC(), r.FinishedAt.UTC(), r.Status, boolInt(r.FullSync), r.NewFiles, nullString(r.Error)); err != nil {
 		return fmt.Errorf("store: run add: %w", err)
 	}
 	prune := `DELETE FROM sync_runs WHERE platform = ? AND username = ? AND id NOT IN (
 	SELECT id FROM sync_runs WHERE platform = ? AND username = ? ORDER BY started_at DESC LIMIT ?)`
-	if err := execContext(ctx, s.db, prune, r.Platform, r.Username, r.Platform, r.Username, runsKept); err != nil {
+	if _, err := s.db.ExecContext(ctx, prune, r.Platform, r.Username, r.Platform, r.Username, runsKept); err != nil {
 		return fmt.Errorf("store: run prune: %w", err)
 	}
 	return nil
@@ -68,7 +68,7 @@ ORDER BY started_at DESC LIMIT ?`, platform, username, limit)
 
 // DeleteAccount drops the history of a removed account.
 func (s *RunStore) DeleteAccount(ctx context.Context, platform, username string) error {
-	if err := execContext(ctx, s.db, `DELETE FROM sync_runs WHERE platform = ? AND username = ?`, platform, username); err != nil {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM sync_runs WHERE platform = ? AND username = ?`, platform, username); err != nil {
 		return fmt.Errorf("store: run delete: %w", err)
 	}
 	return nil

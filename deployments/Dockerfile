@@ -1,38 +1,16 @@
 # syntax=docker/dockerfile:1
 
-# ---- Tailwind CSS ----
-FROM node:26-alpine AS tailwind
-WORKDIR /app
-COPY cmd/parser/web/package.json cmd/parser/web/package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm     npm ci
-COPY cmd/parser/web/ cmd/parser/web/
-RUN for f in cmd/parser/web/templates/*.templ; do \
-      [ -f "$f" ] && cp "$f" "${f}.html"; \
-    done && \
-    npx @tailwindcss/cli -i cmd/parser/web/static/input.css -o app.css --minify
-
-# ---- Templ ----
-FROM golang:1.27-alpine AS templ
-WORKDIR /app
-COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
-COPY cmd/parser/web/templates/ cmd/parser/web/templates/
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go tool templ generate -path ./cmd/parser/web/templates/
-
 # ---- Build ----
+# app.css is the committed build; CI checks that it matches a fresh Tailwind run.
 FROM golang:1.27-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 COPY . .
-COPY --from=tailwind /app/app.css cmd/parser/web/static/app.css
-COPY --from=templ /app/cmd/parser/web/templates/*_templ.go cmd/parser/web/templates/
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    go tool templ generate -path ./cmd/parser/web/templates/ && \
     CGO_ENABLED=0 go build -ldflags="-s -w" -o /app/idolhub ./cmd/parser
 
 # ---- Runtime ----

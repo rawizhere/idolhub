@@ -41,7 +41,6 @@ downloads/
 
 # Generated
 *_templ.go
-cmd/parser/web/static/app.css
 node_modules/
 
 # VCS

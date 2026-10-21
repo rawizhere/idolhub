@@ -4,13 +4,14 @@ import (
 	"testing"
 
 	"idolhub/internal/config"
+	"idolhub/internal/store"
 )
 
 func TestAccountPatchApply(t *testing.T) {
 	str := func(s string) *string { return &s }
 	yes := true
 	filters := []string{" cat ", "Cat", "", "dog"}
-	acc := config.Account{Platform: "twitter", Username: "a", Filters: []string{}}
+	acc := config.Account{Account: store.Account{Platform: "twitter", Username: "a", Filters: []string{}}}
 
 	changed, err := accountPatch{Paused: &yes}.apply(&acc)
 	if err != nil || changed || !acc.Paused {

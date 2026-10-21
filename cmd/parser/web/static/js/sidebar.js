@@ -1,6 +1,6 @@
 import { state, targetKey, activeTarget, isActiveTarget } from "./state.js";
 import { onClick, onInput } from "./actions.js";
-import { timeAgo, toast, confirmDialog, escapeHtml, platformBadgeClass, formatDuration } from "./utils.js";
+import { timeAgo, toast, confirmDialog, escapeHtml, platformBadgeClass } from "./utils.js";
 import { startSyncApi, cancelSyncApi, clearFolderApi, deleteAccountApi } from "./api.js";
 import { goTarget, goOverview } from "./nav.js";
 import { showTarget } from "./gallery.js";
@@ -19,24 +19,10 @@ export function visibleTargets() {
   });
 }
 
-// progressInfo estimates time left from the progress rate since the first sample of this run.
+// progressInfo is the progress of a running target. Scrapers report coarse stages, not a rate, so there is no ETA.
 export function progressInfo(target) {
-  if (!isRunning(target)) {
-    state.progressStart.delete(targetKey(target));
-    return null;
-  }
-  const pct = Math.max(0, Math.min(100, target.progress || 0));
-  const key = targetKey(target);
-  let start = state.progressStart.get(key);
-  if (!start || pct < start.pct) {
-    start = { pct, at: Date.now() };
-    state.progressStart.set(key, start);
-  }
-  let eta = "";
-  const done = pct - start.pct;
-  const elapsed = Date.now() - start.at;
-  if (done >= 5 && elapsed > 10000 && pct < 100) eta = `~${formatDuration(elapsed / done * (100 - pct))} left`;
-  return { pct, eta, queued: target.status === "queued" };
+  if (!isRunning(target)) return null;
+  return { pct: Math.max(0, Math.min(100, target.progress || 0)), queued: target.status === "queued" };
 }
 
 function cardHTML(target) {
@@ -70,7 +56,7 @@ function cardHTML(target) {
   const progress = prog
     ? `<div class="flex items-center gap-1.5 mt-1">
          <div class="flex-1 h-1 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden"><div class="h-full bg-[#ff9900] transition-all duration-300" style="width:${prog.queued ? 0 : prog.pct}%"></div></div>
-         <span class="text-[0.5625rem] font-mono text-slate-500 dark:text-zinc-400 whitespace-nowrap">${prog.queued ? "queued" : `${prog.pct}%${prog.eta ? ` · ${prog.eta}` : ""}`}</span>
+         <span class="text-[0.5625rem] font-mono text-slate-500 dark:text-zinc-400 whitespace-nowrap">${prog.queued ? "queued" : `${prog.pct}%`}</span>
        </div>`
     : "";
 
@@ -170,7 +156,7 @@ export function updateDashboardDetails(target = activeTarget()) {
   box.classList.toggle("flex", !!prog);
   if (prog) {
     $("dashboard-progress-bar").style.width = `${prog.queued ? 0 : prog.pct}%`;
-    $("dashboard-progress-label").textContent = prog.queued ? "queued" : `${prog.pct}%${prog.eta ? ` · ${prog.eta}` : ""}`;
+    $("dashboard-progress-label").textContent = prog.queued ? "queued" : `${prog.pct}%`;
   }
 }
 

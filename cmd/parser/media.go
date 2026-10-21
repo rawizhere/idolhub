@@ -3,7 +3,6 @@ package main
 import (
 	"archive/zip"
 	"cmp"
-	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -27,9 +26,6 @@ const (
 
 // handleRecent lists the newest files across every target for the overview strip.
 func (a *App) handleRecent(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "application/json")
-
 	limit := recentDefaultLimit
 	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
 		limit = min(n, recentMaxLimit)
@@ -50,7 +46,6 @@ func (a *App) handleRecent(w http.ResponseWriter, r *http.Request) {
 				Type:         f.Type,
 				Date:         f.Date,
 				Size:         f.Size,
-				SizeHuman:    f.SizeHuman,
 				URL:          f.URL,
 				ThumbnailURL: f.ThumbnailURL,
 				Caption:      captions[f.Filename],
@@ -67,7 +62,7 @@ func (a *App) handleRecent(w http.ResponseWriter, r *http.Request) {
 	if out == nil {
 		out = []GlobalSearchResultFile{}
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"files": out})
+	writeJSON(w, http.StatusOK, map[string]any{"files": out})
 }
 
 // targetFiles validates a bulk request and returns the on-disk paths of the selected files.
@@ -153,7 +148,6 @@ type mediaDeleteRequest struct {
 
 // handleMediaDelete removes selected files and their thumbnails. A later full resync may fetch them again.
 func (a *App) handleMediaDelete(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
 	var req mediaDeleteRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -181,6 +175,5 @@ func (a *App) handleMediaDelete(w http.ResponseWriter, r *http.Request) {
 	slog.Info("Deleted selected media", "user", req.Username, "platform", req.Platform, "count", deleted)
 	a.mediaIndex.Invalidate(req.Platform, req.Username)
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]int{"deleted": deleted})
+	writeJSON(w, http.StatusOK, map[string]int{"deleted": deleted})
 }

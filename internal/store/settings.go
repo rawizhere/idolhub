@@ -31,7 +31,7 @@ func (s *SettingsStore) Set(ctx context.Context, key, value string) error {
 	query := `
 INSERT INTO settings (key, value) VALUES (?, ?)
 ON CONFLICT (key) DO UPDATE SET value = excluded.value`
-	if err := execContext(ctx, s.db, query, key, value); err != nil {
+	if _, err := s.db.ExecContext(ctx, query, key, value); err != nil {
 		return fmt.Errorf("store: settings set: %w", err)
 	}
 	return nil

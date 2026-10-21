@@ -33,7 +33,7 @@ type Profile struct {
 func LookupProfile(ctx context.Context, platform, username string, opts Options) (Profile, error) {
 	switch platform {
 	case "twitter":
-		s, err := xscraper.New(xscraper.Session{AuthToken: opts.TwitterAuthToken, Cookies: opts.TwitterCookies})
+		s, err := xscraper.New(opts.TwitterCookies)
 		if err != nil {
 			return Profile{}, err
 		}
@@ -50,8 +50,11 @@ func LookupProfile(ctx context.Context, platform, username string, opts Options)
 		return Profile{Username: p.ScreenName, Name: p.Name, Avatar: p.Avatar, Posts: p.Tweets, Followers: p.Followers, Private: p.Protected}, nil
 	case "instagram":
 		f, err := instagramFetcher(ctx, opts)
-		if err != nil {
+		if f == nil {
 			return Profile{}, err
+		}
+		if err != nil {
+			return Profile{}, fmt.Errorf("%w: %w", ErrAuthExpired, err)
 		}
 		return lookupInstagram(ctx, f, username)
 	}
@@ -62,10 +65,10 @@ func LookupProfile(ctx context.Context, platform, username string, opts Options)
 func CheckSession(ctx context.Context, platform string, opts Options) (string, error) {
 	switch platform {
 	case "twitter":
-		if opts.TwitterAuthToken == "" && opts.TwitterCookies == "" {
+		if opts.TwitterCookies == "" {
 			return "", errors.New("no x.com cookies saved")
 		}
-		s, err := xscraper.New(xscraper.Session{AuthToken: opts.TwitterAuthToken, Cookies: opts.TwitterCookies})
+		s, err := xscraper.New(opts.TwitterCookies)
 		if err != nil {
 			return "", err
 		}
@@ -85,10 +88,10 @@ func CheckSession(ctx context.Context, platform string, opts Options) (string, e
 			}
 			return "user id " + st.DsUserID, nil
 		}
-		if opts.InstagramSessionID == "" && opts.InstagramCookies == "" {
+		if opts.InstagramCookies == "" {
 			return "", errors.New("no instagram.com cookies saved")
 		}
-		c := getIGClient(opts.InstagramSessionID, opts.InstagramCookies)
+		c := getIGClient(opts.InstagramCookies)
 		if err := c.bootstrap(ctx); err != nil {
 			return "", fmt.Errorf("%w: %w", ErrAuthExpired, err)
 		}
@@ -97,6 +100,8 @@ func CheckSession(ctx context.Context, platform string, opts Options) (string, e
 	return "", ErrLookupUnsupported
 }
 
+// instagramFetcher picks the sidecar when one is configured, else the shared direct client. A nil fetcher is a
+// hard failure; a fetcher with an error is a direct client whose bootstrap failed, which may still work.
 func instagramFetcher(ctx context.Context, opts Options) (igFetcher, error) {
 	if opts.InstagramSidecarURL != "" {
 		bc := newIGBrowserClient(opts.InstagramSidecarURL)
@@ -105,13 +110,13 @@ func instagramFetcher(ctx context.Context, opts Options) (igFetcher, error) {
 		}
 		return bc, nil
 	}
-	if opts.InstagramSessionID == "" && opts.InstagramCookies == "" {
+	if opts.InstagramCookies == "" {
 		return nil, errors.New("instagram session is not configured")
 	}
-	c := getIGClient(opts.InstagramSessionID, opts.InstagramCookies)
+	c := getIGClient(opts.InstagramCookies)
 	if c.csrf == "" || c.userID == "" {
 		if err := c.bootstrap(ctx); err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrAuthExpired, err)
+			return c, err
 		}
 	}
 	return c, nil

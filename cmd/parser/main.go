@@ -10,13 +10,13 @@ import (
 	"encoding/json"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"mime"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -33,7 +33,6 @@ import (
 	"idolhub/internal/download"
 	"idolhub/internal/gallery"
 	"idolhub/internal/igbrowser"
-	"idolhub/internal/logging"
 	"idolhub/internal/orchestrator"
 	"idolhub/internal/scraper"
 	"idolhub/internal/store"
@@ -156,15 +155,7 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 }
 
 func main() {
-	logging.Init()
-
-	if len(os.Args) > 1 && os.Args[1] == "export-json" {
-		if err := runExportJSON(os.Args[2:]); err != nil {
-			slog.Error("export-json failed", "error", err)
-			os.Exit(1)
-		}
-		return
-	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 
 	st, err := store.Open("configs/idolhub.db")
 	if err != nil {
@@ -177,13 +168,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	gallery.Init(st.Posts)
-	orchestrator.InitOrchestrator(gallery.GlobalIndex, st)
+	mediaIndex := gallery.NewIndex(st.Posts)
+	orch := orchestrator.New(mediaIndex, st)
+	orch.Start()
 	cfg := config.GetConfig()
 	slog.Info("Configuration loaded successfully", "targets_count", len(cfg.Accounts), "auto_sync_interval_hours", cfg.AutoSyncInterval)
 	app := &App{
-		orch:       orchestrator.GlobalOrchestrator,
-		mediaIndex: gallery.GlobalIndex,
+		orch:       orch,
+		mediaIndex: mediaIndex,
 		st:         st,
 		thumbSem:   make(chan struct{}, 2),
 	}
@@ -247,7 +239,7 @@ func main() {
 		}
 	}()
 
-	orchestrator.GlobalOrchestrator.SyncTargets(cfg.Accounts)
+	orch.SyncTargets(cfg.Accounts)
 
 	go func() {
 		// Integrity first: the thumbnail and codec migrations must not work from truncated files.
@@ -269,9 +261,7 @@ func main() {
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
-	sseCtx, sseCancel := context.WithTimeout(shutdownCtx, 5*time.Second)
-	defer sseCancel()
-	app.orch.ShutdownSSE(sseCtx)
+	app.orch.ShutdownSSE()
 	app.orch.Shutdown()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -331,11 +321,8 @@ func (a *App) serveStatic() http.Handler {
 			} else {
 				w.Header().Set("Cache-Control", "no-cache")
 			}
+			// the file server answers If-None-Match with 304 once the ETag header is set
 			w.Header().Set("ETag", etag)
-			if r.Header.Get("If-None-Match") == etag {
-				w.WriteHeader(http.StatusNotModified)
-				return
-			}
 		}
 		if r.URL.Path != "/" && strings.HasSuffix(r.URL.Path, "/") {
 			http.NotFound(w, r)
@@ -347,9 +334,6 @@ func (a *App) serveStatic() http.Handler {
 }
 
 func (a *App) handleConfigPost(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Content-Type", "application/json")
 	var req configDTO
 	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -362,37 +346,14 @@ func (a *App) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	var changed []config.Account
-	for i, newAcc := range cfg.Accounts {
-		var oldAcc *config.Account
-		for _, acc := range oldCfg.Accounts {
-			if acc.Platform == newAcc.Platform && strings.EqualFold(acc.Username, newAcc.Username) {
-				oldAcc = &acc
-				break
-			}
-		}
-		if oldAcc != nil {
-			if !accountsEqual(*oldAcc, newAcc) {
-				cfg.Accounts[i].LastSyncStatus = "idle"
-				cfg.Accounts[i].LastSyncTime = time.Time{}
-				changed = append(changed, newAcc)
-			} else {
-				cfg.Accounts[i].LastSyncStatus = oldAcc.LastSyncStatus
-				cfg.Accounts[i].LastSyncTime = oldAcc.LastSyncTime
-			}
-		}
-	}
-
 	if err := config.SaveConfig(a.st, cfg); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// Fresh session credentials mean the operator fixed the session; lift the circuit breakers.
-	if cfg.InstagramSessionID != oldCfg.InstagramSessionID ||
-		cfg.InstagramCookies != oldCfg.InstagramCookies ||
+	if cfg.InstagramCookies != oldCfg.InstagramCookies ||
 		cfg.InstagramSidecarURL != oldCfg.InstagramSidecarURL ||
-		cfg.TwitterAuthToken != oldCfg.TwitterAuthToken ||
 		cfg.TwitterCookies != oldCfg.TwitterCookies {
 		a.orch.ResetSessionBlocks()
 	}
@@ -411,35 +372,22 @@ func (a *App) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 		}(cfg.InstagramCookies)
 	}
 
-	for _, acc := range changed {
-		if a.st == nil {
-			continue
-		}
-		err := a.st.Accounts.SetSyncInfo(r.Context(), acc.Platform, acc.Username, "idle", time.Time{})
-		if err != nil {
-			slog.Warn("Failed to reset sync info", "user", acc.Username, "error", err)
-		}
-	}
-
-	a.orch.SyncTargets(cfg.Accounts)
 	a.orch.ConcurrencyChanged()
-
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (a *App) handleIGSessionStatus(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
 	url := config.GetConfig().InstagramSidecarURL
 	if url == "" {
-		_ = json.NewEncoder(w).Encode(map[string]string{"session": "sidecar-not-configured"})
+		writeJSON(w, http.StatusOK, map[string]string{"session": "sidecar-not-configured"})
 		return
 	}
 	st, err := igbrowser.New(url).Status(r.Context())
 	if err != nil {
-		_ = json.NewEncoder(w).Encode(map[string]string{"session": "sidecar-unreachable", "error": err.Error()})
+		writeJSON(w, http.StatusOK, map[string]string{"session": "sidecar-unreachable", "error": err.Error()})
 		return
 	}
-	_ = json.NewEncoder(w).Encode(st)
+	writeJSON(w, http.StatusOK, st)
 }
 
 type ProgressResponse struct {
@@ -450,22 +398,13 @@ type ProgressResponse struct {
 }
 
 func (a *App) handleProgress(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Content-Type", "application/json")
-
 	c := config.GetConfig()
-	targets := a.orch.GetAllProgress(c.Accounts)
-	globalLogs := a.orch.GetGlobalLogs()
-
-	resp := ProgressResponse{
-		Targets:          targets,
-		GlobalLogs:       globalLogs,
+	writeJSON(w, http.StatusOK, ProgressResponse{
+		Targets:          a.orch.GetAllProgress(c.Accounts),
+		GlobalLogs:       a.orch.GetGlobalLogs(),
 		LastSync:         a.orch.LastSyncTime().Format(time.RFC3339),
 		AutoSyncInterval: c.AutoSyncInterval,
-	}
-
-	_ = json.NewEncoder(w).Encode(resp)
+	})
 }
 
 type scrapeRequest struct {
@@ -483,14 +422,14 @@ func (a *App) handleMedia(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if strings.Contains("/"+relPath, "/thumbnails/") {
+	thumbRel := isThumbnailRel(relPath)
+	if thumbRel {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 	} else {
 		w.Header().Set("Cache-Control", "private, max-age=300")
 	}
 
 	filePath := filepath.Join("downloads", filepath.FromSlash(filepath.Clean(relPath)))
-	thumbRel := isThumbnailRel(relPath)
 
 	// Thumbnails are served from the fast local dir when configured; the legacy in-tree copy is the fallback.
 	if thumbRel {
@@ -507,10 +446,6 @@ func (a *App) handleMedia(w http.ResponseWriter, r *http.Request) {
 		if thumbRel {
 			a.ensureThumbnail(filePath)
 		}
-	}
-
-	if ct := mime.TypeByExtension(strings.ToLower(filepath.Ext(filePath))); ct != "" {
-		w.Header().Set("Content-Type", ct)
 	}
 
 	http.ServeFile(w, r, filePath)
@@ -600,54 +535,33 @@ func relUnder(path, base string) string {
 }
 
 func (a *App) handleScrapeStart(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
-
 	var req scrapeRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	c := config.GetConfig()
-
-	if req.Username == "all" {
-		if req.ForceFull {
-			slog.Info("Triggered force full resync for all configured targets")
-		} else {
-			slog.Info("Triggered sync for all configured targets")
-		}
-		for _, acc := range c.Accounts {
-			a.orch.StartScrape(acc.Username, acc.Platform, acc.SaveText, req.ForceFull)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "started", "target": "all"})
-		return
-	}
-
+	all := req.Username == "all"
 	var targets []config.Account
-	for _, acc := range c.Accounts {
-		if strings.EqualFold(acc.Username, req.Username) && (req.Platform == "" || acc.Platform == req.Platform) {
+	for _, acc := range config.GetConfig().Accounts {
+		if all || strings.EqualFold(acc.Username, req.Username) && (req.Platform == "" || acc.Platform == req.Platform) {
 			targets = append(targets, acc)
 		}
 	}
-
-	if len(targets) == 0 {
+	if !all && len(targets) == 0 {
 		http.Error(w, "Account not found in settings", http.StatusNotFound)
 		return
 	}
 
 	for _, acc := range targets {
-		if req.ForceFull {
-			slog.Info("Triggered force full resync for target", "user", acc.Username, "platform", acc.Platform)
-		} else {
-			slog.Info("Triggered sync for target", "user", acc.Username, "platform", acc.Platform)
-		}
-		a.orch.StartScrape(acc.Username, acc.Platform, acc.SaveText, req.ForceFull)
+		slog.Info("Triggered sync for target", "user", acc.Username, "platform", acc.Platform, "force_full", req.ForceFull)
+		a.orch.StartScrape(acc.Username, acc.Platform, req.ForceFull)
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "started", "target": targets[0].Username})
+	target := req.Username
+	if !all {
+		target = targets[0].Username
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "started", "target": target})
 }
 
 type clearRequest struct {
@@ -656,9 +570,6 @@ type clearRequest struct {
 }
 
 func (a *App) handleScrapeCancel(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
-
 	var req scrapeRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -670,19 +581,14 @@ func (a *App) handleScrapeCancel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("Cancelling active sync", "user", req.Username, "platform", req.Platform)
-	ok := a.orch.CancelScrape(req.Platform, req.Username)
-	w.Header().Set("Content-Type", "application/json")
-	if ok {
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "cancelled", "target": req.Username})
-	} else {
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "not_running", "target": req.Username})
+	status := "not_running"
+	if a.orch.CancelScrape(req.Platform, req.Username) {
+		status = "cancelled"
 	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": status, "target": req.Username})
 }
 
 func (a *App) handleScrapeClear(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
-
 	var req clearRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -712,18 +618,8 @@ func (a *App) handleScrapeClear(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.orch.SavePersistedSyncInfo(req.Platform, req.Username, "idle", time.Time{})
-	if a.mediaIndex != nil {
-		a.mediaIndex.Invalidate(req.Platform, req.Username)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "cleared", "target": req.Username})
-}
-
-func accountsEqual(a, b config.Account) bool {
-	a.LastSyncStatus, b.LastSyncStatus = "", ""
-	a.LastSyncTime, b.LastSyncTime = time.Time{}, time.Time{}
-	return reflect.DeepEqual(a, b)
+	a.mediaIndex.Invalidate(req.Platform, req.Username)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "cleared", "target": req.Username})
 }
 
 func fileMap(files []gallery.File) map[string]*gallery.File {
@@ -824,7 +720,6 @@ func parseGalleryParams(r *http.Request) galleryPageParams {
 // handleGalleryPage renders a gallery grid or posts page
 func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	p := parseGalleryParams(r)
@@ -853,7 +748,7 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 
 	galleryFiles := a.mediaIndex.View(platform, username)
 	byName := fileMap(galleryFiles)
-	filePostText := gallery.GlobalIndex.FilePostText(platform, username)
+	filePostText := a.mediaIndex.FilePostText(platform, username)
 	fileSource := make(map[string]string)
 	for _, rp := range a.mediaIndex.Posts(platform, username) {
 		src := postSourceURL(platform, username, rp.TweetID)
@@ -894,9 +789,7 @@ func (a *App) handleGalleryPage(w http.ResponseWriter, r *http.Request) {
 	allFiles = gallery.FilterByYearMonth(allFiles, func(f templates.GalleryFileData) string { return f.Date }, gallery.SplitList(year), gallery.SplitList(month))
 
 	if sortParam == "asc" {
-		for i, j := 0, len(allFiles)-1; i < j; i, j = i+1, j-1 {
-			allFiles[i], allFiles[j] = allFiles[j], allFiles[i]
-		}
+		slices.Reverse(allFiles)
 	}
 
 	if p.Tags != "" && p.Tags != "all" {
@@ -934,14 +827,7 @@ func (a *App) handleGalleryPostsPage(w http.ResponseWriter, r *http.Request, gp 
 		cleanText := tcoRe.ReplaceAllString(p.Text, "")
 		cleanText = strings.TrimSpace(cleanText)
 
-		tweetIDSuffix := ""
-		if p.TweetID != "" {
-			if len(p.TweetID) > 6 {
-				tweetIDSuffix = p.TweetID[len(p.TweetID)-6:]
-			} else {
-				tweetIDSuffix = p.TweetID
-			}
-		}
+		tweetIDSuffix := p.TweetID[max(0, len(p.TweetID)-6):]
 
 		var localFiles []templates.GalleryPostMediaFile
 		for _, gf := range a.postLocalFiles(p, gp.Platform, gp.Username, byName) {
@@ -1039,7 +925,6 @@ type GlobalSearchResultFile struct {
 	Type         string `json:"type"`
 	Date         string `json:"date"`
 	Size         int64  `json:"size"`
-	SizeHuman    string `json:"size_human"`
 	URL          string `json:"url"`
 	ThumbnailURL string `json:"thumbnail_url"`
 	Caption      string `json:"caption,omitempty"`
@@ -1067,14 +952,14 @@ func ftsQuery(q string) string {
 }
 
 // ftsMatchedFiles maps local filenames whose post text matches an FTS5 query.
-func (a *App) ftsMatchedFiles(ctx context.Context, platform, username, query string, files []gallery.File) map[string]bool {
+func (a *App) ftsMatchedFiles(ctx context.Context, platform, username, query string) map[string]bool {
 	matched, err := a.st.Posts.SearchFullText(ctx, platform, username, query, searchFTSPostLimit)
 	if err != nil || len(matched) == 0 {
 		return nil
 	}
 	ids := make(map[string]bool, len(matched))
-	for _, m := range matched {
-		ids[m.ExternalID] = true
+	for _, id := range matched {
+		ids[id] = true
 	}
 	urlFiles := a.mediaIndex.URLFiles(platform, username)
 	names := make(map[string]bool)
@@ -1095,10 +980,6 @@ func (a *App) ftsMatchedFiles(ctx context.Context, platform, username, query str
 }
 
 func (a *App) handleGlobalSearchAPI(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Content-Type", "application/json")
-
 	query := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
 	resp := GlobalSearchResponse{Query: query, Files: []GlobalSearchResultFile{}}
 
@@ -1115,8 +996,8 @@ func (a *App) handleGlobalSearchAPI(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			filePostText := gallery.GlobalIndex.FilePostText(platform, username)
-			ftsNames := a.ftsMatchedFiles(r.Context(), platform, username, fts, galleryFiles)
+			filePostText := a.mediaIndex.FilePostText(platform, username)
+			ftsNames := a.ftsMatchedFiles(r.Context(), platform, username, fts)
 
 			for _, gf := range galleryFiles {
 				caption := filePostText[gf.Filename]
@@ -1152,7 +1033,7 @@ func (a *App) handleGlobalSearchAPI(w http.ResponseWriter, r *http.Request) {
 		resp.Files = matchingFiles
 	}
 
-	_ = json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type HashtagCount struct {
@@ -1168,10 +1049,6 @@ type GalleryFiltersResponse struct {
 }
 
 func (a *App) handleGalleryMeta(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("Content-Type", "application/json")
-
 	platform := r.URL.Query().Get("platform")
 	username := r.URL.Query().Get("username")
 	if platform == "" || username == "" {
@@ -1198,11 +1075,7 @@ func (a *App) handleGalleryMeta(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	sortedYears := make([]string, 0, len(years))
-	for y := range years {
-		sortedYears = append(sortedYears, y)
-	}
-	slices.Sort(sortedYears)
+	sortedYears := slices.Sorted(maps.Keys(years))
 	slices.Reverse(sortedYears)
 
 	hashtags := make([]HashtagCount, 0, len(tagCounts))
@@ -1216,7 +1089,7 @@ func (a *App) handleGalleryMeta(w http.ResponseWriter, r *http.Request) {
 		return cmp.Compare(a.Tag, b.Tag)
 	})
 
-	_ = json.NewEncoder(w).Encode(GalleryFiltersResponse{
+	writeJSON(w, http.StatusOK, GalleryFiltersResponse{
 		FileCount: len(files),
 		PostCount: len(posts),
 		Years:     sortedYears,

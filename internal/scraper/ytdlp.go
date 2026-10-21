@@ -16,16 +16,13 @@ import (
 	ytdlp "github.com/lrstanley/go-ytdlp"
 )
 
-var (
-	ytResolvedReady bool
-	ytExecutable    string
-)
+// ytExecutable is the resolved yt-dlp binary; empty until EnsureYTDLP finds or installs one.
+var ytExecutable string
 
 // EnsureYTDLP resolves the yt-dlp binary, falling back to go-ytdlp install if missing from PATH.
 func EnsureYTDLP(ctx context.Context) {
 	if path, err := exec.LookPath("yt-dlp"); err == nil {
 		ytExecutable = path
-		ytResolvedReady = true
 		slog.Info("yt-dlp binary resolved from PATH", "path", ytExecutable)
 		return
 	}
@@ -36,7 +33,6 @@ func EnsureYTDLP(ctx context.Context) {
 		return
 	}
 	ytExecutable = resolved.Executable
-	ytResolvedReady = true
 	slog.Info("yt-dlp binary auto-installed successfully", "path", ytExecutable)
 }
 
@@ -58,7 +54,7 @@ func StartYTDLPUpdateLoop(ctx context.Context) {
 }
 
 func updateYTDLP(parent context.Context) {
-	if !ytResolvedReady || ytExecutable == "" {
+	if ytExecutable == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
@@ -72,45 +68,15 @@ func updateYTDLP(parent context.Context) {
 	slog.Info("yt-dlp self-update done", "output", strings.TrimSpace(string(out)))
 }
 
-type ytdlpPlatform struct {
-	url    string // base URL template
-	cookie string
-}
-
-func ytdlpPlatformConfig(platform, cookie string) ytdlpPlatform {
-	switch platform {
-	case "tiktok":
-		return ytdlpPlatform{
-			url:    "https://www.tiktok.com/@%s",
-			cookie: cookie,
-		}
-	default:
-		return ytdlpPlatform{}
-	}
-}
-
 // ScrapeYTDLP downloads videos from TikTok via yt-dlp. Optional Netscape cookies from config are written to a temp file and cleaned up after.
 func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 	platform := t.Platform
 	username := t.Username
-	saveText := t.SaveText
 	lastSync := opts.LastSync
-	pc := ytdlpPlatformConfig(platform, opts.TikTokCookies)
-	if pc.url == "" {
-		return fmt.Errorf("unsupported yt-dlp platform: %s", platform)
-	}
-	if opts.Posts == nil {
-		return fmt.Errorf("post store is not configured")
-	}
-	if !ytResolvedReady {
+	if ytExecutable == "" {
 		return fmt.Errorf("yt-dlp is not available; install yt-dlp or restart the server")
 	}
 
-	report := func(pct int, msg string) {
-		if opts.OnProgress != nil {
-			opts.OnProgress(pct, msg)
-		}
-	}
 	slog.Info("yt-dlp scrape starting", "platform", platform, "user", username, "last_sync", lastSync)
 
 	outputDir := filepath.Join("downloads", platform, username)
@@ -118,7 +84,7 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 
-	targetURL := fmt.Sprintf(pc.url, username)
+	targetURL := "https://www.tiktok.com/@" + username
 
 	cmd := ytdlp.New().
 		Format("bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc]+bestaudio/best[vcodec^=avc]/bestvideo+bestaudio/best").
@@ -141,15 +107,15 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 		cmd = cmd.DateAfter(cutoff.Format("20060102"))
 	}
 
-	if pc.cookie != "" {
-		cookiePath, err := writeCookieFile(pc.cookie)
+	if opts.TikTokCookies != "" {
+		cookiePath, err := writeCookieFile(opts.TikTokCookies)
 		if err != nil {
 			slog.Warn("failed to write yt-dlp cookie file, continuing without cookies", "platform", platform, "error", err)
 		} else {
 			defer func() { _ = os.Remove(cookiePath) }()
 			cmd = cmd.Cookies(cookiePath)
 			slog.Info("yt-dlp using cookies", "platform", platform, "user", username)
-			report(20, "using cookies")
+			opts.OnProgress(20)
 		}
 	}
 
@@ -167,7 +133,7 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 		}
 	}
 
-	if saveText {
+	if t.SaveText {
 		infos, perr := result.GetExtractedInfo()
 		if perr != nil {
 			slog.Warn("failed to parse yt-dlp JSON output", "platform", platform, "user", username, "error", perr)
@@ -188,7 +154,7 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 	EnsureDirectoryVideoCodecs(ctx, outputDir)
 
 	slog.Info("yt-dlp video scraping completed successfully", "platform", platform, "user", username)
-	report(90, "downloads done")
+	opts.OnProgress(90)
 	return nil
 }
 

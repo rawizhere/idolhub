@@ -4,7 +4,7 @@ import { openDialog } from "./utils.js";
 import { initSSE, pollProgress, whenReady } from "./sse.js";
 import { startCountdownTicker } from "./overview.js";
 import { visibleTargets } from "./sidebar.js";
-import { setView, setSelecting, preloadLightbox, syncFilterUI } from "./gallery.js";
+import { setView, setSelecting, syncFilterUI } from "./gallery.js";
 import { toggleBottomConsole, setTerminalLevel } from "./dock.js";
 import { loadConfig } from "./settings.js";
 import { openAddDialog } from "./accounts.js";
@@ -85,7 +85,6 @@ scrollArea.addEventListener("scroll", () => {
 whenReady(applyRoute);
 syncFilterUI();
 setTerminalLevel("all");
-preloadLightbox();
 loadConfig();
 pollProgress();
 initSSE();

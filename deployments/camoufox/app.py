@@ -4,11 +4,11 @@ Endpoints:
   POST /fetch            run fetch() inside an instagram.com page context
   POST /session/import   replace cookies from a Netscape cookie file
   GET  /session/status   cookie health, last error, captured request identity
-  GET  /health           process liveness
 
 One browser, one persistent profile on /data/profile. No CDP port.
-Request identity (x-asbd-id, graphql doc_id, www-claim) is captured at
-runtime from instagram's own in-page requests, never hardcoded.
+Request identity (x-asbd-id, graphql doc_id, fb_dtsg, www-claim) is captured
+at runtime from the browser network events of instagram's own requests,
+never hardcoded.
 """
 
 import asyncio
@@ -16,42 +16,15 @@ import os
 import re
 import time
 from pathlib import Path
-from urllib.parse import quote_plus, unquote, urlparse
+from urllib.parse import parse_qsl, quote_plus, urlparse
 
 from camoufox.async_api import AsyncCamoufox
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
-PROFILE_DIR = os.environ.get("IG_PROFILE_DIR", "/data/profile")
-SNAPSHOT_PATH = os.environ.get("IG_SNAPSHOT_PATH", "/data/profile-snapshot.json")
-PAGE_TIMEOUT_MS = int(os.environ.get("IG_PAGE_TIMEOUT_MS", "45000"))
-HARVEST_TIMEOUT_S = float(os.environ.get("IG_HARVEST_TIMEOUT_S", "8"))
-
-# init script: wrap fetch in the page and record the identity instagram's own code sends on the profile-posts graphql operation (/api/graphql).
-CAPTURE_JS = """
-window.__igcap = null;
-const _of = window.fetch;
-window.fetch = async function(input, init) {
-    try {
-        const url = typeof input === "string" ? input : (input && input.url) || "";
-        if (url.includes("/graphql") && init && typeof init.body === "string"
-            && init.body.includes("PolarisProfilePostsQuery") && init.body.includes("__dyn=")) {
-            const hdrs = {};
-            const h = init.headers || {};
-            if (h instanceof Headers) { h.forEach((v, k) => hdrs[k] = v); }
-            else { Object.assign(hdrs, h); }
-            const resp = await _of.apply(this, arguments);
-            window.__igcap = {
-                headers: hdrs,
-                body: init.body,
-                www_claim: resp.headers.get("x-ig-set-www-claim") || null,
-            };
-            return resp;
-        }
-    } catch (e) {}
-    return _of.apply(this, arguments);
-};
-"""
+PROFILE_DIR = "/data/profile"
+PAGE_TIMEOUT_MS = 45000
+HARVEST_TIMEOUT_S = 8
 
 app = FastAPI()
 state = {
@@ -59,7 +32,6 @@ state = {
     "page": None,
     "lock": asyncio.Lock(),
     "last_error": None,
-    "last_snapshot": 0.0,
     "ready": False,
     "asbd_id": None,
     "doc_id": None,
@@ -105,24 +77,12 @@ def is_instagram(url: str) -> bool:
     return host == "instagram.com" or host.endswith(".instagram.com")
 
 
-async def snapshot() -> None:
-    ctx = state["context"]
-    if ctx is None:
-        return
-    await ctx.storage_state(path=SNAPSHOT_PATH)
-    state["last_snapshot"] = time.time()
-
-
 async def capture_request(req) -> None:
     """Page-network level capture: instagram's own code does not always go
     through the wrapped window.fetch, so record the profile-posts graphql
     request straight from the browser network events."""
     try:
-        url = req.url
-        if "/api/graphql" not in url and "/graphql/query" not in url:
-            return
-        post = req.post_data
-        if not post or "PolarisProfilePostsQuery" not in post or "__dyn=" not in post:
+        if "/api/graphql" not in req.url and "/graphql/query" not in req.url:
             return
         post = req.post_data
         if isinstance(post, bytes):
@@ -130,12 +90,7 @@ async def capture_request(req) -> None:
         if not post or "PolarisProfilePostsQuery" not in post or "__dyn=" not in post:
             return
         hdrs = req.headers
-        body_pieces = post.split("&")
-        parsed = {}
-        for piece in body_pieces:
-            if "=" in piece:
-                k, v = piece.split("=", 1)
-                parsed[k] = unquote(v)
+        parsed = dict(parse_qsl(post))
         if parsed.get("doc_id"):
             state["doc_id"] = parsed["doc_id"]
         if parsed.get("fb_dtsg"):
@@ -160,32 +115,17 @@ async def capture_response(resp) -> None:
 async def harvest() -> None:
     """Wait until instagram's own page JS fires the profile-posts graphql
     request, then take the request identity from it."""
-    page = state["page"]
-    if page is None:
+    if state["page"] is None:
         return
     deadline = time.time() + HARVEST_TIMEOUT_S
     while time.time() < deadline:
         if state["doc_id"] and state["fb_dtsg"]:
             return
-        cap = await page.evaluate("() => window.__igcap")
-        if cap:
-            hdrs = cap.get("headers") or {}
-            state["asbd_id"] = hdrs.get("X-ASBD-ID") or hdrs.get("x-asbd-id") or state["asbd_id"]
-            state["www_claim"] = cap.get("www_claim") or state["www_claim"]
-            body = cap.get("body") or ""
-            for piece in body.split("&"):
-                if piece.startswith("doc_id="):
-                    state["doc_id"] = piece[len("doc_id="):]
-                elif piece.startswith("fb_dtsg=") and len(piece) > len("fb_dtsg="):
-                    state["fb_dtsg"] = unquote(piece[len("fb_dtsg="):])
-            return
         await asyncio.sleep(0.5)
 
 
 async def navigate(url: str) -> None:
-    page = state["page"]
-    await page.evaluate("() => { window.__igcap = null; }")
-    await page.goto(url, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
+    await state["page"].goto(url, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
 
 
 # UA must equal the one the instagram sessionid was minted with, else instagram returns "useragent mismatch"
@@ -207,7 +147,6 @@ async def launch_browser() -> None:
     launch = AsyncCamoufox(**opts)
     state["context"] = await launch.__aenter__()
     page = await state["context"].new_page()
-    await page.add_init_script(CAPTURE_JS)
     page.on("request", lambda r: asyncio.ensure_future(capture_request(r)))
     page.on("response", lambda r: asyncio.ensure_future(capture_response(r)))
     await page.goto("https://www.instagram.com/", wait_until="domcontentloaded",
@@ -246,19 +185,10 @@ async def startup() -> None:
     await launch_browser()
 
 
-@app.get("/health")
-async def health() -> dict:
-    page = state["page"]
-    alive = page is not None and not page.is_closed()
-    return {"ready": state["ready"] and alive, "browser_alive": alive,
-            "last_error": state["last_error"]}
-
-
 @app.get("/session/status")
 async def status() -> dict:
     ctx = state["context"]
     out = {"ready": state["ready"], "last_error": state["last_error"],
-           "last_snapshot": state["last_snapshot"],
            "doc_id": state["doc_id"], "asbd_id": state["asbd_id"],
            "www_claim": state["www_claim"], "fb_dtsg": state["fb_dtsg"],
            "capture_error": state.get("capture_error")}
@@ -290,7 +220,6 @@ async def session_import(request: Request) -> dict:
         await state["context"].clear_cookies()
         await state["context"].add_cookies(cookies)
         await navigate("https://www.instagram.com/")
-        await snapshot()
     return {"imported": len(cookies), "status": "ok"}
 
 
@@ -350,6 +279,4 @@ async def fetch(req: FetchReq) -> dict:
         except Exception as e:  # noqa: BLE001 - report everything to the caller
             state["last_error"] = str(e)
             raise HTTPException(502, f"page fetch failed: {e}")
-    if result.get("status") == 200:
-        await snapshot()
     return result

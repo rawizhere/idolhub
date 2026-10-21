@@ -4,12 +4,13 @@ import (
 	"cmp"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/hashicorp/golang-lru/v2/expirable"
 	"golang.org/x/sync/singleflight"
 
 	"idolhub/internal/store"
@@ -21,25 +22,56 @@ type MediaEntry struct {
 }
 
 type Index struct {
-	files      *expirable.LRU[string, []MediaEntry]
-	posts      *expirable.LRU[string, []Post]
-	urlFiles   *expirable.LRU[string, map[string]string]
-	fileTexts  *expirable.LRU[string, map[string]string]
+	files      ttlCache[[]MediaEntry]
+	posts      ttlCache[[]Post]
+	urlFiles   ttlCache[map[string]string]
+	fileTexts  ttlCache[map[string]string]
 	postsStore *store.PostStore
 	sf         singleflight.Group
 }
 
-var GlobalIndex *Index
+// cacheTTL bounds how long a view can miss changes made outside the app, such as files copied into downloads/.
+const cacheTTL = 10 * time.Minute
 
-func Init(posts *store.PostStore) {
-	ttl := 10 * time.Minute
-	GlobalIndex = &Index{
-		files:      expirable.NewLRU[string, []MediaEntry](512, nil, ttl),
-		posts:      expirable.NewLRU[string, []Post](512, nil, ttl),
-		urlFiles:   expirable.NewLRU[string, map[string]string](512, nil, ttl),
-		fileTexts:  expirable.NewLRU[string, map[string]string](512, nil, ttl),
-		postsStore: posts,
+func NewIndex(posts *store.PostStore) *Index {
+	return &Index{postsStore: posts}
+}
+
+// ttlCache is a per-target map whose entries expire after cacheTTL.
+type ttlCache[V any] struct {
+	mu sync.Mutex
+	m  map[string]ttlEntry[V]
+}
+
+type ttlEntry[V any] struct {
+	v  V
+	at time.Time
+}
+
+func (c *ttlCache[V]) Get(key string) (V, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.m[key]
+	if !ok || time.Since(e.at) > cacheTTL {
+		var zero V
+		return zero, false
 	}
+	return e.v, true
+}
+
+func (c *ttlCache[V]) Add(key string, v V) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.m == nil {
+		c.m = make(map[string]ttlEntry[V])
+	}
+	c.m[key] = ttlEntry[V]{v, time.Now()}
+}
+
+func (c *ttlCache[V]) Remove(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.m, key)
 }
 
 func keyOf(platform, username string) string {
@@ -50,11 +82,9 @@ func dirOf(platform, username string) string {
 	return filepath.Join("downloads", platform, username)
 }
 
+// isMediaFile skips dot files and the posts.json(.bak) left by old builds.
 func isMediaFile(name string) bool {
-	if name == "posts.json" || strings.HasSuffix(name, ".bak") || name == ".DS_Store" {
-		return false
-	}
-	return !strings.HasPrefix(name, ".")
+	return !strings.HasPrefix(name, ".") && name != "posts.json" && !strings.HasSuffix(name, ".bak")
 }
 
 func mediaType(name string) string {
@@ -177,18 +207,10 @@ func (idx *Index) buildURLFiles(platform, username string) map[string]string {
 
 func urlBase(mediaURL string) string {
 	parsed, err := url.Parse(mediaURL)
-	if err != nil {
+	if err != nil || parsed.Path == "" || strings.HasSuffix(parsed.Path, "/") {
 		return ""
 	}
-	parts := strings.Split(parsed.Path, "/")
-	if len(parts) == 0 {
-		return ""
-	}
-	base := parts[len(parts)-1]
-	if i := strings.IndexByte(base, '?'); i >= 0 {
-		base = base[:i]
-	}
-	return base
+	return path.Base(parsed.Path)
 }
 
 // FindLocalFile resolves a media URL to a cached local filename for a target.

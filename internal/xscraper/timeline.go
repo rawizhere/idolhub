@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 )
 
 // parseTimeline extracts tweets and the bottom cursor from a timeline response.
@@ -78,11 +77,7 @@ func (r *result) parse() *Tweet {
 		text = r.NoteTweet.NoteTweetResults.Result.Text
 	}
 
-	tw := &Tweet{
-		ID:         legacy.IDStr,
-		Text:       text,
-		TimeParsed: parseCreatedAt(legacy.CreatedAt),
-	}
+	tw := &Tweet{ID: legacy.IDStr, Text: text}
 
 	retweeted := false
 	if r.RetweetedStatusResult != nil && r.RetweetedStatusResult.Result != nil {
@@ -98,16 +93,14 @@ func (r *result) parse() *Tweet {
 	for _, m := range legacy.ExtendedEntities.Media {
 		switch m.Type {
 		case "photo":
-			tw.Photos = append(tw.Photos, Photo{ID: m.IDStr, URL: m.MediaURLHTTPS})
+			tw.Photos = append(tw.Photos, m.MediaURLHTTPS)
 		case "video":
-			v := Video{ID: m.IDStr, URL: bestVariant(m.VideoInfo.Variants, false)}
-			if v.URL != "" {
-				tw.Videos = append(tw.Videos, v)
+			if u := bestVariant(m.VideoInfo.Variants, false); u != "" {
+				tw.Videos = append(tw.Videos, u)
 			}
 		case "animated_gif":
-			g := GIF{ID: m.IDStr, URL: bestVariant(m.VideoInfo.Variants, true)}
-			if g.URL != "" {
-				tw.GIFs = append(tw.GIFs, g)
+			if u := bestVariant(m.VideoInfo.Variants, true); u != "" {
+				tw.GIFs = append(tw.GIFs, u)
 			}
 		}
 	}
@@ -133,33 +126,9 @@ func bestVariant(variants []videoVariant, gif bool) string {
 	return strings.TrimSuffix(best.URL, "?tag=10")
 }
 
-func parseUserID(body []byte) (string, error) {
-	var resp struct {
-		Data struct {
-			User struct {
-				Result struct {
-					RestID string `json:"rest_id"`
-				} `json:"result"`
-			} `json:"user"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return "", err
-	}
-	if resp.Data.User.Result.RestID == "" {
-		return "", fmt.Errorf("empty user id in response")
-	}
-	return resp.Data.User.Result.RestID, nil
-}
-
-func parseCreatedAt(s string) time.Time {
-	t, _ := time.Parse("Mon Jan 02 15:04:05 -0700 2006", s)
-	return t
-}
-
 // debt: features are hardcoded; harvest them together with queryIds once X starts validating them
-func timelineFeatures() map[string]interface{} {
-	return map[string]interface{}{
+func timelineFeatures() map[string]any {
+	return map[string]any{
 		"rweb_lists_timeline_redesign_enabled":                                    true,
 		"responsive_web_graphql_exclude_directive_enabled":                        true,
 		"verified_phone_label_enabled":                                            false,

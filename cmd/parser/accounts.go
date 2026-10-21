@@ -17,6 +17,7 @@ import (
 	"idolhub/internal/cookies"
 	"idolhub/internal/orchestrator"
 	"idolhub/internal/scraper"
+	"idolhub/internal/store"
 )
 
 var platforms = []string{"instagram", "twitter", "tiktok"}
@@ -88,10 +89,10 @@ func (p accountPatch) apply(acc *config.Account) (contentChanged bool, err error
 		acc.SkipRetweets, contentChanged = *p.SkipRetweets, true
 	}
 	if p.DownloadPhotos != nil && *p.DownloadPhotos != acc.ShouldDownloadPhotos() {
-		acc.DownloadPhotos, contentChanged = boolPtr(*p.DownloadPhotos), true
+		acc.DownloadPhotos, contentChanged = new(*p.DownloadPhotos), true
 	}
 	if p.DownloadVideos != nil && *p.DownloadVideos != acc.ShouldDownloadVideos() {
-		acc.DownloadVideos, contentChanged = boolPtr(*p.DownloadVideos), true
+		acc.DownloadVideos, contentChanged = new(*p.DownloadVideos), true
 	}
 	if p.Filters != nil {
 		filters, err := cleanFilters(*p.Filters)
@@ -135,8 +136,6 @@ func (p accountPatch) apply(acc *config.Account) (contentChanged bool, err error
 	}
 	return contentChanged, nil
 }
-
-func boolPtr(b bool) *bool { return &b }
 
 func cleanFilters(in []string) ([]string, error) {
 	out := []string{}
@@ -223,7 +222,7 @@ func (a *App) handleAccountCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.SyncNow {
-		a.orch.StartScrape(acc.Username, acc.Platform, acc.SaveText, false)
+		a.orch.StartScrape(acc.Username, acc.Platform, false)
 	}
 	writeJSON(w, http.StatusCreated, viewAccount(acc))
 }
@@ -239,7 +238,7 @@ func (a *App) createAccount(req createAccountRequest) (config.Account, int, erro
 	if err != nil {
 		return config.Account{}, http.StatusBadRequest, err
 	}
-	acc := config.Account{Username: username, Platform: req.Platform, Filters: []string{}, LastSyncStatus: "idle"}
+	acc := config.Account{Account: store.Account{Username: username, Platform: req.Platform, Filters: []string{}}, LastSyncStatus: "idle"}
 	if _, err := req.apply(&acc); err != nil {
 		return config.Account{}, http.StatusBadRequest, err
 	}
@@ -409,8 +408,7 @@ func (a *App) handleFilterPreview(w http.ResponseWriter, r *http.Request) {
 	posts := a.mediaIndex.Posts(platform, username)
 	matched := 0
 	for _, p := range posts {
-		text := strings.ToLower(p.Text)
-		if len(filters) == 0 || slices.ContainsFunc(filters, func(f string) bool { return strings.Contains(text, strings.ToLower(f)) }) {
+		if scraper.MatchesFilters(p.Text, filters) {
 			matched++
 		}
 	}
@@ -480,7 +478,6 @@ func (a *App) handleSessionCheck(w http.ResponseWriter, r *http.Request) {
 /* ---------- export / import ---------- */
 
 type accountsExport struct {
-	Version    int           `json:"version"`
 	ExportedAt time.Time     `json:"exported_at"`
 	Accounts   []accountView `json:"accounts"`
 	Settings   *syncSettings `json:"settings,omitempty"`
@@ -495,7 +492,7 @@ type syncSettings struct {
 // handleAccountsExport downloads the target list and sync settings; sessions and cookies are never exported.
 func (a *App) handleAccountsExport(w http.ResponseWriter, r *http.Request) {
 	cfg := config.GetConfig()
-	out := accountsExport{Version: 1, ExportedAt: time.Now().UTC(), Accounts: []accountView{}}
+	out := accountsExport{ExportedAt: time.Now().UTC(), Accounts: []accountView{}}
 	for _, acc := range cfg.Accounts {
 		v := viewAccount(acc)
 		v.Cookies = nil

@@ -59,17 +59,15 @@ func resolveUserIDShared(ctx context.Context, f igFetcher, username string) (str
 	return "", fmt.Errorf("%w: could not resolve Instagram user ID for @%s", ErrAuthExpired, username)
 }
 
-// igBrowserClient runs instagram requests inside the camoufox sidecar.
+// igBrowserClient runs instagram requests inside the camoufox sidecar. The sidecar swaps its freshly captured
+// fb_dtsg and doc_id into every graphql body, so the client sends the built-in defaults.
 type igBrowserClient struct {
-	sc       *igbrowser.Client
-	ownID    string
-	docID    string
-	dtsg     string
-	Resolved bool
+	sc    *igbrowser.Client
+	ownID string
 }
 
 func newIGBrowserClient(sidecarURL string) *igBrowserClient {
-	return &igBrowserClient{sc: igbrowser.New(sidecarURL), docID: defaultIGGraphQLDocID}
+	return &igBrowserClient{sc: igbrowser.New(sidecarURL)}
 }
 
 func (b *igBrowserClient) doGet(ctx context.Context, apiURL, username string) ([]byte, error) {
@@ -94,8 +92,8 @@ func (b *igBrowserClient) doGet(ctx context.Context, apiURL, username string) ([
 
 func (b *igBrowserClient) doGraphQL(ctx context.Context, username, userID, after string, count int) ([]byte, error) {
 	send := func() ([]byte, error) {
-		form := buildGraphQLForm(username, userID, after, count, b.ownID, "", b.docID)
-		form.Set("fb_dtsg", b.dtsg)
+		form := buildGraphQLForm(username, userID, after, count, b.ownID, defaultIGGraphQLDocID)
+		form.Set("fb_dtsg", "")
 		body := form.Encode()
 		// Navigate to the profile first: the page's own JS fires the same graphql operation, and the sidecar harvests the fresh doc_id / fb_dtsg / asbd-id / www-claim from it before we send ours.
 		res, err := b.sc.Fetch(ctx, "https://www.instagram.com/api/graphql", "POST", body,
@@ -106,20 +104,11 @@ func (b *igBrowserClient) doGraphQL(ctx context.Context, username, userID, after
 		return handleBrowserStatus(res, "graphql")
 	}
 	out, err := send()
-	if err == nil || !errors.Is(err, ErrAuthExpired) {
+	if !errors.Is(err, ErrAuthExpired) {
 		return out, err
 	}
-	// Instagram rotates fb_dtsg / doc_id with page loads; re-read them from the sidecar once and retry.
-	if st, serr := b.sc.Status(ctx); serr == nil {
-		if st.FbDTSG != "" {
-			b.dtsg = st.FbDTSG
-		}
-		if st.DocID != "" {
-			b.docID = st.DocID
-		}
-		return send()
-	}
-	return out, err
+	// Instagram rotates fb_dtsg / doc_id with page loads; the next navigation re-harvests them, so retry once.
+	return send()
 }
 
 // handleBrowserStatus maps page fetch statuses to scraper errors.
@@ -158,22 +147,13 @@ func (b *igBrowserClient) resolveUserID(ctx context.Context, username string) (s
 	res, err := b.sc.Fetch(ctx, "https://www.instagram.com/"+username+"/", "GET", "", "https://www.instagram.com/")
 	if err == nil && res.Status == 200 {
 		if m := profilePagePK.FindStringSubmatch(res.Body); m != nil {
-			// the page load refreshed the sidecar's captured request identity; pull it in for graphql
-			if st, serr := b.sc.Status(ctx); serr == nil {
-				if st.DocID != "" {
-					b.docID = st.DocID
-				}
-				if st.DsUserID != "" {
-					b.ownID = st.DsUserID
-				}
-			}
 			return m[1], nil
 		}
 	}
 	return resolveUserIDShared(ctx, b, username)
 }
 
-// OwnID refreshes ds_user_id and the captured request identity (doc_id, www-claim) from the sidecar session status.
+// OwnID checks the sidecar session and reads its ds_user_id.
 func (b *igBrowserClient) OwnID(ctx context.Context) error {
 	st, err := b.sc.Status(ctx)
 	if err != nil {
@@ -183,11 +163,5 @@ func (b *igBrowserClient) OwnID(ctx context.Context) error {
 		return fmt.Errorf("%w: sidecar session is %s", ErrAuthExpired, st.Session)
 	}
 	b.ownID = st.DsUserID
-	if st.DocID != "" {
-		b.docID = st.DocID
-	}
-	if st.FbDTSG != "" {
-		b.dtsg = st.FbDTSG
-	}
 	return nil
 }

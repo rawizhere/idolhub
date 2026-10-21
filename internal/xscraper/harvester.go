@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"regexp"
 	"time"
@@ -44,21 +45,19 @@ func parseQueryIDs(bundle []byte) map[string]string {
 }
 
 // newAnonClient builds a cookie-less Firefox client for unauthenticated fetches.
-func newAnonClient() (tls_client.HttpClient, string, error) {
-	tp := browser.FirefoxProfile
-	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), []tls_client.HttpClientOption{
+func newAnonClient() (tls_client.HttpClient, error) {
+	return tls_client.NewHttpClient(tls_client.NewNoopLogger(),
 		tls_client.WithTimeoutSeconds(30),
-		tls_client.WithClientProfile(tp.Profile),
-	}...)
-	return client, tp.UA, err
+		tls_client.WithClientProfile(browser.TLS),
+	)
 }
 
-func anonGet(ctx context.Context, client tls_client.HttpClient, ua, rawURL string) ([]byte, error) {
+func anonGet(ctx context.Context, client tls_client.HttpClient, rawURL string) ([]byte, error) {
 	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", ua)
+	req.Header.Set("User-Agent", browser.UA)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	resp, err := client.Do(req)
@@ -73,34 +72,32 @@ func anonGet(ctx context.Context, client tls_client.HttpClient, ua, rawURL strin
 }
 
 // refreshQueryIDs fetches the x.com bundle and updates the queryId table.
-func (s *Scraper) refreshQueryIDs(ctx context.Context) (map[string]string, error) {
-	client, ua, err := newAnonClient()
+func (s *Scraper) refreshQueryIDs(ctx context.Context) error {
+	client, err := newAnonClient()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	home, err := anonGet(ctx, client, ua, homeURL)
+	home, err := anonGet(ctx, client, homeURL)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	m := mainBundleRe.FindSubmatch(home)
 	if m == nil {
-		return nil, errNoBundle
+		return errNoBundle
 	}
-	bundle, err := anonGet(ctx, client, ua, string(m[1]))
+	bundle, err := anonGet(ctx, client, string(m[1]))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	ops := parseQueryIDs(bundle)
 	if len(ops) == 0 {
-		return nil, errNoBundle
+		return errNoBundle
 	}
 	// Merge: keep the previous hash for ops the bundle does not mention.
-	for op, qid := range ops {
-		s.queryIDs[op] = qid
-	}
+	maps.Copy(s.queryIDs, ops)
 	s.lastHarvest = time.Now()
 	slog.Info("Refreshed Twitter queryIds from x.com bundle", "operations", len(ops))
-	return ops, nil
+	return nil
 }
 
 // harvestDue reports whether a runtime refresh is worth trying now.

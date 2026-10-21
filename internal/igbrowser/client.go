@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -62,18 +63,11 @@ func (c *Client) ImportCookies(ctx context.Context, netscape string) error {
 	return err
 }
 
-// Status reports the sidecar session health.
+// Status reports the sidecar session health; the sidecar's own /session/status has the full diagnostics.
 type Status struct {
-	Ready            bool    `json:"ready"`
-	Session          string  `json:"session"`
-	SessionidExpires float64 `json:"sessionid_expires,omitempty"`
-	Cookies          int     `json:"cookies,omitempty"`
-	DsUserID         string  `json:"ds_user_id,omitempty"`
-	DocID            string  `json:"doc_id,omitempty"`
-	AsbdID           string  `json:"asbd_id,omitempty"`
-	WwwClaim         string  `json:"www_claim,omitempty"`
-	FbDTSG           string  `json:"fb_dtsg,omitempty"`
-	LastError        *string `json:"last_error"`
+	Session  string `json:"session"`
+	Cookies  int    `json:"cookies,omitempty"`
+	DsUserID string `json:"ds_user_id,omitempty"`
 }
 
 func (c *Client) Status(ctx context.Context) (*Status, error) {
@@ -98,12 +92,12 @@ func (c *Client) do(req *http.Request) ([]byte, error) {
 		return nil, fmt.Errorf("camoufox sidecar: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	var buf bytes.Buffer
-	if _, err := buf.ReadFrom(resp.Body); err != nil {
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("camoufox sidecar returned %d: %s", resp.StatusCode, strings.TrimSpace(buf.String()))
+		return nil, fmt.Errorf("camoufox sidecar returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	return buf.Bytes(), nil
+	return body, nil
 }

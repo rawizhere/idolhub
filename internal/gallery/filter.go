@@ -18,13 +18,7 @@ func SplitList(v string) []string {
 
 // Keep returns items matching pred, in place.
 func Keep[T any](items []T, pred func(T) bool) []T {
-	filtered := items[:0]
-	for _, item := range items {
-		if pred(item) {
-			filtered = append(filtered, item)
-		}
-	}
-	return filtered
+	return slices.DeleteFunc(items, func(item T) bool { return !pred(item) })
 }
 
 // FilterByYearMonth keeps items whose date prefix matches the selected years and months.
@@ -56,12 +50,9 @@ func Hashtags(text string) []string {
 
 // TagSelected reports whether any selected tag appears among post tags.
 func TagSelected(selected, postTags []string) bool {
-	for _, st := range selected {
-		if slices.Contains(postTags, strings.ToLower(strings.TrimSpace(st))) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(selected, func(st string) bool {
+		return slices.Contains(postTags, strings.ToLower(strings.TrimSpace(st)))
+	})
 }
 
 // Page returns one page of items and the total page count.

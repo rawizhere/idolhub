@@ -18,7 +18,6 @@ type tweetSnapshot struct {
 	ID     string   `json:"id"`
 	Text   string   `json:"text"`
 	RT     bool     `json:"is_retweet,omitempty"`
-	Date   string   `json:"date"`
 	Photos []string `json:"photos,omitempty"`
 	Videos []string `json:"videos,omitempty"`
 	GIFs   []string `json:"gifs,omitempty"`
@@ -33,31 +32,13 @@ type timelineSnapshot struct {
 func snapshot(tweets []*Tweet, cursor string) ([]byte, error) {
 	s := timelineSnapshot{Cursor: cursor, Tweets: []tweetSnapshot{}}
 	for _, tw := range tweets {
-		ts := tweetSnapshot{ID: tw.ID, Text: tw.Text, RT: tw.IsRetweet, Date: formatUTC(tw.TimeParsed)}
-		for _, p := range tw.Photos {
-			ts.Photos = append(ts.Photos, p.URL)
-		}
-		for _, v := range tw.Videos {
-			ts.Videos = append(ts.Videos, v.URL)
-		}
-		for _, g := range tw.GIFs {
-			ts.GIFs = append(ts.GIFs, g.URL)
-		}
-		ts.URLs = tw.URLs
-		s.Tweets = append(s.Tweets, ts)
+		s.Tweets = append(s.Tweets, tweetSnapshot{ID: tw.ID, Text: tw.Text, RT: tw.IsRetweet, Photos: tw.Photos, Videos: tw.Videos, GIFs: tw.GIFs, URLs: tw.URLs})
 	}
 	b, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return append(b, '\n'), nil
-}
-
-func formatUTC(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format(time.RFC3339)
 }
 
 func TestParseTimelineGolden(t *testing.T) {
@@ -115,29 +96,6 @@ func TestBestVariant(t *testing.T) {
 	}
 	if got := bestVariant(gifVariants, true); got != "https://video.twimg.com/g.mp4" {
 		t.Errorf("bestVariant(gif) = %q", got)
-	}
-}
-
-func TestParseCreatedAt(t *testing.T) {
-	tm := parseCreatedAt("Mon Jan 02 15:04:05 +0000 2023")
-	if tm.Year() != 2023 || tm.Month() != time.January || tm.Day() != 2 || tm.Hour() != 15 {
-		t.Errorf("parseCreatedAt = %v", tm)
-	}
-	if !parseCreatedAt("garbage").IsZero() {
-		t.Error("parseCreatedAt should return zero time on bad input")
-	}
-}
-
-func TestParseUserID(t *testing.T) {
-	id, err := parseUserID([]byte(`{"data":{"user":{"result":{"rest_id":"12345"}}}}`))
-	if err != nil || id != "12345" {
-		t.Errorf("parseUserID = %q, %v", id, err)
-	}
-	if _, err := parseUserID([]byte(`{"data":{"user":{"result":{}}}}`)); err == nil {
-		t.Error("expected error for empty rest_id")
-	}
-	if _, err := parseUserID([]byte(`not json`)); err == nil {
-		t.Error("expected error for invalid json")
 	}
 }
 

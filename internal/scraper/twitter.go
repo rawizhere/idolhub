@@ -8,17 +8,19 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"idolhub/internal/browser"
 	"idolhub/internal/download"
 	"idolhub/internal/store"
 	"idolhub/internal/xscraper"
 )
 
-type TwitterDownloadItem struct {
+type twitterItem struct {
 	URL     string
 	DateStr string
 	TweetID string
@@ -40,34 +42,13 @@ const twitterTimelineMax = 20000
 func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	username := t.Username
 	saveText := t.SaveText
-	skipRetweets := t.SkipRetweets
-	filters := t.Filters
-	downloadPhotos := true
-	downloadVideos := true
-	if t.DownloadPhotos != nil {
-		downloadPhotos = *t.DownloadPhotos
-	}
-	if t.DownloadVideos != nil {
-		downloadVideos = *t.DownloadVideos
-	}
 	lastSync := opts.cutoff()
-	report := func(pct int, msg string) {
-		if opts.OnProgress != nil {
-			opts.OnProgress(pct, msg)
-		}
-	}
-	slog.Info("Scraping Twitter target user", "user", username, "platform", "twitter", "save_text", saveText, "skip_retweets", skipRetweets, "filters", filters, "download_photos", downloadPhotos, "download_videos", downloadVideos, "last_sync", lastSync)
+	slog.Info("Scraping Twitter target user", "user", username, "platform", "twitter", "save_text", saveText, "skip_retweets", t.SkipRetweets, "filters", t.Filters, "download_photos", t.DownloadPhotos, "download_videos", t.DownloadVideos, "last_sync", lastSync)
 
-	// the auth_token normally comes from the cookie export; a bare token is the legacy setup
-	authToken := opts.TwitterAuthToken
-	if authToken == "" && opts.TwitterCookies == "" {
+	if opts.TwitterCookies == "" {
 		err := fmt.Errorf("twitter session is not configured: paste an x.com cookie export in settings")
 		slog.Error("Scraper aborted", "error", err)
 		return err
-	}
-
-	if opts.Posts == nil {
-		return fmt.Errorf("post store is not configured")
 	}
 
 	numWorkers := 5
@@ -77,15 +58,14 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 		return err
 	}
 
-	// xscraper generates the csrf token and falls back to built-in defaults; a full cookie export (twitter_cookies) is preferred when configured.
-	s, err := xscraper.New(xscraper.Session{AuthToken: authToken, Cookies: opts.TwitterCookies})
+	s, err := xscraper.New(opts.TwitterCookies)
 	if err != nil {
 		return fmt.Errorf("failed to init twitter client: %w", err)
 	}
 
-	jobs := make(chan TwitterDownloadItem, 10000)
+	jobs := make(chan twitterItem, 10000)
 	client := &http.Client{Timeout: 45 * time.Second}
-	pool := download.Start(ctx, jobs, numWorkers, func(ctx context.Context, item TwitterDownloadItem) download.Result {
+	pool := download.Start(ctx, jobs, numWorkers, func(ctx context.Context, item twitterItem) download.Result {
 		return downloadTwitterMedia(ctx, item, outputDir, client, username)
 	})
 
@@ -98,16 +78,20 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 		ch = s.GetMediaTweets(tlCtx, username, twitterTimelineMax)
 	}
 	received := 0
-	// abort stops the timeline and the download workers; every early return goes through it so no goroutine outlives the scrape.
-	abort := func(err error) error {
+	// stopTimeline cancels the fetch and drains the channel so its goroutine can exit.
+	stopTimeline := func() {
 		cancelTimeline()
 		for range ch {
 		}
+	}
+	// abort stops the timeline and the download workers; every early return goes through it so no goroutine outlives the scrape.
+	abort := func(err error) error {
+		stopTimeline()
 		close(jobs)
 		pool.Wait()
 		return err
 	}
-	report(30, "timeline fetch")
+	opts.OnProgress(30)
 
 	type queuedMedia struct {
 		url  string
@@ -138,36 +122,23 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 		if terr == nil {
 			if !lastSync.IsZero() && tweetTime.Before(lastSync) {
 				slog.Info("Reached tweets older than last sync, stopping timeline", "user", username)
-				cancelTimeline()
-				for range ch {
-				}
+				stopTimeline()
 				break
 			}
 			dateStr = tweetTime.Format("2006-01-02_15-04-05")
 		}
 
-		if tw.IsRetweet && skipRetweets {
+		if tw.IsRetweet && (t.SkipRetweets || !saveText) {
 			continue
 		}
-
 		text := tw.Text
-		matched := len(filters) == 0
-		lowerText := strings.ToLower(text)
-		for _, filter := range filters {
-			if strings.Contains(lowerText, strings.ToLower(filter)) {
-				matched = true
-				break
-			}
-		}
-		if !matched || (tw.IsRetweet && !saveText) {
+		if !MatchesFilters(text, t.Filters) {
 			continue
 		}
 
 		if opts.MaxPosts > 0 && taken >= opts.MaxPosts {
 			slog.Info("Reached the post limit for this sync, stopping timeline", "user", username, "max_posts", opts.MaxPosts)
-			cancelTimeline()
-			for range ch {
-			}
+			stopTimeline()
 			break
 		}
 		taken++
@@ -178,10 +149,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 				return
 			}
 			isVideo := kind == "video" || kind == "gif"
-			if isVideo && !downloadVideos {
-				return
-			}
-			if !isVideo && !downloadPhotos {
+			if isVideo && !t.DownloadVideos || !isVideo && !t.DownloadPhotos {
 				return
 			}
 			if queuedURLs[rawURL] {
@@ -189,7 +157,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 			}
 			queuedURLs[rawURL] = true
 			select {
-			case jobs <- TwitterDownloadItem{
+			case jobs <- twitterItem{
 				URL:     rawURL,
 				DateStr: dateStr,
 				TweetID: tw.ID,
@@ -200,18 +168,17 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 			tweetMedia = append(tweetMedia, queuedMedia{url: rawURL, kind: kind})
 		}
 
-		for _, ph := range tw.Photos {
-			u := ph.URL
+		for _, u := range tw.Photos {
 			if !strings.Contains(u, "?") {
 				u += "?format=jpg&name=large"
 			}
 			queueItem(u, "photo")
 		}
-		for _, v := range tw.Videos {
-			queueItem(v.URL, "video")
+		for _, u := range tw.Videos {
+			queueItem(u, "video")
 		}
-		for _, g := range tw.GIFs {
-			queueItem(g.URL, "gif")
+		for _, u := range tw.GIFs {
+			queueItem(u, "gif")
 		}
 
 		if saveText {
@@ -246,7 +213,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 
 	close(jobs)
 	counts := pool.Wait()
-	report(90, "downloads done")
+	opts.OnProgress(90)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -258,7 +225,7 @@ func ScrapeTwitterUser(ctx context.Context, t Target, opts Options) error {
 	return nil
 }
 
-func downloadTwitterMedia(ctx context.Context, item TwitterDownloadItem, outputDir string, client *http.Client, username string) download.Result {
+func downloadTwitterMedia(ctx context.Context, item twitterItem, outputDir string, client *http.Client, username string) download.Result {
 	var filename string
 	if item.IsVideo {
 		filename = fmt.Sprintf("%s_%s_video.mp4", item.DateStr, item.TweetID)
@@ -267,8 +234,7 @@ func downloadTwitterMedia(ctx context.Context, item TwitterDownloadItem, outputD
 		if err != nil {
 			return download.Skipped
 		}
-		parts := strings.Split(parsedURL.Path, "/")
-		filename = fmt.Sprintf("%s_%s", item.DateStr, parts[len(parts)-1])
+		filename = fmt.Sprintf("%s_%s", item.DateStr, path.Base(parsedURL.Path))
 	}
 	filePath := filepath.Join(outputDir, filename)
 
@@ -278,7 +244,7 @@ func downloadTwitterMedia(ctx context.Context, item TwitterDownloadItem, outputD
 	}
 	slog.Info("Starting Twitter media download", "user", username, "kind", kind, "tweet_id", item.TweetID)
 	downloaded, err := download.File(ctx, client, item.URL, filePath, download.FileOpts{
-		Header: http.Header{"User-Agent": []string{desktopUA}},
+		Header: http.Header{"User-Agent": []string{browser.UA}},
 		Jitter: 2 * time.Second,
 	})
 	if err != nil {

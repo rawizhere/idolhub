@@ -71,6 +71,16 @@ func TranscodeToH264(ctx context.Context, srcPath string) error {
 	return nil
 }
 
+// transcodeCandidate reports whether a file is a finished video whose codec may need converting.
+func transcodeCandidate(name string) bool {
+	return !strings.HasPrefix(name, ".") && !strings.Contains(name, ".transcoding.") && !strings.HasSuffix(name, ".tmp.mp4") && download.IsVideo(name)
+}
+
+// incompatibleCodec lists the codecs that do not play on Windows/Firefox without extra codec packs.
+func incompatibleCodec(codec string) bool {
+	return codec == "hevc" || codec == "h265" || codec == "bytevc1"
+}
+
 // EnsureDirectoryVideoCodecs checks all videos in a target directory and transcodes any HEVC/ByteVC1 videos to H.264.
 func EnsureDirectoryVideoCodecs(ctx context.Context, dir string) {
 	entries, err := os.ReadDir(dir)
@@ -78,21 +88,13 @@ func EnsureDirectoryVideoCodecs(ctx context.Context, dir string) {
 		return
 	}
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if entry.IsDir() || !transcodeCandidate(entry.Name()) {
 			continue
 		}
-		name := entry.Name()
-		if strings.HasPrefix(name, ".") || strings.Contains(name, ".transcoding.") || strings.HasSuffix(name, ".tmp.mp4") {
-			continue
-		}
-		ext := strings.ToLower(filepath.Ext(name))
-		if ext == ".mp4" || ext == ".mov" || ext == ".m4v" {
-			filePath := filepath.Join(dir, name)
-			codec, err := probeVideoCodec(ctx, filePath)
-			if err == nil && (codec == "hevc" || codec == "h265" || codec == "bytevc1") {
-				slog.Info("Transcoding video to H.264 for cross-browser playback", "file", filePath)
-				_ = TranscodeToH264(ctx, filePath)
-			}
+		filePath := filepath.Join(dir, entry.Name())
+		if codec, err := probeVideoCodec(ctx, filePath); err == nil && incompatibleCodec(codec) {
+			slog.Info("Transcoding video to H.264 for cross-browser playback", "file", filePath)
+			_ = TranscodeToH264(ctx, filePath)
 		}
 	}
 }
@@ -130,12 +132,7 @@ func MigrateVideoCodecs() {
 				}
 				return nil
 			}
-			name := d.Name()
-			if strings.HasPrefix(name, ".") || strings.HasSuffix(name, ".tmp.mp4") {
-				return nil
-			}
-			ext := strings.ToLower(filepath.Ext(name))
-			if ext != ".mp4" && ext != ".mov" && ext != ".m4v" {
+			if !transcodeCandidate(d.Name()) {
 				return nil
 			}
 
@@ -146,8 +143,7 @@ func MigrateVideoCodecs() {
 				return nil
 			}
 
-			// Codecs that are problematic on Windows/Firefox without extra codec packs
-			if codec == "hevc" || codec == "h265" || codec == "bytevc1" {
+			if incompatibleCodec(codec) {
 				filesToTranscode = append(filesToTranscode, path)
 			}
 			return nil

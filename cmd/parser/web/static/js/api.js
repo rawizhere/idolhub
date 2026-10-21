@@ -23,10 +23,7 @@ const accountUrl = (platform, username) => `/api/accounts/${encodeURIComponent(p
 export const fetchConfig = () => request("/api/config", {}, "Failed to load configuration").then(r => r.json());
 
 // GET /api/config never returns secrets; any secret left out of the body keeps its stored value.
-export function postConfig(cfg) {
-  const { cookie_status: _status, ...body } = cfg;
-  return postJSON("/api/config", body, "Failed to save configuration");
-}
+export const postConfig = (body) => postJSON("/api/config", body, "Failed to save configuration");
 
 export const fetchProgress = () => request("/api/progress", {}, "Failed to load progress data").then(r => r.json());
 export const fetchIgSession = () => request("/api/instagram/session").then(r => r.json());

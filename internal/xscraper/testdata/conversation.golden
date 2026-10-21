@@ -3,13 +3,11 @@
   "tweets": [
     {
       "id": "2001",
-      "text": "module tweet one",
-      "date": "2023-02-02T08:00:00Z"
+      "text": "module tweet one"
     },
     {
       "id": "2002",
       "text": "module tweet two",
-      "date": "2023-02-02T08:05:00Z",
       "photos": [
         "https://pbs.twimg.com/media/p9.jpg"
       ]

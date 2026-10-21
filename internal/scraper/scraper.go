@@ -2,6 +2,8 @@ package scraper
 
 import (
 	"context"
+	"slices"
+	"strings"
 	"time"
 
 	"idolhub/internal/store"
@@ -13,17 +15,21 @@ type Target struct {
 	SaveText       bool
 	SkipRetweets   bool
 	Filters        []string
-	DownloadPhotos *bool
-	DownloadVideos *bool
+	DownloadPhotos bool
+	DownloadVideos bool
+}
+
+// MatchesFilters reports whether a post is kept: no filters keep everything, otherwise the text must contain one, case-insensitively.
+func MatchesFilters(text string, filters []string) bool {
+	text = strings.ToLower(text)
+	return len(filters) == 0 || slices.ContainsFunc(filters, func(f string) bool { return strings.Contains(text, strings.ToLower(f)) })
 }
 
 type Options struct {
 	LastSync            time.Time
 	ForceFull           bool
-	OnProgress          func(pct int, msg string)
-	TwitterAuthToken    string
+	OnProgress          func(pct int)
 	TwitterCookies      string
-	InstagramSessionID  string
 	InstagramCookies    string
 	InstagramSidecarURL string
 	TikTokCookies       string

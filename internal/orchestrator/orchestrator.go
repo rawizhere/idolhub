@@ -6,20 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math/rand"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/tmaxmax/go-sse"
-
 	"idolhub/internal/config"
 	"idolhub/internal/gallery"
-	"idolhub/internal/logging"
 	"idolhub/internal/scraper"
 	"idolhub/internal/store"
 )
@@ -30,7 +27,6 @@ const maxScrapeWorkers = 8
 type scrapeJob struct {
 	username      string
 	platform      string
-	saveText      bool
 	lastSync      time.Time
 	forceFullSync bool
 	beforeCount   int
@@ -56,8 +52,8 @@ type TaskProgress struct {
 	AuthError  bool      `json:"auth_error"`
 	Paused     bool      `json:"paused"`
 
-	mediaCountCached   int       `json:"-"`
-	mediaCountCachedAt time.Time `json:"-"`
+	mediaCountCached   int
+	mediaCountCachedAt time.Time
 }
 
 // SSEEvent pushed to all connected SSE clients
@@ -77,8 +73,8 @@ type Orchestrator struct {
 	progress       map[string]*TaskProgress
 	globalLogs     []TaskLog
 	cancels        map[string]context.CancelFunc
-	LastSync       time.Time
-	sseServer      *sse.Server
+	lastSync       time.Time
+	events         *sseHub
 	autoSyncCtx    context.Context
 	autoSyncCancel context.CancelFunc
 	mediaIndex     *gallery.Index
@@ -86,13 +82,13 @@ type Orchestrator struct {
 	posts          *store.PostStore
 	settings       *store.SettingsStore
 	// fullResync holds task keys whose next scrape must be a full one (media was quarantined after their watermark).
-	fullResync   map[string]bool
-	igBlockUntil time.Time
-	twBlockUntil time.Time
-	twitterMu    sync.Mutex
-	jobCh        chan scrapeJob
-	logEvents    chan logEvent
-	runs         *store.RunStore
+	fullResync map[string]bool
+	// blockUntil is the per-platform circuit breaker: no scrapes of that platform before the time.
+	blockUntil map[string]time.Time
+	twitterMu  sync.Mutex
+	jobCh      chan scrapeJob
+	logEvents  chan logEvent
+	runs       *store.RunStore
 
 	slotMu   sync.Mutex
 	slotCond *sync.Cond
@@ -107,38 +103,20 @@ type logEvent struct {
 	msg      string
 }
 
-var GlobalOrchestrator *Orchestrator
-
 // taskKey identifies one scrape target.
 func taskKey(platform, username string) string {
 	return platform + "/" + strings.ToLower(username)
 }
 
-func InitOrchestrator(mediaIndex *gallery.Index, st *store.Store) {
+// New builds an orchestrator; Start runs its workers and schedulers.
+func New(mediaIndex *gallery.Index, st *store.Store) *Orchestrator {
 	autoSyncCtx, autoSyncCancel := context.WithCancel(context.Background())
-	sseServer := &sse.Server{
-		OnSession: func(w http.ResponseWriter, r *http.Request) ([]string, bool) {
-			// The body write below commits the headers, so the SSE content type must be set first or
-			// EventSource rejects the sniffed text/plain. go-sse hands us a writer whose Flush returns an
-			// error, which is not an http.Flusher.
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.Header().Set("Cache-Control", "no-cache")
-			_, _ = fmt.Fprintf(w, "event: hello\ndata: {}\n\n")
-			switch f := w.(type) {
-			case interface{ Flush() error }:
-				_ = f.Flush()
-			case http.Flusher:
-				f.Flush()
-			}
-			return nil, true
-		},
-	}
 	orch := &Orchestrator{
 		progress:       make(map[string]*TaskProgress),
 		globalLogs:     make([]TaskLog, 0, 100),
 		cancels:        make(map[string]context.CancelFunc),
-		sseServer:      sseServer,
-		LastSync:       time.Now(),
+		events:         newSSEHub(),
+		lastSync:       time.Now(),
 		autoSyncCtx:    autoSyncCtx,
 		autoSyncCancel: autoSyncCancel,
 		mediaIndex:     mediaIndex,
@@ -146,31 +124,35 @@ func InitOrchestrator(mediaIndex *gallery.Index, st *store.Store) {
 		posts:          st.Posts,
 		settings:       st.Settings,
 		fullResync:     loadFullResync(st.Settings),
+		blockUntil:     make(map[string]time.Time),
 		jobCh:          make(chan scrapeJob, 100),
 		logEvents:      make(chan logEvent, 4096),
 		runs:           st.Runs,
 	}
 	orch.slotCond = sync.NewCond(&orch.slotMu)
-	GlobalOrchestrator = orch
+	return orch
+}
 
+// Start routes the process logs into the task logs and starts the workers and the auto-sync loop.
+func (o *Orchestrator) Start() {
 	go func() {
-		for evt := range orch.logEvents {
-			orch.dispatch(evt)
+		for evt := range o.logEvents {
+			o.dispatch(evt)
 		}
 	}()
 
 	slog.SetDefault(slog.New(&taskLogHandler{
-		Handler: logging.NewHandler(),
-		orch:    orch,
+		Handler: slog.NewJSONHandler(os.Stderr, nil),
+		orch:    o,
 	}))
 
-	for i := 0; i < maxScrapeWorkers; i++ {
-		go orch.worker()
+	for range maxScrapeWorkers {
+		go o.worker()
 	}
 
 	scraper.EnsureYTDLP(context.Background())
-	scraper.StartYTDLPUpdateLoop(autoSyncCtx)
-	go orch.StartAutoSyncLoop(autoSyncCtx)
+	scraper.StartYTDLPUpdateLoop(o.autoSyncCtx)
+	go o.StartAutoSyncLoop(o.autoSyncCtx)
 }
 
 type taskLogHandler struct {
@@ -203,14 +185,9 @@ func (h *taskLogHandler) Handle(ctx context.Context, r slog.Record) error {
 		formattedMsg = fmt.Sprintf("%s (%s)", formattedMsg, strings.Join(attrs, ", "))
 	}
 
-	evt := logEvent{user: targetUser, platform: targetPlatform, t: time.Now(), level: r.Level.String(), msg: formattedMsg}
-	if h.orch.logEvents == nil {
-		h.orch.dispatch(evt)
-	} else {
-		select {
-		case h.orch.logEvents <- evt:
-		default:
-		}
+	select {
+	case h.orch.logEvents <- logEvent{user: targetUser, platform: targetPlatform, t: time.Now(), level: r.Level.String(), msg: formattedMsg}:
+	default:
 	}
 
 	return h.Handler.Handle(ctx, r)
@@ -249,37 +226,25 @@ func (o *Orchestrator) AppendGlobalLog(t time.Time, level, msg string) {
 	})
 }
 
-// SSEHandler serves the SSE stream directly via sseServer.
+// SSEHandler serves the dashboard event stream.
 func (o *Orchestrator) SSEHandler() http.Handler {
-	return o.sseServer
+	return o.events
 }
 
-func (o *Orchestrator) ShutdownSSE(ctx context.Context) {
-	if o.sseServer == nil {
-		return
-	}
-	if err := o.sseServer.Shutdown(ctx); err != nil {
-		slog.Warn("SSE shutdown failed", "error", err)
-	}
+// ShutdownSSE ends every open event stream so the HTTP server can drain.
+func (o *Orchestrator) ShutdownSSE() {
+	o.events.close()
 }
 
 func (o *Orchestrator) broadcast(evt SSEEvent) {
-	if o.sseServer == nil {
-		return
-	}
 	data, err := json.Marshal(evt)
 	if err != nil {
 		return
 	}
-	msg := &sse.Message{}
-	msg.AppendData(string(data))
-	_ = o.sseServer.Publish(msg)
+	o.events.publish(data)
 }
 
 func (o *Orchestrator) loadPersistedSyncInfo(platform, username string) (string, time.Time) {
-	if o.accounts == nil {
-		return "idle", time.Time{}
-	}
 	info, err := o.accounts.GetSyncInfo(context.Background(), platform, username)
 	if err != nil {
 		slog.Warn("Failed to load sync info", "user", username, "error", err)
@@ -293,9 +258,6 @@ func (o *Orchestrator) loadPersistedSyncInfo(platform, username string) (string,
 
 // SavePersistedSyncInfo persists an account's sync status in the store.
 func (o *Orchestrator) SavePersistedSyncInfo(platform, username, status string, updatedAt time.Time) {
-	if o.accounts == nil {
-		return
-	}
 	if err := o.accounts.SetSyncInfo(context.Background(), platform, username, status, updatedAt); err != nil {
 		slog.Warn("Failed to persist sync info", "user", username, "error", err)
 	}
@@ -404,12 +366,20 @@ func (o *Orchestrator) setProgress(key string, pct int) {
 func (o *Orchestrator) GetGlobalLogs() []TaskLog {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	copied := make([]TaskLog, len(o.globalLogs))
-	copy(copied, o.globalLogs)
-	return copied
+	return slices.Clone(o.globalLogs)
 }
 
-func (o *Orchestrator) StartScrape(username string, platform string, saveText bool, forceFull bool) {
+// account finds a configured target.
+func account(platform, username string) (config.Account, bool) {
+	for _, acc := range config.GetConfig().Accounts {
+		if acc.Platform == platform && strings.EqualFold(acc.Username, username) {
+			return acc, true
+		}
+	}
+	return config.Account{}, false
+}
+
+func (o *Orchestrator) StartScrape(username, platform string, forceFull bool) {
 	key := taskKey(platform, username)
 	o.mu.Lock()
 	p, exists := o.progress[key]
@@ -429,17 +399,10 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 		return
 	}
 
-	if platform == "instagram" || platform == "twitter" {
-		// o.mu is already held here; read the breaker field directly
-		blockedUntil := o.igBlockUntil
-		if platform == "twitter" {
-			blockedUntil = o.twBlockUntil
-		}
-		if time.Now().Before(blockedUntil) {
-			o.mu.Unlock()
-			slog.Warn("Skipping scrape, session is flagged (circuit breaker); save new session settings to reset it", "user", username, "platform", platform, "resume_after", blockedUntil.Format(time.RFC3339))
-			return
-		}
+	if blockedUntil := o.blockUntil[platform]; time.Now().Before(blockedUntil) {
+		o.mu.Unlock()
+		slog.Warn("Skipping scrape, session is flagged (circuit breaker); save new session settings to reset it", "user", username, "platform", platform, "resume_after", blockedUntil.Format(time.RFC3339))
+		return
 	}
 
 	if o.fullResync[key] && !forceFull {
@@ -453,46 +416,35 @@ func (o *Orchestrator) StartScrape(username string, platform string, saveText bo
 		p.NewCount = 0
 	}
 
+	// a target that keeps post text but has none stored yet needs a full pass to backfill it
+	if acc, _ := account(platform, username); !forceFull && (acc.SaveText || platform == "tiktok") {
+		count, err := o.posts.CountByAccount(context.Background(), platform, username)
+		if err != nil {
+			slog.Warn("Failed to count stored posts", "user", username, "error", err)
+		}
+		forceFull = count == 0
+	}
 	lastSync := p.UpdatedAt
-	forceFullSync := forceFull
-	if forceFullSync {
-		lastSync = time.Time{}
-	}
-	if !forceFullSync && (saveText || platform == "tiktok") {
-		storedCount := 0
-		if o.posts != nil {
-			count, err := o.posts.CountByAccount(context.Background(), platform, username)
-			if err != nil {
-				slog.Warn("Failed to count stored posts", "user", username, "error", err)
-			}
-			storedCount = count
-		}
-		if storedCount == 0 {
-			forceFullSync = true
-			lastSync = time.Time{}
-		}
-	}
-	if forceFullSync {
+	if forceFull {
 		lastSync = time.Time{}
 	}
 
-	beforeCount := o.countDownloadedMedia(platform, username)
+	beforeCount := o.mediaIndex.Count(platform, username)
 	p.Status = "queued"
 	p.Logs = []TaskLog{}
 	p.AuthError = false
 	queuedAt := p.UpdatedAt
 	o.mu.Unlock()
 
-	if forceFullSync {
+	if forceFull {
 		slog.Info("Forcing full sync for target", "user", username)
 	}
 
 	o.jobCh <- scrapeJob{
 		username:      username,
 		platform:      platform,
-		saveText:      saveText,
 		lastSync:      lastSync,
-		forceFullSync: forceFullSync,
+		forceFullSync: forceFull,
 		beforeCount:   beforeCount,
 	}
 
@@ -539,7 +491,6 @@ func (o *Orchestrator) ConcurrencyChanged() {
 func (o *Orchestrator) runScrape(job scrapeJob) {
 	username := job.username
 	platform := job.platform
-	saveText := job.saveText
 	lastSync := job.lastSync
 	beforeCount := job.beforeCount
 	key := taskKey(platform, username)
@@ -555,13 +506,11 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	p.Progress = 5
 	prevUpdated := p.UpdatedAt
 	persistUser := p.Username
-	persistStatus := p.Status
-	persistUpdated := p.UpdatedAt
 	o.mu.Unlock()
 
 	slog.Info("Starting media scrape worker", "user", username, "platform", platform)
 	o.broadcast(SSEEvent{Type: "status", Username: username, Platform: platform, Status: "running", Progress: 5})
-	o.SavePersistedSyncInfo(platform, persistUser, persistStatus, persistUpdated)
+	o.SavePersistedSyncInfo(platform, persistUser, "running", prevUpdated)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 2*time.Hour)
@@ -571,42 +520,33 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	o.cancels[key] = cancel
 	o.mu.Unlock()
 
-	target := scraper.Target{
-		Username: username,
-		Platform: platform,
-		SaveText: saveText,
-	}
+	target := scraper.Target{Username: username, Platform: platform, DownloadPhotos: true, DownloadVideos: true}
 	var err error
 	opts := scraper.Options{
 		LastSync:  lastSync,
 		ForceFull: job.forceFullSync,
-		OnProgress: func(pct int, _ string) {
+		OnProgress: func(pct int) {
 			o.setProgress(key, pct)
 		},
+		Posts: o.posts,
 	}
 
-	c := config.GetConfig()
-	SessionOptions(c, &opts)
-	for _, acc := range c.Accounts {
-		if acc.Platform == platform && strings.EqualFold(acc.Username, username) {
-			target.SkipRetweets = acc.SkipRetweets
-			target.Filters = acc.Filters
-			dp := acc.ShouldDownloadPhotos()
-			dv := acc.ShouldDownloadVideos()
-			target.DownloadPhotos = &dp
-			target.DownloadVideos = &dv
-			AccountSession(acc, &opts)
-			if since, err := time.ParseInLocation(time.DateOnly, acc.SinceDate, time.Local); err == nil {
-				opts.Since = since
-			}
-			// the cap bounds how far back a first or full sync reaches; incremental syncs stop at the watermark anyway
-			if lastSync.IsZero() {
-				opts.MaxPosts = acc.MaxPosts
-			}
-			break
+	SessionOptions(config.GetConfig(), &opts)
+	if acc, ok := account(platform, username); ok {
+		target.SaveText = acc.SaveText
+		target.SkipRetweets = acc.SkipRetweets
+		target.Filters = acc.Filters
+		target.DownloadPhotos = acc.ShouldDownloadPhotos()
+		target.DownloadVideos = acc.ShouldDownloadVideos()
+		AccountSession(acc, &opts)
+		if since, err := time.ParseInLocation(time.DateOnly, acc.SinceDate, time.Local); err == nil {
+			opts.Since = since
+		}
+		// the cap bounds how far back a first or full sync reaches; incremental syncs stop at the watermark anyway
+		if lastSync.IsZero() {
+			opts.MaxPosts = acc.MaxPosts
 		}
 	}
-	opts.Posts = o.posts
 
 	// watermark = start time: posts during a long scrape must not be skipped next run
 	scrapeStart := time.Now()
@@ -624,18 +564,13 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 	if err != nil {
 		hintSessionRefresh(err)
 	}
-	// Circuit breaker: once instagram flags the session (temporary invalidation / "please wait" checkpoint), further requests with the dead session only prolong the block. Skip the remaining instagram targets until the next sync window instead.
-	if platform == "instagram" && errors.Is(err, scraper.ErrAuthExpired) {
+	// Circuit breaker: once a platform flags the session (temporary invalidation / "please wait" checkpoint), further requests with the dead session only prolong the block. Skip the remaining targets of that platform until the next sync window instead.
+	if (platform == "instagram" || platform == "twitter") && errors.Is(err, scraper.ErrAuthExpired) {
+		until := time.Now().Add(6 * time.Hour)
 		o.mu.Lock()
-		o.igBlockUntil = time.Now().Add(6 * time.Hour)
+		o.blockUntil[platform] = until
 		o.mu.Unlock()
-		slog.Warn("Instagram session flagged; pausing instagram targets for 6 hours", "resume_after", time.Now().Add(6*time.Hour).Format(time.RFC3339))
-	}
-	if platform == "twitter" && errors.Is(err, scraper.ErrAuthExpired) {
-		o.mu.Lock()
-		o.twBlockUntil = time.Now().Add(6 * time.Hour)
-		o.mu.Unlock()
-		slog.Warn("Twitter session flagged; pausing twitter targets for 6 hours", "resume_after", time.Now().Add(6*time.Hour).Format(time.RFC3339))
+		slog.Warn("Session flagged; pausing the platform's targets for 6 hours", "platform", platform, "resume_after", until.Format(time.RFC3339))
 	}
 
 	o.mu.Lock()
@@ -660,15 +595,9 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 			o.saveFullResyncLocked()
 		}
 	}
-	p.mediaCountCachedAt = time.Time{}
-	if o.mediaIndex != nil {
-		o.mediaIndex.Invalidate(platform, username)
-	}
-	afterCount := o.countDownloadedMedia(platform, username)
-	newCount := afterCount - beforeCount
-	if newCount < 0 {
-		newCount = 0
-	}
+	o.mediaIndex.Invalidate(platform, username)
+	afterCount := o.mediaIndex.Count(platform, username)
+	newCount := max(0, afterCount-beforeCount)
 	p.NewCount = newCount
 	p.mediaCountCached = afterCount
 	p.mediaCountCachedAt = time.Now()
@@ -690,9 +619,6 @@ func (o *Orchestrator) runScrape(job scrapeJob) {
 }
 
 func (o *Orchestrator) recordRun(platform, username string, started time.Time, full bool, newFiles int, err error, cancelled bool) {
-	if o.runs == nil {
-		return
-	}
 	run := store.Run{Platform: platform, Username: username, StartedAt: started, FinishedAt: time.Now(), Status: "completed", FullSync: full, NewFiles: newFiles}
 	switch {
 	case cancelled:
@@ -708,9 +634,7 @@ func (o *Orchestrator) recordRun(platform, username string, started time.Time, f
 
 // SessionOptions fills the platform-wide credentials from the config.
 func SessionOptions(c config.Config, opts *scraper.Options) {
-	opts.TwitterAuthToken = c.TwitterAuthToken
 	opts.TwitterCookies = c.TwitterCookies
-	opts.InstagramSessionID = c.InstagramSessionID
 	opts.InstagramCookies = c.InstagramCookies
 	opts.InstagramSidecarURL = c.InstagramSidecarURL
 	opts.TikTokCookies = c.TikTokCookies
@@ -719,24 +643,18 @@ func SessionOptions(c config.Config, opts *scraper.Options) {
 // AccountSession swaps in an account's own session. Its cookie export replaces the platform one whole: mixing one
 // account's auth cookie with another browser's device cookies is a stronger bot signal than either alone.
 func AccountSession(acc config.Account, opts *scraper.Options) {
-	if acc.Cookies != "" {
-		switch acc.Platform {
-		case "twitter":
-			opts.TwitterCookies = acc.Cookies
-			opts.TwitterAuthToken = ""
-		case "instagram":
-			opts.InstagramCookies = acc.Cookies
-			opts.InstagramSessionID = ""
-			// the sidecar holds one browser session; an account with its own cookies goes direct
-			opts.InstagramSidecarURL = ""
-		case "tiktok":
-			opts.TikTokCookies = acc.Cookies
-		}
+	if acc.Cookies == "" {
 		return
 	}
-	// legacy per-account token: one auth_token across all targets is the loudest ban signal X sees
-	if acc.Platform == "twitter" && acc.TwitterAuthToken != "" {
-		opts.TwitterAuthToken = acc.TwitterAuthToken
+	switch acc.Platform {
+	case "twitter":
+		opts.TwitterCookies = acc.Cookies
+	case "instagram":
+		opts.InstagramCookies = acc.Cookies
+		// the sidecar holds one browser session; an account with its own cookies goes direct
+		opts.InstagramSidecarURL = ""
+	case "tiktok":
+		opts.TikTokCookies = acc.Cookies
 	}
 }
 
@@ -830,7 +748,7 @@ func (o *Orchestrator) Shutdown() {
 func (o *Orchestrator) LastSyncTime() time.Time {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	return o.LastSync
+	return o.lastSync
 }
 
 func (o *Orchestrator) GetAllProgress(accounts []config.Account) []TaskProgress {
@@ -861,7 +779,7 @@ func (o *Orchestrator) GetAllProgress(accounts []config.Account) []TaskProgress 
 		if !result[i].mediaCountCachedAt.IsZero() && now.Sub(result[i].mediaCountCachedAt) <= mediaCountTTL {
 			continue
 		}
-		count := o.countDownloadedMedia(result[i].Platform, result[i].Username)
+		count := o.mediaIndex.Count(result[i].Platform, result[i].Username)
 		o.mu.Lock()
 		v.mediaCountCached = count
 		v.mediaCountCachedAt = now
@@ -871,29 +789,11 @@ func (o *Orchestrator) GetAllProgress(accounts []config.Account) []TaskProgress 
 	return result
 }
 
-func (o *Orchestrator) countDownloadedMedia(platform, username string) int {
-	if o.mediaIndex != nil {
-		return o.mediaIndex.Count(platform, username)
-	}
-	dir := filepath.Join("downloads", platform, username)
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return 0
-	}
-	count := 0
-	for _, f := range files {
-		if !f.IsDir() && f.Name() != "posts.json" && !strings.HasSuffix(f.Name(), ".bak") && f.Name() != ".DS_Store" {
-			count++
-		}
-	}
-	return count
-}
-
 func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 	slog.Info("Starting auto-sync scheduler")
 
 	o.mu.Lock()
-	o.LastSync = time.Now()
+	o.lastSync = time.Now()
 	o.mu.Unlock()
 
 	for {
@@ -948,11 +848,11 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 				slog.Debug("Skipping auto-sync, task already running or queued", "user", acc.Username)
 				continue
 			}
-			if acc.Platform == "instagram" && o.instagramBlocked() {
-				slog.Info("Skipping auto-sync, instagram session is flagged (circuit breaker)", "user", acc.Username)
+			if o.blocked(acc.Platform) {
+				slog.Info("Skipping auto-sync, the platform session is flagged (circuit breaker)", "user", acc.Username, "platform", acc.Platform)
 				continue
 			}
-			o.StartScrape(acc.Username, acc.Platform, acc.SaveText, false)
+			o.StartScrape(acc.Username, acc.Platform, false)
 			select {
 			case <-ctx.Done():
 				return
@@ -960,25 +860,22 @@ func (o *Orchestrator) StartAutoSyncLoop(ctx context.Context) {
 			}
 		}
 		o.mu.Lock()
-		o.LastSync = time.Now()
+		o.lastSync = time.Now()
 		o.mu.Unlock()
 	}
 }
 
-// instagramBlocked reports whether the instagram circuit breaker is active.
-func (o *Orchestrator) instagramBlocked() bool {
+// blocked reports whether the platform's circuit breaker is active.
+func (o *Orchestrator) blocked(platform string) bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	return time.Now().Before(o.igBlockUntil)
+	return time.Now().Before(o.blockUntil[platform])
 }
 
 const fullResyncSetting = "pending_full_resync"
 
 func loadFullResync(st *store.SettingsStore) map[string]bool {
 	out := make(map[string]bool)
-	if st == nil {
-		return out
-	}
 	raw, err := st.Get(context.Background(), fullResyncSetting)
 	if err != nil {
 		return out
@@ -995,15 +892,7 @@ func loadFullResync(st *store.SettingsStore) map[string]bool {
 }
 
 func (o *Orchestrator) saveFullResyncLocked() {
-	if o.settings == nil {
-		return
-	}
-	keys := make([]string, 0, len(o.fullResync))
-	for k := range o.fullResync {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	b, _ := json.Marshal(keys)
+	b, _ := json.Marshal(slices.Sorted(maps.Keys(o.fullResync)))
 	if err := o.settings.Set(context.Background(), fullResyncSetting, string(b)); err != nil {
 		slog.Warn("Failed to persist pending full resyncs", "error", err)
 	}
@@ -1013,9 +902,6 @@ func (o *Orchestrator) saveFullResyncLocked() {
 func (o *Orchestrator) RequestFullResync(platform, username string) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if o.fullResync == nil {
-		o.fullResync = make(map[string]bool)
-	}
 	o.fullResync[taskKey(platform, username)] = true
 	o.saveFullResyncLocked()
 }
@@ -1023,8 +909,7 @@ func (o *Orchestrator) RequestFullResync(platform, username string) {
 // ResetSessionBlocks clears the circuit breakers; called when the operator saves fresh session settings.
 func (o *Orchestrator) ResetSessionBlocks() {
 	o.mu.Lock()
-	o.igBlockUntil = time.Time{}
-	o.twBlockUntil = time.Time{}
+	clear(o.blockUntil)
 	o.mu.Unlock()
 }
 
@@ -1034,7 +919,7 @@ func hintSessionRefresh(err error) {
 	case errors.Is(err, scraper.ErrRateLimited):
 		slog.Warn("Instagram rate-limited requests (429); the session is valid, wait for the throttle to decay instead of re-saving cookies", "error", err)
 	case errors.Is(err, scraper.ErrAuthExpired):
-		if err != nil && strings.Contains(err.Error(), "twitter") {
+		if strings.Contains(err.Error(), "twitter") {
 			slog.Warn("Scraping session rejected by Twitter; the auth_token expired, paste a fresh cookie export in settings", "error", err)
 		} else {
 			slog.Warn("Scraping session rejected by Instagram; the sessionid cookie expired, paste a fresh one in settings", "error", err)

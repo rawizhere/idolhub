@@ -30,9 +30,6 @@ func (idx *Index) Posts(platform, username string) []Post {
 }
 
 func (idx *Index) loadPosts(platform, username string) []Post {
-	if idx.postsStore == nil {
-		return []Post{}
-	}
 	ctx := context.Background()
 	rows, err := idx.postsStore.ListByAccount(ctx, platform, username, postListLimit)
 	if err != nil {

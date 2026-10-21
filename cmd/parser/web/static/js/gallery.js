@@ -5,6 +5,7 @@ import { fetchGalleryMeta, fetchHTML, deleteMediaApi } from "./api.js";
 import { syncUrl, slideFromHash, setSlideHash } from "./router.js";
 import { loadProgress } from "./sse.js";
 import { renderTargetSettings, confirmLeave } from "./target-settings.js";
+import PhotoSwipeLightbox from "/static/vendor/photoswipe-lightbox.esm.min.js";
 
 const $ = (id) => document.getElementById(id);
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -57,7 +58,7 @@ export async function showTarget(target, route = null) {
     await renderTargetSettings();
     return;
   }
-  if (!meta.file_count && !meta.post_count && state.view !== "settings") {
+  if (!meta.file_count && !meta.post_count) {
     showGalleryState("empty", "Nothing downloaded for this target yet — run a sync.");
     return;
   }
@@ -396,44 +397,12 @@ const ICONS = {
 };
 const toolbarIcon = (name) => `<svg viewBox="0 0 24 24" width="22" height="22" style="fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round">${ICONS[name]}</svg>`;
 
-let lightboxPromise = null;
-
-function ensurePhotoSwipeCss() {
-  if (document.querySelector('link[href="/static/vendor/photoswipe.min.css"]')) return;
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.href = "/static/vendor/photoswipe.min.css";
-  document.head.appendChild(link);
-}
-
-function getLightbox() {
-  if (!lightboxPromise) {
-    ensurePhotoSwipeCss();
-    lightboxPromise = import("/static/vendor/photoswipe-lightbox.esm.min.js").then(({ default: Lightbox }) => {
-      const lb = new Lightbox({
-        children: "a.pswp-item",
-        showHideAnimationType: "none",
-        bgOpacity: 0.92,
-        pswpModule: () => import("/static/vendor/photoswipe.esm.min.js")
-      });
-      addItemData(lb);
-      addToolbar(lb);
-      addVideoHandling(lb);
-      lb.on("change", () => setSlideHash(lb.pswp?.currSlide?.data?.filename || ""));
-      lb.on("close", () => setSlideHash(""));
-      lb.init();
-      return lb;
-    }).catch(err => {
-      lightboxPromise = null;
-      throw err;
-    });
-  }
-  return lightboxPromise;
-}
-
-export function preloadLightbox() {
-  getLightbox().catch(() => {});
-}
+const lightbox = new PhotoSwipeLightbox({
+  children: "a.pswp-item",
+  showHideAnimationType: "none",
+  bgOpacity: 0.92,
+  pswpModule: () => import("/static/vendor/photoswipe.esm.min.js")
+});
 
 function addItemData(lb) {
   lb.addFilter("domItemData", (itemData, element, linkEl) => {
@@ -567,15 +536,9 @@ function addVideoHandling(lb) {
   lb.on("close", () => lb.pswp?.element?.querySelectorAll("video").forEach(v => v.pause()));
 }
 
-async function openLightbox(galleryEl, item) {
-  try {
-    const lb = await getLightbox();
-    const items = [...galleryEl.querySelectorAll("a.pswp-item")];
-    const idx = items.indexOf(item);
-    if (idx >= 0) lb.loadAndOpen(idx, { gallery: galleryEl });
-  } catch (err) {
-    toast(`Viewer failed to load: ${err.message}`, "error");
-  }
+function openLightbox(galleryEl, item) {
+  const idx = [...galleryEl.querySelectorAll("a.pswp-item")].indexOf(item);
+  if (idx >= 0) lightbox.loadAndOpen(idx, { gallery: galleryEl });
 }
 
 // openSlideFromHash reopens a shared #f=<filename> link once its tile is on the page.
@@ -586,6 +549,13 @@ function openSlideFromHash() {
   const item = [...container.querySelectorAll("a.pswp-item")].find(a => a.dataset.filename === name);
   if (item) openLightbox(container, item);
 }
+
+addItemData(lightbox);
+addToolbar(lightbox);
+addVideoHandling(lightbox);
+lightbox.on("change", () => setSlideHash(lightbox.pswp?.currSlide?.data?.filename || ""));
+lightbox.on("close", () => setSlideHash(""));
+lightbox.init();
 
 document.addEventListener("click", (e) => {
   const item = e.target.closest("a.pswp-item");

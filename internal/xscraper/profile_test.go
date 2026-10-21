@@ -13,7 +13,7 @@ func TestParseProfileReadsBothShapes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if p.ID != "42" || p.ScreenName != "alice" || p.Name != "Alice" || p.Avatar == "" || p.Tweets != 10 || p.Media != 3 || p.Followers != 7 || !p.Protected {
+	if p.ID != "42" || p.ScreenName != "alice" || p.Name != "Alice" || p.Avatar == "" || p.Tweets != 10 || p.Followers != 7 || !p.Protected {
 		t.Errorf("current shape = %+v", p)
 	}
 

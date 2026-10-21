@@ -85,10 +85,14 @@ ORDER BY posted_at DESC LIMIT ?`, platform, username, limit)
 	defer func() { _ = rows.Close() }()
 	var out []Post
 	for rows.Next() {
-		p, err := scanPost(rows)
-		if err != nil {
-			return nil, err
+		var (
+			p        Post
+			postedAt sql.NullTime
+		)
+		if err := rows.Scan(&p.ID, &p.Platform, &p.Username, &p.ExternalID, &postedAt, &p.Text); err != nil {
+			return nil, fmt.Errorf("store: post scan: %w", err)
 		}
+		p.PostedAt = postedAt.Time
 		out = append(out, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -100,10 +104,10 @@ ORDER BY posted_at DESC LIMIT ?`, platform, username, limit)
 	return out, nil
 }
 
-// SearchFullText returns account posts whose text matches an FTS5 query.
-func (s *PostStore) SearchFullText(ctx context.Context, platform, username, query string, limit int) ([]Post, error) {
+// SearchFullText returns the external ids of account posts whose text matches an FTS5 query.
+func (s *PostStore) SearchFullText(ctx context.Context, platform, username, query string, limit int) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT p.id, p.platform, p.username, p.external_id, p.posted_at, p.text
+SELECT p.external_id
 FROM posts_fts f JOIN posts p ON p.id = f.rowid
 WHERE posts_fts MATCH ? AND p.platform = ? AND p.username = ?
 ORDER BY rank LIMIT ?`, query, platform, username, limit)
@@ -111,21 +115,18 @@ ORDER BY rank LIMIT ?`, query, platform, username, limit)
 		return nil, fmt.Errorf("store: post search: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var out []Post
+	var ids []string
 	for rows.Next() {
-		p, err := scanPost(rows)
-		if err != nil {
-			return nil, err
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: post scan: %w", err)
 		}
-		out = append(out, p)
+		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: post search: %w", err)
 	}
-	if err := s.attachMedia(ctx, out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return ids, nil
 }
 
 func (s *PostStore) attachMedia(ctx context.Context, posts []Post) error {
@@ -158,18 +159,4 @@ func (s *PostStore) attachMedia(ctx context.Context, posts []Post) error {
 		_ = rows.Close()
 	}
 	return nil
-}
-
-func scanPost(rs rowScanner) (Post, error) {
-	var (
-		p        Post
-		postedAt sql.NullTime
-	)
-	if err := rs.Scan(&p.ID, &p.Platform, &p.Username, &p.ExternalID, &postedAt, &p.Text); err != nil {
-		return Post{}, fmt.Errorf("store: post scan: %w", err)
-	}
-	if postedAt.Valid {
-		p.PostedAt = postedAt.Time
-	}
-	return p, nil
 }

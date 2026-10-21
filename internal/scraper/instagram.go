@@ -15,20 +15,10 @@ import (
 	"sync"
 	"time"
 
+	"idolhub/internal/browser"
 	"idolhub/internal/download"
 	"idolhub/internal/store"
 )
-
-func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
-	sessionID := opts.InstagramSessionID
-	if sessionID == "" && opts.InstagramCookies == "" && opts.InstagramSidecarURL == "" {
-		return fmt.Errorf("instagram session is not configured")
-	}
-	if opts.Posts == nil {
-		return fmt.Errorf("post store is not configured")
-	}
-	return scrapeInstagramDirect(ctx, t.Username, t.SaveText, opts.cutoff(), opts.MaxPosts, opts.ForceFull, sessionID, opts.InstagramCookies, opts.InstagramSidecarURL, opts.Posts, opts.OnProgress)
-}
 
 // igFeedItem is one media node from the graphql user timeline response.
 type igFeedItem struct {
@@ -36,16 +26,19 @@ type igFeedItem struct {
 	Caption *struct {
 		Text string `json:"text"`
 	} `json:"caption"`
-	TakenAt       int64            `json:"taken_at"`
-	MediaType     int              `json:"media_type"`
-	ImageVersions *igImageVersions `json:"image_versions2,omitempty"`
-	CarouselMedia []struct {
-		ID            string           `json:"pk"`
-		MediaType     int              `json:"media_type"`
-		ImageVersions *igImageVersions `json:"image_versions2,omitempty"`
-		VideoVersions []igVideoVersion `json:"video_versions,omitempty"`
-	} `json:"carousel_media,omitempty"`
-	VideoVersions []igVideoVersion `json:"video_versions,omitempty"`
+	TakenAt int64 `json:"taken_at"`
+	igMediaNode
+	CarouselMedia []igMediaNode `json:"carousel_media,omitempty"`
+}
+
+// igMediaNode is a single photo or video: a post, or one slide of a carousel.
+type igMediaNode struct {
+	ID            string `json:"pk"`
+	MediaType     int    `json:"media_type"`
+	ImageVersions struct {
+		Candidates []igRendition `json:"candidates"`
+	} `json:"image_versions2"`
+	VideoVersions []igRendition `json:"video_versions,omitempty"`
 }
 
 type igDirectItem struct {
@@ -53,64 +46,27 @@ type igDirectItem struct {
 	Date    time.Time
 	MediaID string
 	IsVideo bool
-	Caption string
 }
 
-// igImageVersions wraps candidates returned by the API
-type igImageVersions struct {
-	Candidates []igCandidate `json:"candidates"`
-}
-
-type igCandidate struct {
+// igRendition is one size of an image or video.
+type igRendition struct {
 	URL    string `json:"url"`
 	Width  int    `json:"width"`
 	Height int    `json:"height"`
 }
 
-type igVideoVersion struct {
-	URL    string `json:"url"`
-	Type   int    `json:"type"`
-	Width  int    `json:"width"`
-	Height int    `json:"height"`
-}
-
-// bestImageURL picks the highest-resolution image candidate
-func bestImageURL(iv *igImageVersions) string {
-	if iv == nil || len(iv.Candidates) == 0 {
+// bestURL picks the highest-resolution rendition.
+func bestURL(rs []igRendition) string {
+	if len(rs) == 0 {
 		return ""
 	}
-	return slices.MaxFunc(iv.Candidates, func(a, b igCandidate) int {
-		areaA := a.Width * a.Height
-		areaB := b.Width * b.Height
-		return cmp.Compare(areaA, areaB)
-	}).URL
+	return slices.MaxFunc(rs, func(a, b igRendition) int { return cmp.Compare(a.Width*a.Height, b.Width*b.Height) }).URL
 }
 
-// bestVideoURL picks the highest-resolution video version
-func bestVideoURL(vs []igVideoVersion) string {
-	if len(vs) == 0 {
-		return ""
-	}
-	return slices.MaxFunc(vs, func(a, b igVideoVersion) int {
-		areaA := a.Width * a.Height
-		areaB := b.Width * b.Height
-		return cmp.Compare(areaA, areaB)
-	}).URL
-}
-
-// scrapeInstagramDirect pulls timeline media via the private Instagram web API
-func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, lastSync time.Time, maxPosts int, forceFull bool, sessionID, cookieExport, sidecarURL string, posts *store.PostStore, onProgress func(pct int, msg string)) error {
-	if sessionID == "" && cookieExport == "" && sidecarURL == "" {
-		return fmt.Errorf("instagram session is not configured")
-	}
-
+// ScrapeInstagramUser pulls timeline media via the private Instagram web API.
+func ScrapeInstagramUser(ctx context.Context, t Target, opts Options) error {
+	username, lastSync, maxPosts := t.Username, opts.cutoff(), opts.MaxPosts
 	numWorkers := 5
-
-	report := func(pct int, msg string) {
-		if onProgress != nil {
-			onProgress(pct, msg)
-		}
-	}
 
 	slog.Info("Scraping Instagram target user via direct API", "user", username, "platform", "instagram", "last_sync", lastSync)
 
@@ -120,30 +76,19 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		return err
 	}
 
-	var fetcher igFetcher
-	if sidecarURL != "" {
-		bc := newIGBrowserClient(sidecarURL)
-		if err := bc.OwnID(ctx); err != nil {
-			return err
-		}
-		fetcher = bc
-		slog.Info("Instagram scrape via camoufox sidecar", "user", username)
-	} else {
-		client := getIGClient(sessionID, cookieExport)
-		if client.csrf == "" || client.userID == "" {
-			if err := client.bootstrap(ctx); err != nil {
-				slog.Warn("Instagram client bootstrap failed, graphql requests may be rejected", "user", username, "error", err)
-			}
-		}
-		fetcher = client
+	fetcher, err := instagramFetcher(ctx, opts)
+	if fetcher == nil {
+		return err
+	}
+	if err != nil {
+		slog.Warn("Instagram client bootstrap failed, graphql requests may be rejected", "user", username, "error", err)
 	}
 	userID, err := fetcher.resolveUserID(ctx, username)
 	if err != nil {
 		return err
 	}
 	slog.Info("Resolved Instagram user ID", "user", username, "user_id", userID)
-	report(30, "session valid")
-	report(35, "resolved user id")
+	opts.OnProgress(35)
 
 	fileIdx := newIgFileIndex(outputDir)
 	cdnClient := &http.Client{Timeout: 5 * time.Minute}
@@ -206,7 +151,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 		}
 
 		slog.Info("Instagram feed page parsed", "user", username, "page", page, "items", len(feed.Data.Feed.Edges), "has_next_page", feed.Data.Feed.PageInfo.HasNextPage)
-		report(50, "feed parsed")
+		opts.OnProgress(50)
 
 		for _, edge := range feed.Data.Feed.Edges {
 			item := edge.Node
@@ -215,39 +160,28 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 			if item.Caption != nil {
 				caption = item.Caption.Text
 			}
-			var postEntries []igDirectItem
-
+			nodes := []igMediaNode{item.igMediaNode}
 			if item.MediaType == 8 && len(item.CarouselMedia) > 0 {
-				for _, cm := range item.CarouselMedia {
-					if cm.MediaType == 2 {
-						if v := bestVideoURL(cm.VideoVersions); v != "" {
-							postEntries = append(postEntries, igDirectItem{
-								URL: v, Date: itemTime, MediaID: cm.ID, IsVideo: true, Caption: caption,
-							})
-						}
-					} else if u := bestImageURL(cm.ImageVersions); u != "" {
-						postEntries = append(postEntries, igDirectItem{
-							URL: u, Date: itemTime, MediaID: cm.ID, IsVideo: false, Caption: caption,
-						})
-					}
+				nodes = item.CarouselMedia
+			}
+			var postEntries []igDirectItem
+			for _, n := range nodes {
+				// media_type 2 is a video; anything else is shown by its image
+				isVideo := n.MediaType == 2
+				u := bestURL(n.ImageVersions.Candidates)
+				if isVideo {
+					u = bestURL(n.VideoVersions)
 				}
-			} else if item.MediaType == 2 {
-				if v := bestVideoURL(item.VideoVersions); v != "" {
-					postEntries = append(postEntries, igDirectItem{
-						URL: v, Date: itemTime, MediaID: item.ID, IsVideo: true, Caption: caption,
-					})
+				if u != "" {
+					postEntries = append(postEntries, igDirectItem{URL: u, Date: itemTime, MediaID: n.ID, IsVideo: isVideo})
 				}
-			} else if u := bestImageURL(item.ImageVersions); u != "" {
-				postEntries = append(postEntries, igDirectItem{
-					URL: u, Date: itemTime, MediaID: item.ID, IsVideo: false, Caption: caption,
-				})
 			}
 
 			// Check if this post is older than lastSync or already exists on disk
 			isOlderThanLastSync := !lastSync.IsZero() && itemTime.Before(lastSync)
 
 			allExisting := false
-			if !forceFull {
+			if !opts.ForceFull {
 				allExisting = len(postEntries) > 0
 				for _, pe := range postEntries {
 					if !fileIdx.exists(pe) {
@@ -287,7 +221,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 				}
 			}
 
-			if len(postEntries) > 0 && saveText {
+			if len(postEntries) > 0 && t.SaveText {
 				var media []store.PostMedia
 				for _, pe := range postEntries {
 					kind := "photo"
@@ -296,7 +230,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 					}
 					media = append(media, store.PostMedia{URL: pe.URL, Kind: kind})
 				}
-				if err := posts.UpsertPost(ctx, store.Post{
+				if err := opts.Posts.UpsertPost(ctx, store.Post{
 					Platform:   "instagram",
 					Username:   username,
 					ExternalID: item.ID,
@@ -331,7 +265,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 
 	close(jobs)
 	counts := pool.Wait()
-	report(90, "downloads done")
+	opts.OnProgress(90)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -343,7 +277,7 @@ func scrapeInstagramDirect(ctx context.Context, username string, saveText bool, 
 	return nil
 }
 
-// resolveUserID resolves the numeric user ID from username, doubling as a session check. topsearch goes first: web_profile_info is heavily throttled.
+// resolveUserID resolves the numeric user ID from username, doubling as a session check.
 func (c *igClient) resolveUserID(ctx context.Context, username string) (string, error) {
 	return resolveUserIDShared(ctx, c, username)
 }
@@ -365,28 +299,31 @@ func newIgFileIndex(outputDir string) *igFileIndex {
 	return idx
 }
 
-func (idx *igFileIndex) exists(item igDirectItem) bool {
-	ext := ".jpg"
-	if item.IsVideo {
-		ext = ".mp4"
-	}
+// igFilename names a downloaded item: <date>_<cdn file name>, falling back to the media id. baseName is the part after the date.
+func igFilename(item igDirectItem) (filename, baseName string, ok bool) {
 	parsed, err := url.Parse(item.URL)
 	if err != nil {
-		return false
+		return "", "", false
 	}
-	pathParts := strings.Split(parsed.Path, "/")
-	baseName := pathParts[len(pathParts)-1]
+	baseName = parsed.Path[strings.LastIndex(parsed.Path, "/")+1:]
 	if baseName == "" {
 		baseName = item.MediaID
 	}
-	if qIdx := strings.Index(baseName, "?"); qIdx >= 0 {
-		baseName = baseName[:qIdx]
-	}
 	if filepath.Ext(baseName) == "" {
-		baseName += ext
+		if item.IsVideo {
+			baseName += ".mp4"
+		} else {
+			baseName += ".jpg"
+		}
 	}
-	datePrefix := item.Date.Format("2006-01-02_15-04-05")
-	filename := fmt.Sprintf("%s_%s", datePrefix, baseName)
+	return item.Date.Format("2006-01-02_15-04-05") + "_" + baseName, baseName, true
+}
+
+func (idx *igFileIndex) exists(item igDirectItem) bool {
+	filename, baseName, ok := igFilename(item)
+	if !ok {
+		return false
+	}
 
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
@@ -411,38 +348,18 @@ func (idx *igFileIndex) add(filename string) {
 
 // downloadInstagramDirectMedia downloads a media item from CDN
 func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, outputDir string, username string, fileIdx *igFileIndex, client *http.Client) download.Result {
-	if fileIdx != nil && fileIdx.exists(item) {
+	if fileIdx.exists(item) {
 		return download.Skipped
 	}
-
-	ext := ".jpg"
-	if item.IsVideo {
-		ext = ".mp4"
-	}
-
-	parsed, err := url.Parse(item.URL)
-	if err != nil {
-		slog.Warn("Failed to parse Instagram CDN URL", "user", username, "url", item.URL, "error", err)
+	filename, _, ok := igFilename(item)
+	if !ok {
+		slog.Warn("Failed to parse Instagram CDN URL", "user", username, "url", item.URL)
 		return download.Skipped
 	}
-	pathParts := strings.Split(parsed.Path, "/")
-	baseName := pathParts[len(pathParts)-1]
-	if baseName == "" {
-		baseName = item.MediaID
-	}
-	if idx := strings.Index(baseName, "?"); idx >= 0 {
-		baseName = baseName[:idx]
-	}
-	if filepath.Ext(baseName) == "" {
-		baseName += ext
-	}
-
-	datePrefix := item.Date.Format("2006-01-02_15-04-05")
-	filename := fmt.Sprintf("%s_%s", datePrefix, baseName)
 	filePath := filepath.Join(outputDir, filename)
 
 	header := http.Header{
-		"User-Agent": []string{desktopUA},
+		"User-Agent": []string{browser.UA},
 		"Referer":    []string{"https://www.instagram.com/"},
 		"Accept":     []string{"image/avif,image/webp,*/*;q=0.8"},
 	}
@@ -455,9 +372,7 @@ func downloadInstagramDirectMedia(ctx context.Context, item igDirectItem, output
 		return download.Failed
 	}
 	if !downloaded {
-		if fileIdx != nil {
-			fileIdx.add(filename)
-		}
+		fileIdx.add(filename)
 		return download.Skipped
 	}
 

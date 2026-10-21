@@ -13,42 +13,25 @@ import (
 	"idolhub/internal/store"
 )
 
+// Account is a stored account row plus its sync bookkeeping.
 type Account struct {
-	Username         string    `json:"username"`
-	Platform         string    `json:"platform"`                     // "instagram" or "twitter"
-	SaveText         bool      `json:"save_text"`                    // for twitter only
-	SkipRetweets     bool      `json:"skip_retweets"`                // for twitter only
-	Filters          []string  `json:"filters"`                      // for twitter only, match keywords/phrases
-	TwitterAuthToken string    `json:"twitter_auth_token,omitempty"` // per-account override of the global twitter_auth_token
-	DownloadPhotos   *bool     `json:"download_photos,omitempty"`
-	DownloadVideos   *bool     `json:"download_videos,omitempty"`
-	Paused           bool      `json:"paused,omitempty"`
-	Cookies          string    `json:"cookies,omitempty"`   // per-account Netscape export; replaces the platform session
-	SinceDate        string    `json:"since,omitempty"`     // YYYY-MM-DD lower bound for every sync
-	MaxPosts         int       `json:"max_posts,omitempty"` // cap for a sync without a watermark (first or full)
-	LastSyncStatus   string    `json:"last_sync_status,omitempty"`
-	LastSyncTime     time.Time `json:"last_sync_time,omitempty"`
+	store.Account
+	LastSyncStatus string
+	LastSyncTime   time.Time
 }
 
 func (a Account) ShouldDownloadPhotos() bool {
-	if a.DownloadPhotos == nil {
-		return true
-	}
-	return *a.DownloadPhotos
+	return a.DownloadPhotos == nil || *a.DownloadPhotos
 }
 
 func (a Account) ShouldDownloadVideos() bool {
-	if a.DownloadVideos == nil {
-		return true
-	}
-	return *a.DownloadVideos
+	return a.DownloadVideos == nil || *a.DownloadVideos
 }
 
 type Config struct {
-	Accounts            []Account `json:"accounts"`
-	TwitterAuthToken    string    `json:"twitter_auth_token"`
+	// Accounts never goes over the wire: secrets live in it, and the account API owns the list.
+	Accounts            []Account `json:"-"`
 	TwitterCookies      string    `json:"twitter_cookies"`
-	InstagramSessionID  string    `json:"instagram_session_id"`
 	InstagramCookies    string    `json:"instagram_cookies"`
 	InstagramSidecarURL string    `json:"instagram_sidecar_url"`
 	ThumbnailsDir       string    `json:"thumbnails_dir"`
@@ -108,22 +91,12 @@ func LoadConfig(st *store.Store) error {
 	configMu.Lock()
 	defer configMu.Unlock()
 
-	globalConfig = Config{
-		Accounts: []Account{},
-	}
-	if st == nil {
-		return nil
-	}
-	loadFromStoreLocked(st)
-	return nil
-}
-
-func loadFromStoreLocked(st *store.Store) {
+	globalConfig = Config{Accounts: []Account{}}
 	ctx := context.Background()
 	rows, err := st.Accounts.List(ctx)
 	if err != nil {
 		slog.Warn("Failed to read accounts from store", "error", err)
-		return
+		return nil
 	}
 	accounts := make([]Account, 0, len(rows))
 	for _, row := range rows {
@@ -131,58 +104,27 @@ func loadFromStoreLocked(st *store.Store) {
 		if err != nil {
 			slog.Warn("Failed to read sync info from store", "user", row.Username, "error", err)
 		}
-		accounts = append(accounts, Account{
-			Username:         row.Username,
-			Platform:         row.Platform,
-			SaveText:         row.SaveText,
-			SkipRetweets:     row.SkipRetweets,
-			Filters:          row.Filters,
-			DownloadPhotos:   row.DownloadPhotos,
-			DownloadVideos:   row.DownloadVideos,
-			TwitterAuthToken: row.TwitterAuthToken,
-			Paused:           row.Paused,
-			Cookies:          row.Cookies,
-			SinceDate:        row.SinceDate,
-			MaxPosts:         row.MaxPosts,
-			LastSyncStatus:   info.Status,
-			LastSyncTime:     info.Time,
-		})
+		accounts = append(accounts, Account{Account: row, LastSyncStatus: info.Status, LastSyncTime: info.Time})
 	}
 	globalConfig = Config{
 		Accounts:            accounts,
-		TwitterAuthToken:    settingString(st, ctx, "twitter_auth_token"),
-		TwitterCookies:      settingString(st, ctx, "twitter_cookies"),
-		InstagramSessionID:  settingString(st, ctx, "instagram_session_id"),
-		InstagramCookies:    settingString(st, ctx, "instagram_cookies"),
-		InstagramSidecarURL: settingString(st, ctx, "instagram_sidecar_url"),
-		ThumbnailsDir:       settingString(st, ctx, "thumbnails_dir"),
-		TikTokCookies:       settingString(st, ctx, "tiktok_cookies"),
-		AutoSyncInterval:    settingInt(st, ctx, "auto_sync_interval"),
-		QuietHours:          settingString(st, ctx, "quiet_hours"),
-		MaxConcurrent:       settingInt(st, ctx, "max_concurrent"),
+		TwitterCookies:      setting[string](st, ctx, "twitter_cookies"),
+		InstagramCookies:    setting[string](st, ctx, "instagram_cookies"),
+		InstagramSidecarURL: setting[string](st, ctx, "instagram_sidecar_url"),
+		ThumbnailsDir:       setting[string](st, ctx, "thumbnails_dir"),
+		TikTokCookies:       setting[string](st, ctx, "tiktok_cookies"),
+		AutoSyncInterval:    setting[int](st, ctx, "auto_sync_interval"),
+		QuietHours:          setting[string](st, ctx, "quiet_hours"),
+		MaxConcurrent:       setting[int](st, ctx, "max_concurrent"),
 	}
+	return nil
 }
 
-func settingString(st *store.Store, ctx context.Context, key string) string {
-	raw, err := st.Settings.Get(ctx, key)
-	if err != nil {
-		return ""
-	}
-	var value string
-	if err := json.Unmarshal([]byte(raw), &value); err != nil {
-		return ""
-	}
-	return value
-}
-
-func settingInt(st *store.Store, ctx context.Context, key string) int {
-	raw, err := st.Settings.Get(ctx, key)
-	if err != nil {
-		return 0
-	}
-	var value int
-	if err := json.Unmarshal([]byte(raw), &value); err != nil {
-		return 0
+// setting reads a JSON-encoded settings value; a missing or unreadable one is the zero value.
+func setting[T any](st *store.Store, ctx context.Context, key string) T {
+	var value T
+	if raw, err := st.Settings.Get(ctx, key); err == nil {
+		_ = json.Unmarshal([]byte(raw), &value)
 	}
 	return value
 }
@@ -192,9 +134,6 @@ func SaveConfig(st *store.Store, cfg Config) error {
 	configMu.Lock()
 	defer configMu.Unlock()
 	globalConfig = cfg
-	if st == nil {
-		return nil
-	}
 	return saveToStore(st)
 }
 
@@ -203,21 +142,7 @@ func saveToStore(st *store.Store) error {
 	keep := make(map[string]bool)
 	for _, acc := range globalConfig.Accounts {
 		keep[acc.Platform+"/"+acc.Username] = true
-		err := st.Accounts.Upsert(ctx, store.Account{
-			Platform:         acc.Platform,
-			Username:         acc.Username,
-			SaveText:         acc.SaveText,
-			SkipRetweets:     acc.SkipRetweets,
-			DownloadPhotos:   acc.DownloadPhotos,
-			DownloadVideos:   acc.DownloadVideos,
-			Filters:          acc.Filters,
-			TwitterAuthToken: acc.TwitterAuthToken,
-			Paused:           acc.Paused,
-			Cookies:          acc.Cookies,
-			SinceDate:        acc.SinceDate,
-			MaxPosts:         acc.MaxPosts,
-		})
-		if err != nil {
+		if err := st.Accounts.Upsert(ctx, acc.Account); err != nil {
 			return err
 		}
 	}
@@ -235,9 +160,7 @@ func saveToStore(st *store.Store) error {
 		}
 	}
 	settings := map[string]any{
-		"twitter_auth_token":    globalConfig.TwitterAuthToken,
 		"twitter_cookies":       globalConfig.TwitterCookies,
-		"instagram_session_id":  globalConfig.InstagramSessionID,
 		"instagram_cookies":     globalConfig.InstagramCookies,
 		"instagram_sidecar_url": globalConfig.InstagramSidecarURL,
 		"thumbnails_dir":        globalConfig.ThumbnailsDir,
@@ -269,11 +192,9 @@ func UpdateAccounts(st *store.Store, fn func([]Account) ([]Account, error)) (Con
 	}
 	prev := globalConfig.Accounts
 	globalConfig.Accounts = next
-	if st != nil {
-		if err := saveToStore(st); err != nil {
-			globalConfig.Accounts = prev
-			return globalConfig, err
-		}
+	if err := saveToStore(st); err != nil {
+		globalConfig.Accounts = prev
+		return globalConfig, err
 	}
 	return globalConfig, nil
 }

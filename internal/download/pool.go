@@ -9,11 +9,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/disintegration/imaging"
 	_ "golang.org/x/image/webp"
-	"golang.org/x/sync/errgroup"
 )
 
 // Result is the outcome of one pool job.
@@ -32,20 +32,18 @@ type Counts struct {
 }
 
 // Pool runs fn over jobs across numWorkers goroutines and tallies results.
-type Pool[T any] struct {
-	g *errgroup.Group
-	d atomic.Int32
-	s atomic.Int32
-	f atomic.Int32
+type Pool struct {
+	wg sync.WaitGroup
+	d  atomic.Int32
+	s  atomic.Int32
+	f  atomic.Int32
 }
 
 // Start launches workers right away; close jobs, then call Wait.
-func Start[T any](ctx context.Context, jobs <-chan T, numWorkers int, fn func(ctx context.Context, item T) Result) *Pool[T] {
-	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(numWorkers)
-	p := &Pool[T]{g: g}
+func Start[T any](ctx context.Context, jobs <-chan T, numWorkers int, fn func(ctx context.Context, item T) Result) *Pool {
+	p := &Pool{}
 	for range numWorkers {
-		g.Go(func() error {
+		p.wg.Go(func() {
 			for item := range jobs {
 				if ctx.Err() != nil {
 					// keep draining so producers never block on a full channel
@@ -61,16 +59,24 @@ func Start[T any](ctx context.Context, jobs <-chan T, numWorkers int, fn func(ct
 					p.s.Add(1)
 				}
 			}
-			return nil
 		})
 	}
 	return p
 }
 
 // Wait blocks until all workers finish and returns the tallies.
-func (p *Pool[T]) Wait() Counts {
-	_ = p.g.Wait()
+func (p *Pool) Wait() Counts {
+	p.wg.Wait()
 	return Counts{Downloaded: p.d.Load(), Skipped: p.s.Load(), Failed: p.f.Load()}
+}
+
+// IsVideo reports whether a file name has a video extension.
+func IsVideo(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".mp4", ".mov", ".m4v", ".webm":
+		return true
+	}
+	return false
 }
 
 func GenerateThumbnail(srcPath, dstPath string) error {
@@ -79,9 +85,7 @@ func GenerateThumbnail(srcPath, dstPath string) error {
 		return fmt.Errorf("failed to create thumbnail directory: %w", err)
 	}
 
-	ext := strings.ToLower(filepath.Ext(srcPath))
-
-	if ext == ".mp4" || ext == ".mov" || ext == ".m4v" {
+	if IsVideo(srcPath) {
 		if _, err := exec.LookPath("ffmpeg"); err != nil {
 			slog.Warn("ffmpeg not found in PATH, skipping video thumbnail generation", "src", srcPath)
 			return nil
@@ -136,10 +140,8 @@ func GenerateVideoThumbnails(outputDir string) {
 			continue
 		}
 		name := entry.Name()
-		ext := strings.ToLower(filepath.Ext(name))
-		if ext == ".mp4" || ext == ".webm" || ext == ".mov" {
-			thumbName := strings.TrimSuffix(name, ext) + ".jpg"
-			thumbPath := filepath.Join(thumbDir, thumbName)
+		if IsVideo(name) {
+			thumbPath := filepath.Join(thumbDir, strings.TrimSuffix(name, filepath.Ext(name))+".jpg")
 			if _, err := os.Stat(thumbPath); os.IsNotExist(err) {
 				_ = GenerateThumbnail(filepath.Join(outputDir, name), thumbPath)
 			}

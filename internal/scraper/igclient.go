@@ -94,7 +94,6 @@ var igPkRe = regexp.MustCompile(`"pk":"(\d+)"|"id":"(\d{6,})"`)
 
 type igClient struct {
 	client tls_client.HttpClient
-	ua     string
 	csrf   string
 	userID string
 	docID  string
@@ -103,7 +102,7 @@ type igClient struct {
 	docIDRefreshed bool
 	bootMu         sync.Mutex
 
-	// key identifies the credential set (sessionid + exported cookies) this client was built from; the shared client is rebuilt only when it changes.
+	// key identifies the cookie export this client was built from; the shared client is rebuilt only when it changes.
 	key string
 }
 
@@ -114,57 +113,41 @@ var (
 )
 
 // getIGClient returns the shared instagram client, rebuilding it only when the configured credentials change (e.g. the user pasted a new cookie export).
-func getIGClient(sessionID, cookieExport string) *igClient {
-	key := fmt.Sprintf("%d|%x", len(sessionID), sha256.Sum256([]byte(cookieExport)))
+func getIGClient(cookieExport string) *igClient {
+	key := fmt.Sprintf("%x", sha256.Sum256([]byte(cookieExport)))
 	igSharedClientMu.Lock()
 	defer igSharedClientMu.Unlock()
 	if igSharedClient != nil && igSharedClient.key == key {
 		return igSharedClient
 	}
-	c := newIGClient(sessionID, cookieExport)
+	c := newIGClient(cookieExport)
 	c.key = key
 	igSharedClient = c
 	return c
 }
 
-// newIGClient builds a client whose cookie jar starts from a full browser cookie export (Netscape format) when one is configured. Device cookies (mid, ig_did, datr) are what makes the session look like the browser it was created in; a bare sessionid is a strong automation signal.
-func newIGClient(sessionID, cookieExport string) *igClient {
-	tp := browser.FirefoxProfile
+// newIGClient builds a client whose cookie jar starts from the browser cookie export (Netscape format). Device cookies (mid, ig_did, datr) are what makes the session look like the browser it was created in.
+func newIGClient(cookieExport string) *igClient {
 	jar, _ := fcookiejar.New(nil)
-	u := &url.URL{Scheme: "https", Host: "www.instagram.com", Path: "/"}
-	if cookieExport != "" {
-		parsed, err := cookies.ParseNetscape(cookieExport, "instagram.com")
-		if err != nil {
-			slog.Warn("Ignoring invalid instagram cookie export, falling back to sessionid only", "error", err)
-		} else {
-			jar.SetCookies(u, parsed)
-			slog.Info("Loaded instagram cookie export into client jar", "cookies", len(parsed))
-		}
-	}
-	// The sessionid from the export wins; the separate sessionid setting is only a fallback for setups that never exported a full jar.
-	if sessionID != "" && jarCookie(jar, "sessionid") == "" {
-		jar.SetCookies(u, []*fhttp.Cookie{{
-			Name:     "sessionid",
-			Value:    sessionID,
-			Domain:   ".instagram.com",
-			Path:     "/",
-			Secure:   true,
-			HttpOnly: true,
-		}})
+	parsed, err := cookies.ParseNetscape(cookieExport, "instagram.com")
+	if err != nil {
+		slog.Warn("Ignoring invalid instagram cookie export", "error", err)
+	} else {
+		jar.SetCookies(&url.URL{Scheme: "https", Host: "www.instagram.com", Path: "/"}, parsed)
+		slog.Info("Loaded instagram cookie export into client jar", "cookies", len(parsed))
 	}
 	client, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
 		tls_client.WithTimeoutSeconds(30),
-		tls_client.WithClientProfile(tp.Profile),
+		tls_client.WithClientProfile(browser.TLS),
 		tls_client.WithCookieJar(jar),
 		tls_client.WithNotFollowRedirects(),
 	)
 	if err != nil {
 		slog.Error("Failed to create tls client, check profiles", "error", err)
 	}
-	slog.Info("Instagram client TLS profile", "tls_fingerprint", tp.Profile.GetClientHelloStr())
+	slog.Info("Instagram client TLS profile", "tls_fingerprint", browser.TLS.GetClientHelloStr())
 	c := &igClient{
 		client: client,
-		ua:     tp.UA,
 		docID:  defaultIGGraphQLDocID,
 	}
 	// A full export already carries csrftoken and ds_user_id; seeding them here skips the bootstrap round-trips entirely.
@@ -179,9 +162,6 @@ func newIGClient(sessionID, cookieExport string) *igClient {
 
 // jarCookie reads a single cookie value from the client jar.
 func jarCookie(jar fhttp.CookieJar, name string) string {
-	if jar == nil {
-		return ""
-	}
 	u, _ := url.Parse("https://www.instagram.com")
 	for _, ck := range jar.Cookies(u) {
 		if ck.Name == name && ck.Value != "" {
@@ -237,12 +217,7 @@ func (c *igClient) bootstrap(ctx context.Context) error {
 }
 
 func (c *igClient) setCookie(name, value string) {
-	jar := c.client.GetCookieJar()
-	if jar == nil {
-		return
-	}
-	u := &url.URL{Scheme: "https", Host: "www.instagram.com", Path: "/"}
-	jar.SetCookies(u, []*fhttp.Cookie{{
+	c.client.GetCookieJar().SetCookies(&url.URL{Scheme: "https", Host: "www.instagram.com", Path: "/"}, []*fhttp.Cookie{{
 		Name: name, Value: value, Domain: ".instagram.com", Path: "/", Secure: true, HttpOnly: true,
 	}})
 }
@@ -256,7 +231,7 @@ func (c *igClient) fetchPage(ctx context.Context, pageURL string) ([]byte, error
 		return nil, err
 	}
 	// Minimal headers on purpose: the Sec-Fetch navigation trio makes instagram serve a degraded page variant without the doc_id bundles.
-	req.Header.Set("User-Agent", c.ua)
+	req.Header.Set("User-Agent", browser.UA)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	resp, err := c.client.Do(req)
@@ -278,6 +253,56 @@ func (c *igClient) fetchPage(ctx context.Context, pageURL string) ([]byte, error
 	return body, nil
 }
 
+// setXHRHeaders sets the headers instagram's web frontend sends on its own API requests.
+func (c *igClient) setXHRHeaders(req *fhttp.Request, username string) {
+	req.Header.Set("User-Agent", browser.UA)
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("X-IG-App-ID", igAppID)
+	req.Header.Set("X-ASBD-ID", igASBDID)
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Sec-Fetch-Dest", "empty")
+	req.Header.Set("Sec-Fetch-Mode", "cors")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Sec-Fetch-Storage-Access", "active")
+	req.Header.Set("Referer", "https://www.instagram.com/"+username+"/")
+}
+
+// do sends an API request and returns the body of any response.
+func (c *igClient) do(req *fhttp.Request) (int, []byte, error) {
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	return resp.StatusCode, body, err
+}
+
+// igStatusErr maps a non-200 API answer to a scraper error.
+func igStatusErr(status int, body []byte) error {
+	switch {
+	case status == fhttp.StatusUnauthorized || status == fhttp.StatusForbidden:
+		snippet := strings.TrimSpace(string(body))
+		if len(snippet) > 300 {
+			snippet = snippet[:300]
+		}
+		// Rate limiting can masquerade as 401/403 with a "please wait" body.
+		if isRateLimitBody(string(body)) {
+			slog.Warn("Instagram auth-style response is actually rate limiting", "status", status, "body", snippet)
+			return fmt.Errorf("%w: instagram returned %d (rate limited)", download.ErrRateLimited, status)
+		}
+		slog.Warn("Instagram rejected the session", "status", status, "body", snippet)
+		return fmt.Errorf("%w: instagram returned %d", ErrAuthExpired, status)
+	case status == fhttp.StatusTooManyRequests:
+		return fmt.Errorf("%w: instagram returned 429", download.ErrRateLimited)
+	case status >= 300 && status < 400:
+		return sessionRedirectErr(status)
+	default:
+		return download.StatusError(status)
+	}
+}
+
 func (c *igClient) doGet(ctx context.Context, apiURL, username string) ([]byte, error) {
 	if err := igPace(ctx); err != nil {
 		return nil, err
@@ -286,50 +311,18 @@ func (c *igClient) doGet(ctx context.Context, apiURL, username string) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", c.ua)
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
-	req.Header.Set("X-IG-App-ID", igAppID)
-	req.Header.Set("X-ASBD-ID", igASBDID)
-	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	c.setXHRHeaders(req, username)
 	if c.csrf != "" {
 		req.Header.Set("X-CSRFToken", c.csrf)
 	}
-	req.Header.Set("Sec-Fetch-Dest", "empty")
-	req.Header.Set("Sec-Fetch-Mode", "cors")
-	req.Header.Set("Sec-Fetch-Site", "same-origin")
-	req.Header.Set("Sec-Fetch-Storage-Access", "active")
-	req.Header.Set("Referer", "https://www.instagram.com/"+username+"/")
-
-	resp, err := c.client.Do(req)
+	status, body, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
-	if err != nil {
-		return nil, err
+	if status != fhttp.StatusOK {
+		return nil, igStatusErr(status, body)
 	}
-	switch resp.StatusCode {
-	case fhttp.StatusOK:
-		return body, nil
-	case fhttp.StatusUnauthorized, fhttp.StatusForbidden:
-		// Rate limiting can masquerade as 401/403 with a "please wait" body.
-		if isRateLimitBody(string(body)) {
-			slog.Warn("Instagram auth-style response is actually rate limiting", "url", apiURL, "status", resp.StatusCode, "body", strings.TrimSpace(string(body)))
-			return nil, fmt.Errorf("%w: instagram returned %d (rate limited)", download.ErrRateLimited, resp.StatusCode)
-		}
-		slog.Warn("Instagram rejected the session", "url", apiURL, "status", resp.StatusCode, "body", strings.TrimSpace(string(body)))
-		return nil, fmt.Errorf("%w: instagram returned %d", ErrAuthExpired, resp.StatusCode)
-	case fhttp.StatusTooManyRequests:
-		return nil, fmt.Errorf("%w: instagram returned 429", download.ErrRateLimited)
-	default:
-		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-			return nil, sessionRedirectErr(resp.StatusCode)
-		}
-		return nil, download.StatusError(resp.StatusCode)
-	}
+	return body, nil
 }
 
 // doGraphQL fetches one page of the profile posts timeline via the web graphql endpoint.
@@ -337,7 +330,7 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 	if err := igPace(ctx); err != nil {
 		return nil, err
 	}
-	form := buildGraphQLForm(username, userID, after, count, c.userID, c.csrf, c.docID)
+	form := buildGraphQLForm(username, userID, after, count, c.userID, c.docID)
 	form.Set("__spin_t", strconv.FormatInt(time.Now().Unix(), 10))
 	form.Set("fb_dtsg", c.dtsg)
 
@@ -345,79 +338,37 @@ func (c *igClient) doGraphQL(ctx context.Context, username, userID, after string
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", c.ua)
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	c.setXHRHeaders(req, username)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("X-CSRFToken", c.csrf)
-	req.Header.Set("X-IG-App-ID", igAppID)
-	req.Header.Set("X-ASBD-ID", igASBDID)
-	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	req.Header.Set("Sec-Fetch-Dest", "empty")
-	req.Header.Set("Sec-Fetch-Mode", "cors")
-	req.Header.Set("Sec-Fetch-Site", "same-origin")
-	req.Header.Set("Sec-Fetch-Storage-Access", "active")
 	req.Header.Set("Origin", "https://www.instagram.com")
-	req.Header.Set("Referer", "https://www.instagram.com/"+username+"/")
 
-	resp, err := c.client.Do(req)
+	status, body, err := c.do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
-	if err != nil {
-		return nil, err
+	// HTML or the legacy "for (;;);{"__ar":1,...}" envelope on 200, or a logged-in "Page Not Found" on 403, mean an outdated doc_id or a rejected session
+	html := len(body) > 0 && body[0] == '<'
+	stale := status == fhttp.StatusOK && (html || strings.HasPrefix(string(body), "for (;;);")) ||
+		(status == fhttp.StatusUnauthorized || status == fhttp.StatusForbidden) && html && !isRateLimitBody(string(body))
+	if stale && !c.docIDRefreshed {
+		// re-read the doc_id once before giving up
+		c.docIDRefreshed = true
+		if rerr := c.refreshDocID(ctx, username); rerr == nil {
+			return c.doGraphQL(ctx, username, userID, after, count)
+		} else {
+			slog.Warn("Instagram doc_id refresh failed", "error", rerr)
+		}
 	}
-	switch resp.StatusCode {
-	case fhttp.StatusOK:
-		// the legacy "for (;;);{"__ar":1,...}" envelope means stale fb_dtsg/doc_id or a rejected session, same handling as HTML
-		if len(body) > 0 && (body[0] == '<' || strings.HasPrefix(string(body), "for (;;);")) {
-			// Stale doc_id or rejected session: re-read doc_id once.
-			if !c.docIDRefreshed {
-				c.docIDRefreshed = true
-				if rerr := c.refreshDocID(ctx, username); rerr == nil {
-					return c.doGraphQL(ctx, username, userID, after, count)
-				} else {
-					slog.Warn("Instagram doc_id refresh failed", "error", rerr)
-				}
-			}
-			return nil, fmt.Errorf("%w: instagram returned HTML instead of JSON (session rejected or doc_id outdated)", ErrAuthExpired)
-		}
-		if c.docIDRefreshed {
-			// Successful page: re-arm the one-time doc_id refresh so the long-lived shared client can re-harvest a rotated doc_id later.
-			c.docIDRefreshed = false
-		}
-		return body, nil
-	case fhttp.StatusUnauthorized, fhttp.StatusForbidden:
-		if isRateLimitBody(string(body)) {
-			slog.Warn("Instagram graphql response is rate limiting", "status", resp.StatusCode, "body", strings.TrimSpace(string(body)))
-			return nil, fmt.Errorf("%w: instagram returned %d (rate limited)", download.ErrRateLimited, resp.StatusCode)
-		}
-		// A 403 with a logged-in "Page Not Found" page means an unknown doc_id, not a dead session; re-read it once before giving up.
-		if len(body) > 0 && body[0] == '<' && !c.docIDRefreshed {
-			c.docIDRefreshed = true
-			if rerr := c.refreshDocID(ctx, username); rerr == nil {
-				return c.doGraphQL(ctx, username, userID, after, count)
-			} else {
-				slog.Warn("Instagram doc_id refresh failed", "error", rerr)
-			}
-		}
-		snippet := strings.TrimSpace(string(body))
-		if len(snippet) > 300 {
-			snippet = snippet[:300]
-		}
-		slog.Warn("Instagram rejected the graphql request", "status", resp.StatusCode, "body", snippet)
-		return nil, fmt.Errorf("%w: instagram returned %d", ErrAuthExpired, resp.StatusCode)
-	case fhttp.StatusTooManyRequests:
-		return nil, fmt.Errorf("%w: instagram returned 429", download.ErrRateLimited)
-	default:
-		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
-			return nil, sessionRedirectErr(resp.StatusCode)
-		}
-		return nil, download.StatusError(resp.StatusCode)
+	if status != fhttp.StatusOK {
+		return nil, igStatusErr(status, body)
 	}
+	if stale {
+		return nil, fmt.Errorf("%w: instagram returned HTML instead of JSON (session rejected or doc_id outdated)", ErrAuthExpired)
+	}
+	// Successful page: re-arm the one-time doc_id refresh so the long-lived shared client can re-harvest a rotated doc_id later.
+	c.docIDRefreshed = false
+	return body, nil
 }
 
 // isRateLimitBody reports whether an Instagram error body means rate limiting, not a bad session.
@@ -432,7 +383,7 @@ func isRateLimitBody(body string) bool {
 }
 
 // buildGraphQLForm builds the PolarisProfilePostsTabContentQuery form shared by the tls-client and browser fetch paths.
-func buildGraphQLForm(username, userID, after string, count int, ownUserID, csrf, docID string) *url.Values {
+func buildGraphQLForm(username, userID, after string, count int, ownUserID, docID string) url.Values {
 	v := url.Values{}
 	vars := map[string]any{
 		"username": username,
@@ -451,10 +402,7 @@ func buildGraphQLForm(username, userID, after string, count int, ownUserID, csrf
 	if after != "" {
 		vars["after"] = after
 	}
-	varsJSON, err := json.Marshal(vars)
-	if err != nil {
-		return &v
-	}
+	varsJSON, _ := json.Marshal(vars)
 	user := ownUserID
 	if user == "" {
 		user = "0"
@@ -474,5 +422,5 @@ func buildGraphQLForm(username, userID, after string, count int, ownUserID, csrf
 	v.Set("server_timestamps", "true")
 	v.Set("variables", string(varsJSON))
 	v.Set("doc_id", docID)
-	return &v
+	return v
 }

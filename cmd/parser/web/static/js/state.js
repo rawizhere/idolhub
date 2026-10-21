@@ -15,9 +15,6 @@ export const state = {
   sseSource: null,
   sseConnected: false,
   sseReconnectTimeout: null,
-  // progress samples per target key, for the ETA estimate
-  progressStart: new Map(),
-
   terminalLevel: "all",
   globalLogs: [],
   dockConsoleOpen: false,
@@ -36,10 +33,7 @@ export const state = {
   tags: new Set(),
 
   selecting: false,
-  selected: new Set(),
-
-  newFilters: [],
-  editConfig: null
+  selected: new Set()
 };
 
 export const targetKey = (t) => `${t.platform}/${t.username}`;

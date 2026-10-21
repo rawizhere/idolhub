@@ -18,8 +18,6 @@ type Account struct {
 	DownloadPhotos *bool
 	DownloadVideos *bool
 	Filters        []string
-	// TwitterAuthToken overrides the global twitter_auth_token for this account.
-	TwitterAuthToken string
 	// Paused accounts are skipped by auto-sync; a manual sync still runs.
 	Paused bool
 	// Cookies is a Netscape export that replaces the platform-wide session for this account.
@@ -47,15 +45,14 @@ func (s *AccountStore) Upsert(ctx context.Context, a Account) error {
 		return fmt.Errorf("store: account upsert: %w", err)
 	}
 	query := `
-INSERT INTO accounts (platform, username, save_text, skip_retweets, download_photos, download_videos, filters, twitter_auth_token, paused, cookies, since_date, max_posts)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO accounts (platform, username, save_text, skip_retweets, download_photos, download_videos, filters, paused, cookies, since_date, max_posts)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (platform, username) DO UPDATE SET
 	save_text = excluded.save_text,
 	skip_retweets = excluded.skip_retweets,
 	download_photos = excluded.download_photos,
 	download_videos = excluded.download_videos,
 	filters = excluded.filters,
-	twitter_auth_token = excluded.twitter_auth_token,
 	paused = excluded.paused,
 	cookies = excluded.cookies,
 	since_date = excluded.since_date,
@@ -68,13 +65,12 @@ ON CONFLICT (platform, username) DO UPDATE SET
 		nullBool(a.DownloadPhotos),
 		nullBool(a.DownloadVideos),
 		filters,
-		nullString(a.TwitterAuthToken),
 		boolInt(a.Paused),
 		nullString(a.Cookies),
 		nullString(a.SinceDate),
 		a.MaxPosts,
 	}
-	if err := execContext(ctx, s.db, query, args...); err != nil {
+	if _, err := s.db.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("store: account upsert: %w", err)
 	}
 	return nil
@@ -82,7 +78,7 @@ ON CONFLICT (platform, username) DO UPDATE SET
 
 func (s *AccountStore) List(ctx context.Context) ([]Account, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT platform, username, save_text, skip_retweets, download_photos, download_videos, filters, twitter_auth_token, paused, cookies, since_date, max_posts
+SELECT platform, username, save_text, skip_retweets, download_photos, download_videos, filters, paused, cookies, since_date, max_posts
 FROM accounts
 ORDER BY platform, username`)
 	if err != nil {
@@ -101,7 +97,7 @@ ORDER BY platform, username`)
 }
 
 func (s *AccountStore) Delete(ctx context.Context, platform, username string) error {
-	if err := execContext(ctx, s.db, `DELETE FROM accounts WHERE platform = ? AND username = ?`, platform, username); err != nil {
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM accounts WHERE platform = ? AND username = ?`, platform, username); err != nil {
 		return fmt.Errorf("store: account delete: %w", err)
 	}
 	return nil
@@ -111,20 +107,25 @@ func (s *AccountStore) GetSyncInfo(ctx context.Context, platform, username strin
 	row := s.db.QueryRowContext(ctx,
 		`SELECT COALESCE(last_sync_status, 'idle'), last_sync_time FROM accounts WHERE platform = ? AND username = ?`,
 		platform, username)
-	info, err := scanSyncInfo(row.Scan)
+	var (
+		info SyncInfo
+		at   sql.NullTime
+	)
+	err := row.Scan(&info.Status, &at)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SyncInfo{Status: "idle"}, nil
 	}
 	if err != nil {
 		return SyncInfo{}, fmt.Errorf("store: sync info get: %w", err)
 	}
+	info.Time = at.Time
 	return info, nil
 }
 
 // SetSyncInfo updates sync bookkeeping of an existing account. It never inserts: a late status write for a removed account must not bring it back on the next load.
 func (s *AccountStore) SetSyncInfo(ctx context.Context, platform, username, status string, at time.Time) error {
 	query := `UPDATE accounts SET last_sync_status = ?, last_sync_time = ? WHERE platform = ? AND username = ?`
-	if err := execContext(ctx, s.db, query, status, nullTime(at), platform, username); err != nil {
+	if _, err := s.db.ExecContext(ctx, query, status, nullTime(at), platform, username); err != nil {
 		return fmt.Errorf("store: sync info set: %w", err)
 	}
 	return nil
@@ -152,11 +153,7 @@ func (s *AccountStore) Rename(ctx context.Context, platform, from, to string) er
 	return nil
 }
 
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanAccount(rs rowScanner) (Account, error) {
+func scanAccount(rs *sql.Rows) (Account, error) {
 	var (
 		a              Account
 		saveText       int
@@ -164,17 +161,15 @@ func scanAccount(rs rowScanner) (Account, error) {
 		downloadPhotos sql.NullBool
 		downloadVideos sql.NullBool
 		filters        sql.NullString
-		twitterToken   sql.NullString
 		paused         int
 		cookies        sql.NullString
 		sinceDate      sql.NullString
 	)
-	if err := rs.Scan(&a.Platform, &a.Username, &saveText, &skipRetweets, &downloadPhotos, &downloadVideos, &filters, &twitterToken, &paused, &cookies, &sinceDate, &a.MaxPosts); err != nil {
+	if err := rs.Scan(&a.Platform, &a.Username, &saveText, &skipRetweets, &downloadPhotos, &downloadVideos, &filters, &paused, &cookies, &sinceDate, &a.MaxPosts); err != nil {
 		return Account{}, fmt.Errorf("store: account scan: %w", err)
 	}
 	a.SaveText = saveText == 1
 	a.SkipRetweets = skipRetweets == 1
-	a.TwitterAuthToken = twitterToken.String
 	a.Paused = paused == 1
 	a.Cookies = cookies.String
 	a.SinceDate = sinceDate.String
@@ -194,21 +189,6 @@ func scanAccount(rs rowScanner) (Account, error) {
 		a.Filters = parsed
 	}
 	return a, nil
-}
-
-func scanSyncInfo(scan func(dest ...any) error) (SyncInfo, error) {
-	var (
-		status string
-		at     sql.NullTime
-	)
-	if err := scan(&status, &at); err != nil {
-		return SyncInfo{}, err
-	}
-	info := SyncInfo{Status: status}
-	if at.Valid {
-		info.Time = at.Time
-	}
-	return info, nil
 }
 
 func encodeFilters(filters []string) (any, error) {
