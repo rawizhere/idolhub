@@ -105,14 +105,17 @@
   #bottom-dock-console:not(.is-open) { display: none; }
 }
 
-/* Gallery grid density: tiles have a rem-based minimum width, so column count follows window size and UI scale */
-.density-relaxed {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(11rem, 42vw), 1fr));
-}
-.density-compact {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(7rem, 28vw), 1fr));
+/* Gallery grid density: tiles have a rem-based minimum width, so column count follows window size and UI scale.
+   Layered so the .hidden utility still wins when the posts or settings view replaces the grid. */
+@layer components {
+  .density-relaxed {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(11rem, 42vw), 1fr));
+  }
+  .density-compact {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(7rem, 28vw), 1fr));
+  }
 }
 
 /* Gallery Grid Item */
