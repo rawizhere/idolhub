@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -124,12 +125,14 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 		if result != nil && result.ExitCode == 101 {
 			slog.Info("yt-dlp reached previously downloaded or older videos, stopped early", "platform", platform, "user", username)
 		} else {
-			if result != nil {
-				slog.Error("yt-dlp run failed", "platform", platform, "user", username, "code", result.ExitCode, "stderr", result.Stderr, "error", err)
-			} else {
+			if result == nil {
 				slog.Error("yt-dlp run failed", "platform", platform, "user", username, "error", err)
+				return fmt.Errorf("yt-dlp run failed: %w", err)
 			}
-			return fmt.Errorf("yt-dlp run failed: %w", err)
+			// err and result.Stderr carry the whole yt-dlp output, progress lines with the session cookies included
+			reason := ytdlpFailure(result.Stderr)
+			slog.Error("yt-dlp run failed", "platform", platform, "user", username, "code", result.ExitCode, "reason", reason)
+			return fmt.Errorf("yt-dlp exited with code %d: %s", result.ExitCode, reason)
 		}
 	}
 
@@ -214,4 +217,29 @@ func writeCookieFile(raw string) (string, error) {
 		return "", err
 	}
 	return f.Name(), nil
+}
+
+// ytdlpFailure picks the ERROR lines out of yt-dlp's stderr, or else its last plain line, capped in length. Progress
+// lines are never returned: they embed the info dict, request headers and cookies included.
+func ytdlpFailure(stderr string) string {
+	var errs []string
+	last := ""
+	for line := range strings.Lines(stderr) {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "progress:") {
+			continue
+		}
+		last = line
+		if strings.HasPrefix(line, "ERROR:") && !slices.Contains(errs, line) {
+			errs = append(errs, line)
+		}
+	}
+	reason := strings.Join(errs, "; ")
+	if reason == "" {
+		reason = last
+	}
+	if r := []rune(reason); len(r) > 500 {
+		reason = string(r[:500]) + "…"
+	}
+	return reason
 }

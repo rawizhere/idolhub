@@ -3,6 +3,7 @@ package scraper
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,5 +66,23 @@ func TestCollectYTDLPPosts(t *testing.T) {
 	}
 	if posts[2].Text != "" {
 		t.Errorf("post[2].Text = %q", posts[2].Text)
+	}
+}
+
+func TestYTDLPFailureKeepsCookiesOut(t *testing.T) {
+	stderr := `progress:{"info":{"http_headers":{"Cookie":"sessionid=SECRET"}}}
+[TikTok] Extracting URL: https://www.tiktok.com/@x/video/1
+ERROR: [TikTok] 1: curl: (56) Connection closed abruptly
+progress:{"info":{"http_headers":{"Cookie":"sessionid=SECRET"}}}
+`
+	got := ytdlpFailure(stderr)
+	if got != "ERROR: [TikTok] 1: curl: (56) Connection closed abruptly" {
+		t.Errorf("ytdlpFailure = %q", got)
+	}
+	if got := ytdlpFailure("progress:{\"Cookie\":\"SECRET\"}\nsome warning\n"); got != "some warning" {
+		t.Errorf("fallback = %q", got)
+	}
+	if got := ytdlpFailure("ERROR: " + strings.Repeat("x", 2000)); len([]rune(got)) != 501 {
+		t.Errorf("not capped: %d runes", len([]rune(got)))
 	}
 }
