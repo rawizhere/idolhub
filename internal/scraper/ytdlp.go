@@ -94,6 +94,8 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 
 	cmd := ytdlp.New().
 		Format("bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc]+bestaudio/best[vcodec^=avc]/bestvideo+bestaudio/best").
+		// photo posts carry only a soundtrack; without a video stream the entry is skipped instead of saved as bare audio
+		MatchFilters("vcodec!=none").
 		IgnoreErrors().
 		PrintJSON().
 		SocketTimeout(15).
