@@ -20,7 +20,7 @@ import (
 	"idolhub/internal/store"
 )
 
-var platforms = []string{"instagram", "twitter", "tiktok"}
+var platforms = []string{"instagram", "twitter", "tiktok", "youtube"}
 
 const (
 	maxFilters  = 50

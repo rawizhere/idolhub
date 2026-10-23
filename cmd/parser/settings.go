@@ -86,6 +86,7 @@ func (a *App) handleConfigGet(w http.ResponseWriter, r *http.Request) {
 			"twitter":   inspectCookies("twitter", cfg.TwitterCookies),
 			"instagram": inspectCookies("instagram", cfg.InstagramCookies),
 			"tiktok":    inspectCookies("tiktok", cfg.TikTokCookies),
+			"youtube":   inspectCookies("youtube", cfg.YouTubeCookies),
 		},
 	})
 }
@@ -106,6 +107,7 @@ func (d configDTO) merge(old config.Config) (config.Config, error) {
 		{&cfg.TwitterCookies, d.TwitterCookies, old.TwitterCookies},
 		{&cfg.InstagramCookies, d.InstagramCookies, old.InstagramCookies},
 		{&cfg.TikTokCookies, d.TikTokCookies, old.TikTokCookies},
+		{&cfg.YouTubeCookies, d.YouTubeCookies, old.YouTubeCookies},
 	} {
 		val := f.cur
 		if f.v != nil {
