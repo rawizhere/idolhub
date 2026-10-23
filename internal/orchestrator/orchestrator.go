@@ -638,6 +638,7 @@ func SessionOptions(c config.Config, opts *scraper.Options) {
 	opts.InstagramCookies = c.InstagramCookies
 	opts.InstagramSidecarURL = c.InstagramSidecarURL
 	opts.TikTokCookies = c.TikTokCookies
+	opts.ThumbnailsDir = c.ThumbnailsDir
 }
 
 // AccountSession swaps in an account's own session. Its cookie export replaces the platform one whole: mixing one
