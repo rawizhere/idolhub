@@ -2,6 +2,10 @@ function storedDensity() {
   try { return localStorage.getItem("idolhub-density") || "relaxed"; } catch (_) { return "relaxed"; }
 }
 
+function storedDayGroups() {
+  try { return localStorage.getItem("idolhub-day-groups") !== "off"; } catch (_) { return true; }
+}
+
 export const state = {
   // the same handle can be configured on several platforms; a target is the pair
   target: null,
@@ -19,6 +23,7 @@ export const state = {
   globalLogs: [],
   dockConsoleOpen: false,
   gridDensity: storedDensity(),
+  groupByDay: storedDayGroups(),
 
   targetSearchQuery: "",
   targetPlatformFilter: "all",

@@ -145,6 +145,10 @@ const dayLabel = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "lon
 // labelDays heads each run of same-day tiles with its date, which tiles no longer carry. Idempotent, so it runs after
 // every page and every delete; a page that continues the previous day gets no second header.
 function labelDays(grid) {
+  if (!state.groupByDay) {
+    grid.querySelectorAll(".day-header").forEach(h => h.remove());
+    return;
+  }
   grid.querySelectorAll(".day-header").forEach(h => {
     if (!h.nextElementSibling?.classList.contains("gallery-item")) h.remove();
   });
@@ -246,6 +250,8 @@ export function syncFilterUI() {
   $("btn-select-mode").classList.toggle("hidden", !isGrid);
   setPressed($("btn-select-mode"), state.selecting);
   setPressed($("btn-density-toggle"), state.gridDensity === "compact");
+  setPressed($("btn-day-groups"), state.groupByDay);
+  document.body.classList.toggle("show-tile-dates", !state.groupByDay);
   $("btn-reset-filters").classList.toggle("hidden", !filtersDirty());
 
   const grid = $("lg-container");
@@ -312,6 +318,13 @@ onClick({
     state.gridDensity = state.gridDensity === "relaxed" ? "compact" : "relaxed";
     try { localStorage.setItem("idolhub-density", state.gridDensity); } catch (_) {}
     syncFilterUI();
+  },
+  "toggle-day-groups": () => {
+    state.groupByDay = !state.groupByDay;
+    try { localStorage.setItem("idolhub-day-groups", state.groupByDay ? "on" : "off"); } catch (_) {}
+    syncFilterUI();
+    const grid = $("lg-container");
+    if (grid) labelDays(grid);
   },
   "load-more": (el) => loadNext(el.closest("[data-next-url]")),
   "youtube-play": (btn) => {

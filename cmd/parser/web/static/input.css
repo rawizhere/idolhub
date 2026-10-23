@@ -174,3 +174,7 @@ a.pswp__button { display: flex; align-items: center; justify-content: center; co
   --pswp-bg: rgba(0, 0, 0, 0.94);
 }
 
+/* Tile date badge: visible only when day grouping is off */
+.tile-date { display: none; }
+body.show-tile-dates .tile-date { display: block; }
+
