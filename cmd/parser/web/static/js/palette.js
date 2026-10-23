@@ -53,8 +53,8 @@ function render() {
       <li role="option" id="palette-opt-${i}" aria-selected="${i === active}" data-index="${i}"
           class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer ${i === active ? "bg-[#ff9900]/15 text-slate-900 dark:text-white" : "text-slate-700 dark:text-zinc-300"}">
         <span class="flex-1 truncate font-medium">${escapeHtml(c.label)}</span>
-        ${c.badge ? `<span class="text-[0.5625rem] font-bold uppercase px-1 py-0.5 rounded border ${platformBadgeClass(c.badge)}">${escapeHtml(c.badge)}</span>` : ""}
-        <span class="text-[0.6875rem] text-slate-400 font-mono">${escapeHtml(c.hint || "")}</span>
+        ${c.badge ? `<span class="text-xs font-bold uppercase px-1 py-0.5 rounded border ${platformBadgeClass(c.badge)}">${escapeHtml(c.badge)}</span>` : ""}
+        <span class="text-xs text-slate-400 font-mono">${escapeHtml(c.hint || "")}</span>
       </li>`).join("")
     : `<li class="px-3 py-6 text-center text-xs text-slate-400">No matches. Paste a profile link to add a target.</li>`;
   $("palette-input").setAttribute("aria-activedescendant", items.length ? `palette-opt-${active}` : "");

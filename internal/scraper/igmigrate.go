@@ -103,7 +103,7 @@ func migrateIgAccount(ctx context.Context, posts *store.PostStore, thumbsDir, us
 			}
 			newURL := ""
 			if want := prefix + p.ExternalID + ".mp4"; len(videos) == 1 && name != want && !files[want] {
-				if err := renameIgVideo(dir, thumbsDir, username, name, want); err != nil {
+				if err := renameMedia(dir, thumbsDir, "instagram", username, name, want); err != nil {
 					slog.Warn("Failed to rename Instagram video", "file", name, "error", err)
 				} else {
 					delete(files, name)
@@ -145,7 +145,7 @@ func migrateIgAccount(ctx context.Context, posts *store.PostStore, thumbsDir, us
 			slog.Warn("Failed to move duplicate Instagram video", "file", name, "error", err)
 			continue
 		}
-		for _, t := range igThumbPaths(thumbsDir, username, name) {
+		for _, t := range mediaThumbPaths(thumbsDir, "instagram", username, name) {
 			_ = os.Remove(t)
 		}
 		moved++
@@ -171,24 +171,24 @@ func igMediaFile(files map[string]bool, prefix, mediaURL string) string {
 	return ""
 }
 
-func renameIgVideo(dir, thumbsDir, username, from, to string) error {
+func renameMedia(dir, thumbsDir, platform, username, from, to string) error {
 	if err := os.Rename(filepath.Join(dir, from), filepath.Join(dir, to)); err != nil {
 		return err
 	}
 	// carry the previews along; a missing one is generated on demand
-	newThumbs := igThumbPaths(thumbsDir, username, to)
-	for i, t := range igThumbPaths(thumbsDir, username, from) {
+	newThumbs := mediaThumbPaths(thumbsDir, platform, username, to)
+	for i, t := range mediaThumbPaths(thumbsDir, platform, username, from) {
 		_ = os.Rename(t, newThumbs[i])
 	}
 	return nil
 }
 
-// igThumbPaths lists the preview locations of a media file: the fast thumbnails dir and the legacy in-tree one.
-func igThumbPaths(thumbsDir, username, name string) []string {
+// mediaThumbPaths lists the preview locations of a media file: the fast thumbnails dir and the legacy in-tree one.
+func mediaThumbPaths(thumbsDir, platform, username, name string) []string {
 	thumb := strings.TrimSuffix(name, filepath.Ext(name)) + ".jpg"
-	paths := []string{filepath.Join(mediaRoot, "instagram", username, "thumbnails", thumb)}
+	paths := []string{filepath.Join(mediaRoot, platform, username, "thumbnails", thumb)}
 	if thumbsDir != "" {
-		paths = append(paths, filepath.Join(thumbsDir, "instagram", username, "thumbnails", thumb))
+		paths = append(paths, filepath.Join(thumbsDir, platform, username, "thumbnails", thumb))
 	}
 	return paths
 }

@@ -50,13 +50,13 @@ function cardHTML(target) {
        </button>`;
 
   const authFix = target.auth_error
-    ? `<button data-action="fix-cookies" data-platform="${p}" class="flex-shrink-0 text-[0.5625rem] font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/80 px-1.5 py-1 rounded-md hover:bg-rose-100 dark:hover:bg-rose-950 cursor-pointer" title="Authentication error — update cookies">Fix cookies</button>`
+    ? `<button data-action="fix-cookies" data-platform="${p}" class="flex-shrink-0 text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/80 px-1.5 py-1 rounded-md hover:bg-rose-100 dark:hover:bg-rose-950 cursor-pointer" title="Authentication error — update cookies">Fix cookies</button>`
     : "";
 
   const progress = prog
     ? `<div class="flex items-center gap-1.5 mt-1">
          <div class="flex-1 h-1 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden"><div class="h-full bg-[#ff9900] transition-all duration-300" style="width:${prog.queued ? 0 : prog.pct}%"></div></div>
-         <span class="text-[0.5625rem] font-mono text-slate-500 dark:text-zinc-400 whitespace-nowrap">${prog.queued ? "queued" : `${prog.pct}%`}</span>
+         <span class="text-xs font-mono text-slate-500 dark:text-zinc-400 whitespace-nowrap">${prog.queued ? "queued" : `${prog.pct}%`}</span>
        </div>`
     : "";
 
@@ -68,9 +68,9 @@ function cardHTML(target) {
           <div class="flex flex-col gap-0.5 min-w-0">
             <div class="flex items-center gap-1.5 min-w-0">
               <a href="/?t=${encodeURIComponent(`${target.platform}/${target.username}`)}" data-action="select-target" data-username="${u}" data-platform="${p}" ${active ? 'aria-current="page"' : ""} class="text-xs font-bold tracking-tight truncate outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:after:ring-2 focus-visible:after:ring-[#ff9900]">@${u}</a>
-              <span class="text-[0.5625rem] font-bold uppercase px-1 py-0.5 rounded border flex-shrink-0 leading-none ${platformBadgeClass(target.platform)}">${p}</span>
+              <span class="text-xs font-bold uppercase px-1 py-0.5 rounded border flex-shrink-0 leading-none ${platformBadgeClass(target.platform)}">${p}</span>
             </div>
-            <div class="flex items-center gap-1.5 text-[0.625rem] text-slate-400 dark:text-zinc-500 font-mono">
+            <div class="flex items-center gap-1.5 text-xs text-slate-400 dark:text-zinc-500 font-mono">
               <span>${(target.media_count || 0).toLocaleString()} files</span>
               ${target.new_count > 0 ? `<span class="text-emerald-600 dark:text-emerald-400 font-bold">+${target.new_count}</span>` : ""}
               ${target.paused ? `<span class="text-amber-600 dark:text-amber-400 font-bold" title="Auto-sync paused">⏸ paused</span>` : ""}
@@ -126,7 +126,7 @@ export function showTargetChrome(target) {
   $("dashboard-username-label").textContent = `@${target.username}`;
   const badge = $("dashboard-platform-badge");
   badge.textContent = target.platform.toUpperCase();
-  badge.className = `text-[0.625rem] font-bold uppercase px-2 py-0.5 rounded border ${platformBadgeClass(target.platform)}`;
+  badge.className = `text-xs font-bold uppercase px-2 py-0.5 rounded border ${platformBadgeClass(target.platform)}`;
   document.title = `@${target.username} · IdolHub`;
   updateDashboardDetails(target);
   renderPauseState();

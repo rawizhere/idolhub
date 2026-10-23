@@ -32,8 +32,8 @@ export function renderChips(kind) {
   if (!box) return;
   const items = chipLists[kind];
   box.innerHTML = items.length
-    ? items.map((tag, idx) => `<span class="inline-flex items-center gap-1 bg-[#ff9900]/15 border border-[#ff9900]/40 text-[#ff9900] text-[0.625rem] font-semibold px-2 py-0.5 rounded-full">${escapeHtml(tag)}<button type="button" class="hover:text-rose-500 font-bold cursor-pointer" data-action="remove-chip" data-kind="${kind}" data-index="${idx}" aria-label="Remove ${escapeHtml(tag)}">&times;</button></span>`).join("")
-    : `<span class="text-[0.6875rem] text-slate-400 dark:text-zinc-500">No keyword filters — everything is downloaded</span>`;
+    ? items.map((tag, idx) => `<span class="inline-flex items-center gap-1 bg-[#ff9900]/15 border border-[#ff9900]/40 text-[#ff9900] text-xs font-semibold px-2 py-0.5 rounded-full">${escapeHtml(tag)}<button type="button" class="hover:text-rose-500 font-bold cursor-pointer" data-action="remove-chip" data-kind="${kind}" data-index="${idx}" aria-label="Remove ${escapeHtml(tag)}">&times;</button></span>`).join("")
+    : `<span class="text-xs text-slate-400 dark:text-zinc-500">No keyword filters — everything is downloaded</span>`;
   box.dispatchEvent(new CustomEvent("chips-changed", { bubbles: true, detail: { kind } }));
 }
 
@@ -139,10 +139,10 @@ function renderRows() {
           <div class="flex items-center gap-1.5">
             <span class="text-xs font-bold truncate">@${escapeHtml(r.username)}</span>
             ${r.explicit
-              ? `<span class="text-[0.5625rem] font-bold uppercase px-1 py-0.5 rounded border ${platformBadgeClass(r.platform)}">${PLATFORM_NAMES[r.platform]}</span>`
-              : `<button type="button" data-action="add-row-platform" data-index="${i}" class="text-[0.5625rem] font-bold uppercase px-1 py-0.5 rounded border cursor-pointer ${platformBadgeClass(r.platform)}" title="Switch platform">${PLATFORM_NAMES[r.platform]} ⇄</button>`}
+              ? `<span class="text-xs font-bold uppercase px-1 py-0.5 rounded border ${platformBadgeClass(r.platform)}">${PLATFORM_NAMES[r.platform]}</span>`
+              : `<button type="button" data-action="add-row-platform" data-index="${i}" class="text-xs font-bold uppercase px-1 py-0.5 rounded border cursor-pointer ${platformBadgeClass(r.platform)}" title="Switch platform">${PLATFORM_NAMES[r.platform]} ⇄</button>`}
           </div>
-          <p class="text-[0.6875rem] truncate ${tone}" title="${escapeHtml(text)}">${r.info.code === "pending" ? '<span class="inline-block w-2.5 h-2.5 mr-1 align-middle border-2 border-slate-300 border-t-[#ff9900] rounded-full animate-spin"></span>' : ""}${escapeHtml(text)}</p>
+          <p class="text-xs truncate ${tone}" title="${escapeHtml(text)}">${r.info.code === "pending" ? '<span class="inline-block w-2.5 h-2.5 mr-1 align-middle border-2 border-slate-300 border-t-[#ff9900] rounded-full animate-spin"></span>' : ""}${escapeHtml(text)}</p>
         </div>
         <button type="button" data-action="add-row-remove" data-index="${i}" class="btn-icon p-1 text-xs" aria-label="Remove @${escapeHtml(r.username)}">✕</button>
       </li>`;

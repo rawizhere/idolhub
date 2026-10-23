@@ -87,13 +87,13 @@ async function runSessionCheck(btn) {
   const platform = btn.dataset.platform;
   const out = btn.closest(".cookie-field").querySelector('[data-slot="check"]');
   if (btn.closest(".cookie-field").querySelector("textarea").value.trim()) {
-    out.className = `text-[0.6875rem] font-mono ${TONES.warn}`;
+    out.className = `text-xs font-mono ${TONES.warn}`;
     out.textContent = "Save first — the check uses the saved session.";
     return;
   }
   await withLoading(btn, async () => {
     const res = await checkSession(platform).catch(err => ({ ok: false, error: err.message }));
-    out.className = `text-[0.6875rem] font-mono ${res.ok ? TONES.ok : TONES.bad}`;
+    out.className = `text-xs font-mono ${res.ok ? TONES.ok : TONES.bad}`;
     out.textContent = res.ok ? `✓ Logged in as ${res.account}` : `✗ ${res.error}`;
   });
 }
@@ -145,7 +145,7 @@ async function loadStorage() {
     const targets = [...st.targets].sort((a, b) => (b.bytes + b.thumb_bytes) - (a.bytes + a.thumb_bytes));
     $("storage-targets").innerHTML = targets.map(t => `
       <tr>
-        <td class="py-1.5 pr-4 whitespace-nowrap"><span class="text-[0.5625rem] font-bold uppercase px-1 py-0.5 rounded border mr-1.5 ${platformBadgeClass(t.platform)}">${escapeHtml(t.platform)}</span>@${escapeHtml(t.username)}</td>
+        <td class="py-1.5 pr-4 whitespace-nowrap"><span class="text-xs font-bold uppercase px-1 py-0.5 rounded border mr-1.5 ${platformBadgeClass(t.platform)}">${escapeHtml(t.platform)}</span>@${escapeHtml(t.username)}</td>
         <td class="py-1.5 pr-4 text-right font-mono">${t.files.toLocaleString()}</td>
         <td class="py-1.5 pr-4 text-right font-mono">${formatBytes(t.bytes)}</td>
         <td class="py-1.5 text-right font-mono text-slate-400">${formatBytes(t.thumb_bytes)}</td>
@@ -174,17 +174,17 @@ async function doClearQuarantine(btn) {
 
 async function doImport(file) {
   const out = $("import-result");
-  out.className = "text-[0.6875rem] font-mono text-slate-500";
+  out.className = "text-xs font-mono text-slate-500";
   out.textContent = "Importing…";
   try {
     const data = JSON.parse(await file.text());
     const res = await importAccounts(data, $("import-settings").checked);
-    out.className = `text-[0.6875rem] font-mono ${res.problems?.length ? TONES.warn : TONES.ok}`;
+    out.className = `text-xs font-mono ${res.problems?.length ? TONES.warn : TONES.ok}`;
     out.textContent = `Added ${res.added}, skipped ${res.skipped} existing.${res.problems?.length ? ` Problems: ${res.problems.join("; ")}` : ""}`;
     loadProgress();
     if ($("import-settings").checked) await loadConfig();
   } catch (err) {
-    out.className = `text-[0.6875rem] font-mono ${TONES.bad}`;
+    out.className = `text-xs font-mono ${TONES.bad}`;
     out.textContent = err instanceof SyntaxError ? "That file is not JSON." : err.message;
   } finally {
     $("import-file").value = "";
@@ -283,7 +283,7 @@ function syncFooter() {
   $("settings-save").disabled = !dirty || invalid;
   const label = $("settings-dirty");
   label.textContent = invalid ? "Fix the highlighted fields" : dirty ? "Unsaved changes" : "No changes";
-  label.className = `text-[0.6875rem] ${invalid ? TONES.bad : dirty ? TONES.warn : "text-slate-500 dark:text-zinc-400"}`;
+  label.className = `text-xs ${invalid ? TONES.bad : dirty ? TONES.warn : "text-slate-500 dark:text-zinc-400"}`;
 }
 
 export async function loadConfig() {

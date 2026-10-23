@@ -115,11 +115,11 @@ function renderSession() {
   const st = account.cookies;
   const status = $("ts-cookie-status");
   if (!st) {
-    status.className = "text-[0.6875rem] font-mono text-slate-400";
+    status.className = "text-xs font-mono text-slate-400";
     status.textContent = "Uses the shared session";
   } else {
     const h = cookieHealthFor(account.platform, st);
-    status.className = `text-[0.6875rem] font-mono ${h.tone === "ok" ? "text-emerald-600 dark:text-emerald-400" : h.tone === "warn" ? "text-amber-600" : "text-rose-600 dark:text-rose-400"}`;
+    status.className = `text-xs font-mono ${h.tone === "ok" ? "text-emerald-600 dark:text-emerald-400" : h.tone === "warn" ? "text-amber-600" : "text-rose-600 dark:text-rose-400"}`;
     status.textContent = `Own session · ${h.text}`;
   }
   $("ts-cookies-remove").classList.toggle("hidden", !st);
@@ -263,7 +263,7 @@ async function saveCookies(btn) {
       renderSession();
       toast("Own session saved for this target.", "success");
     } catch (err) {
-      $("ts-cookies-result").className = "text-[0.6875rem] font-mono text-rose-600 dark:text-rose-400";
+      $("ts-cookies-result").className = "text-xs font-mono text-rose-600 dark:text-rose-400";
       $("ts-cookies-result").textContent = err.message;
     }
   });
@@ -289,7 +289,7 @@ async function checkCookies(btn) {
   const out = $("ts-cookies-result");
   await withLoading(btn, async () => {
     const res = await checkSession(account.platform, account.username).catch(err => ({ ok: false, error: err.message }));
-    out.className = `text-[0.6875rem] font-mono ${res.ok ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`;
+    out.className = `text-xs font-mono ${res.ok ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`;
     out.textContent = res.ok ? `✓ Logged in as ${res.account}` : `✗ ${res.error}`;
   });
 }

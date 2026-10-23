@@ -140,7 +140,30 @@ export async function renderGallery() {
   }
 }
 
+const dayLabel = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+
+// labelDays heads each run of same-day tiles with its date, which tiles no longer carry. Idempotent, so it runs after
+// every page and every delete; a page that continues the previous day gets no second header.
+function labelDays(grid) {
+  grid.querySelectorAll(".day-header").forEach(h => {
+    if (!h.nextElementSibling?.classList.contains("gallery-item")) h.remove();
+  });
+  let prev = null;
+  grid.querySelectorAll(".gallery-item").forEach(item => {
+    const date = item.dataset.date || "";
+    if (date !== prev && !item.previousElementSibling?.classList.contains("day-header")) {
+      const d = new Date(`${date}T00:00:00Z`);
+      const h = document.createElement("h3");
+      h.className = "day-header col-span-full text-sm font-bold pt-3 pb-1.5 border-b border-slate-200 dark:border-zinc-800 first:pt-0";
+      h.textContent = isNaN(d) ? "Undated" : dayLabel.format(d);
+      item.before(h);
+    }
+    prev = date;
+  });
+}
+
 function afterInsert(container) {
+  if (container.id === "lg-container") labelDays(container);
   container.querySelectorAll("[data-next-url]").forEach(s => scrollObserver.observe(s));
   initVideoHoverPreviews(container);
   if (state.selecting) markSelected(container);
@@ -196,7 +219,7 @@ export function syncFilterUI() {
   const years = meta.years || [];
   $("year-dropdown-list").innerHTML = years.length
     ? years.map(y => `<button type="button" class="pill" data-action="toggle-year" data-value="${escapeHtml(y)}" aria-pressed="${state.years.has(y)}">${escapeHtml(y)}</button>`).join("")
-    : `<span class="text-[0.625rem] text-slate-400">No dated media</span>`;
+    : `<span class="text-xs text-slate-400">No dated media</span>`;
   $("month-dropdown-list").innerHTML = MONTHS.map((name, i) => {
     const v = String(i + 1).padStart(2, "0");
     return `<button type="button" class="pill justify-center" data-action="toggle-month" data-value="${v}" aria-pressed="${state.months.has(v)}">${name}</button>`;
@@ -210,9 +233,9 @@ export function syncFilterUI() {
   setPressed(tagBtn, state.tags.size > 0);
   $("hashtag-dropdown").innerHTML = tags.map(t => `
     <button type="button" class="menu-item ${state.tags.has(t.tag) ? "bg-[#ff9900]/15" : ""}" data-action="toggle-tag" data-value="${escapeHtml(t.tag)}" aria-pressed="${state.tags.has(t.tag)}">
-      <span class="w-3.5 h-3.5 rounded border flex items-center justify-center text-[0.5625rem] ${state.tags.has(t.tag) ? "bg-[#ff9900] border-[#ff9900] text-black" : "border-slate-300 dark:border-zinc-600"}">${state.tags.has(t.tag) ? "✓" : ""}</span>
+      <span class="w-3.5 h-3.5 rounded border flex items-center justify-center text-xs ${state.tags.has(t.tag) ? "bg-[#ff9900] border-[#ff9900] text-black" : "border-slate-300 dark:border-zinc-600"}">${state.tags.has(t.tag) ? "✓" : ""}</span>
       <span class="truncate flex-1">${escapeHtml(t.tag)}</span>
-      <span class="text-[0.5625rem] bg-slate-100 dark:bg-zinc-800 text-slate-500 px-1.5 rounded-full">${t.count}</span>
+      <span class="text-xs bg-slate-100 dark:bg-zinc-800 text-slate-500 px-1.5 rounded-full">${t.count}</span>
     </button>`).join("");
 
   // sort
@@ -274,7 +297,10 @@ export function resetFilters() {
 }
 
 onClick({
-  "view": (el) => setView(el.dataset.view),
+  "view": (el) => {
+    document.querySelectorAll("[popover]:popover-open").forEach(p => p.hidePopover());
+    setView(el.dataset.view);
+  },
   "type-filter": (el) => { state.filter = el.dataset.filter; filtersChanged(); },
   "toggle-sort": () => { state.sortAsc = !state.sortAsc; filtersChanged(); },
   "toggle-year": (el) => { toggleIn(state.years, el.dataset.value); filtersChanged(); },
@@ -381,6 +407,7 @@ async function deleteSelected() {
     const res = await deleteMediaApi(state.target.platform, state.target.username, files);
     const gone = new Set(files);
     $("lg-container").querySelectorAll(".gallery-item").forEach(i => { if (gone.has(i.dataset.filename)) i.remove(); });
+    labelDays($("lg-container"));
     setSelecting(false);
     toast(`Deleted ${res.deleted} files`, "success");
     refreshMeta();
@@ -437,7 +464,7 @@ function addItemData(lb) {
           <video src="${src}" controls playsinline preload="metadata" style="max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;border-radius:12px;box-shadow:0 25px 60px rgba(0,0,0,0.6);"></video>
           <div class="video-codec-fallback hidden flex-col items-center justify-center p-6 bg-zinc-900/95 text-white rounded-xl border border-zinc-800 text-center max-w-md gap-3 shadow-2xl">
             <p class="text-xs font-semibold text-zinc-200">Video format not supported by this browser.</p>
-            <p class="text-[0.6875rem] text-zinc-400">Download the file and play it in an external player like QuickTime or VLC.</p>
+            <p class="text-xs text-zinc-400">Download the file and play it in an external player like QuickTime or VLC.</p>
             <a href="${src}" download class="mt-2 bg-[#ff9900] hover:bg-[#e68a00] text-black font-bold text-xs px-4 py-2 rounded-lg">Download video</a>
           </div>
         </div>`;

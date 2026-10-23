@@ -243,6 +243,9 @@ func main() {
 	for _, u := range scraper.MigrateInstagramVideoNames(context.Background(), st.Posts, config.GetConfig().ThumbnailsDir) {
 		mediaIndex.Invalidate("instagram", u)
 	}
+	for _, u := range scraper.MigrateTikTokNames(config.GetConfig().ThumbnailsDir) {
+		mediaIndex.Invalidate("tiktok", u)
+	}
 	orch.SyncTargets(cfg.Accounts)
 
 	go func() {

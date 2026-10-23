@@ -36,12 +36,7 @@
   </div>
 
   <div class="flex items-center gap-1 sm:gap-2 flex-shrink-0">
-    <button data-action="open-add" class="hidden sm:inline-flex btn btn-primary" title="Add target account">
-      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="12" x2="12" y1="5" y2="19"></line><line x1="5" x2="19" y1="12" y2="12"></line></svg>
-      <span class="hidden lg:inline">Add Target</span>
-    </button>
-
-    <div id="global-sync-status" class="hidden xl:flex items-center gap-2 text-[0.6875rem] font-semibold px-2.5 py-1 rounded-full border bg-slate-100 dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-800 transition-all">
+    <div id="global-sync-status" class="hidden xl:flex items-center gap-2 text-xs font-semibold px-2.5 py-1 rounded-full border bg-slate-100 dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-800 transition-all">
       <span id="global-status-dot" class="w-2 h-2 rounded-full bg-slate-400"></span>
       <span id="global-status-text">Idle</span>
     </div>
@@ -79,7 +74,7 @@
         <button id="target-search-clear" data-action="clear-target-filter" aria-label="Clear filter" class="hidden absolute right-2 text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 text-xs">✕</button>
       </div>
 
-      <div class="seg text-[0.6875rem]" id="target-platform-chips">
+      <div class="seg text-xs" id="target-platform-chips">
         <button aria-pressed="true" data-action="platform-filter" data-platform="all">All</button>
         <button aria-pressed="false" data-action="platform-filter" data-platform="instagram">IG</button>
         <button aria-pressed="false" data-action="platform-filter" data-platform="twitter">X</button>
@@ -91,12 +86,12 @@
       <p class="text-xs text-slate-500 dark:text-zinc-400 py-6 text-center">Loading targets...</p>
     </div>
 
-    <div class="flex-shrink-0 pt-2 border-t border-slate-200 dark:border-zinc-800/80 flex justify-between items-center text-[0.6875rem] text-slate-500 dark:text-zinc-400">
+    <div class="flex-shrink-0 pt-2 border-t border-slate-200 dark:border-zinc-800/80 flex justify-between items-center text-xs text-slate-500 dark:text-zinc-400">
       <div class="flex items-center gap-1.5">
         <span class="w-2 h-2 rounded-full bg-emerald-500" id="autoupdate-dot"></span>
         <span id="autoupdate-text">Auto-Sync: Ready</span>
       </div>
-      <button data-action="open-shortcuts" class="font-mono text-[0.625rem] opacity-75 hover:opacity-100 cursor-pointer" title="Keyboard shortcuts (?)"><span id="sidebar-count-label"></span> · <span class="kbd">?</span></button>
+      <button data-action="open-shortcuts" class="font-mono text-xs opacity-75 hover:opacity-100 cursor-pointer" title="Keyboard shortcuts (?)"><span id="sidebar-count-label"></span> · <span class="kbd">?</span></button>
     </div>
   </aside>
 
@@ -106,13 +101,13 @@
     <div class="flex-col gap-4 flex-shrink-0 hidden" id="dashboard-target-header">
       <div class="flex justify-between items-center flex-wrap gap-3 pb-2 border-b border-slate-200 dark:border-zinc-800/80">
         <div class="flex items-center gap-3 min-w-0">
-          <span class="text-[0.625rem] font-bold uppercase px-2 py-0.5 rounded border" id="dashboard-platform-badge"></span>
+          <span class="text-xs font-bold uppercase px-2 py-0.5 rounded border" id="dashboard-platform-badge"></span>
           <h1 class="text-base font-bold text-slate-900 dark:text-zinc-100 truncate" id="dashboard-username-label"></h1>
           <span class="text-xs bg-slate-100 dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 px-2.5 py-0.5 rounded-full border border-slate-200 dark:border-zinc-800 font-mono font-medium whitespace-nowrap" id="dashboard-file-count"></span>
         </div>
 
         <div class="flex items-center gap-2">
-          <div id="dashboard-progress" class="hidden items-center gap-2 text-[0.6875rem] font-mono text-slate-500 dark:text-zinc-400">
+          <div id="dashboard-progress" class="hidden items-center gap-2 text-xs font-mono text-slate-500 dark:text-zinc-400">
             <div class="w-24 h-1.5 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden"><div class="h-full bg-[#ff9900] transition-all duration-300" id="dashboard-progress-bar"></div></div>
             <span id="dashboard-progress-label"></span>
           </div>
@@ -137,13 +132,9 @@
               Force full resync
             </button>
             <div class="my-1 border-t border-slate-100 dark:border-zinc-800"></div>
-            <button class="menu-item danger" data-action="clear-active">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"></path><line x1="18" y1="9" x2="12" y2="15"></line><line x1="12" y1="9" x2="18" y2="15"></line></svg>
-              Erase all downloaded files…
-            </button>
-            <button class="menu-item danger" data-action="delete-active">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="18" y1="8" x2="23" y2="13"></line><line x1="23" y1="8" x2="18" y2="13"></line></svg>
-              Remove target (keep files)…
+            <button class="menu-item" data-action="view" data-view="settings">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>
+              Target settings…
             </button>
           </div>
         </div>
@@ -186,7 +177,7 @@
             <div class="flex flex-col gap-2.5">
               <div class="flex justify-between items-center border-b border-slate-100 dark:border-zinc-800 pb-2">
                 <span class="label">Date Range</span>
-                <button data-action="clear-dates" class="btn-link text-[0.6875rem]">Reset</button>
+                <button data-action="clear-dates" class="btn-link text-xs">Reset</button>
               </div>
               <div class="flex flex-col gap-1">
                 <span class="label">Years</span>
@@ -233,7 +224,7 @@
               <div class="card p-4 flex items-center justify-between gap-4">
                 <div>
                   <h3 class="text-xs font-bold">Automatic sync</h3>
-                  <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400 mt-0.5" id="ts-pause-help">Included in every auto-sync run.</p>
+                  <p class="text-xs text-slate-500 dark:text-zinc-400 mt-0.5" id="ts-pause-help">Included in every auto-sync run.</p>
                 </div>
                 <button type="button" role="switch" aria-checked="true" id="ts-pause" data-action="toggle-pause-active"
                         class="relative w-10 h-6 rounded-full transition-colors bg-slate-300 dark:bg-zinc-700 aria-checked:bg-[#ff9900] cursor-pointer flex-shrink-0" aria-label="Include in auto-sync">
@@ -250,17 +241,17 @@
                     <label class="flex items-center gap-2 text-xs cursor-pointer"><input class="accent-[#ff9900]" name="download_photos" type="checkbox"/><span>Photos</span></label>
                     <label class="flex items-center gap-2 text-xs cursor-pointer"><input class="accent-[#ff9900]" name="download_videos" type="checkbox"/><span>Videos</span></label>
                   </div>
-                  <p class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="media">Pick at least photos or videos.</p>
+                  <p class="text-xs text-rose-600 dark:text-rose-400 hidden" data-error="media">Pick at least photos or videos.</p>
                 </section>
 
                 <section class="card p-4 flex flex-col gap-2" data-only="twitter">
                   <h3 class="text-xs font-bold">Keyword filters</h3>
-                  <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400">Only posts whose text contains <strong>at least one</strong> of these words are downloaded. Matching ignores case and also hits inside words (“cat” matches “catwalk”). Empty means everything.</p>
+                  <p class="text-xs text-slate-500 dark:text-zinc-400">Only posts whose text contains <strong>at least one</strong> of these words are downloaded. Matching ignores case and also hits inside words (“cat” matches “catwalk”). Empty means everything.</p>
                   <div class="flex flex-col gap-2 bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-lg p-2.5">
                     <div class="flex flex-wrap gap-1.5" data-chips="ts"></div>
                     <input class="input bg-white dark:bg-zinc-900 px-2.5 py-1.5" data-chip-input="ts" placeholder="Type a keyword and press Enter…" type="text" aria-label="Add keyword filter"/>
                   </div>
-                  <p class="text-[0.6875rem] font-mono text-slate-500 dark:text-zinc-400" id="ts-filter-preview"></p>
+                  <p class="text-xs font-mono text-slate-500 dark:text-zinc-400" id="ts-filter-preview"></p>
                 </section>
 
                 <section class="card p-4 flex flex-col gap-3">
@@ -269,14 +260,14 @@
                     <label class="flex flex-col gap-1">
                       <span class="label">Oldest post date</span>
                       <input type="date" name="since" class="input px-2.5 py-1.5 font-mono"/>
-                      <span class="text-[0.625rem] text-slate-400">Nothing older is downloaded. Empty = no limit.</span>
-                      <span class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="since"></span>
+                      <span class="text-xs text-slate-400">Nothing older is downloaded. Empty = no limit.</span>
+                      <span class="text-xs text-rose-600 dark:text-rose-400 hidden" data-error="since"></span>
                     </label>
                     <label class="flex flex-col gap-1">
                       <span class="label">Post limit for a full sync</span>
                       <input type="number" name="max_posts" min="0" max="100000" placeholder="no limit" class="input px-2.5 py-1.5 font-mono"/>
-                      <span class="text-[0.625rem] text-slate-400">Caps the first sync and forced full resyncs. Regular syncs fetch everything new.</span>
-                      <span class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="max_posts"></span>
+                      <span class="text-xs text-slate-400">Caps the first sync and forced full resyncs. Regular syncs fetch everything new.</span>
+                      <span class="text-xs text-rose-600 dark:text-rose-400 hidden" data-error="max_posts"></span>
                     </label>
                   </div>
                 </section>
@@ -294,26 +285,26 @@
             <div class="flex flex-col gap-4 min-w-0">
               <section class="card p-4 flex flex-col gap-2">
                 <h3 class="text-xs font-bold">Handle</h3>
-                <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400">If the account was renamed on the platform, update it here. Downloads, posts and history move along.</p>
+                <p class="text-xs text-slate-500 dark:text-zinc-400">If the account was renamed on the platform, update it here. Downloads, posts and history move along.</p>
                 <div class="flex gap-2">
                   <input type="text" id="ts-username" class="input px-2.5 py-1.5 font-mono" autocomplete="off" spellcheck="false" aria-label="Username"/>
                   <button type="button" class="btn btn-secondary" data-action="ts-rename" id="ts-rename-btn" disabled>Rename</button>
                 </div>
-                <span class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" id="ts-rename-error"></span>
+                <span class="text-xs text-rose-600 dark:text-rose-400 hidden" id="ts-rename-error"></span>
               </section>
 
               <section class="card p-4 flex flex-col gap-2">
                 <div class="flex items-center justify-between gap-2">
                   <h3 class="text-xs font-bold">Own session <span class="font-normal text-slate-400">· optional</span></h3>
-                  <span class="text-[0.6875rem] font-mono" id="ts-cookie-status"></span>
+                  <span class="text-xs font-mono" id="ts-cookie-status"></span>
                 </div>
-                <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400">Paste a cookie export of a different logged-in account to scrape this target with it instead of the shared session from Settings. Useful for private accounts that only that login follows, and to spread load across accounts.</p>
+                <p class="text-xs text-slate-500 dark:text-zinc-400">Paste a cookie export of a different logged-in account to scrape this target with it instead of the shared session from Settings. Useful for private accounts that only that login follows, and to spread load across accounts.</p>
                 <textarea id="ts-cookies" rows="3" spellcheck="false" class="input p-2.5 font-mono resize-y" placeholder="# Netscape HTTP Cookie File …  or  [ {&quot;domain&quot;: …} ]"></textarea>
                 <div class="flex flex-wrap gap-2 items-center">
                   <button type="button" class="btn btn-secondary" data-action="ts-cookies-save">Save session</button>
                   <button type="button" class="btn btn-secondary" data-action="ts-cookies-check" id="ts-cookies-check">Check</button>
                   <button type="button" class="btn-link text-rose-600 dark:text-rose-400 hidden" data-action="ts-cookies-remove" id="ts-cookies-remove">Remove own session</button>
-                  <span class="text-[0.6875rem] font-mono" id="ts-cookies-result"></span>
+                  <span class="text-xs font-mono" id="ts-cookies-result"></span>
                 </div>
               </section>
 
@@ -332,8 +323,8 @@
           <section class="card p-4 flex flex-col gap-2">
             <h3 class="text-xs font-bold">Sync history</h3>
             <div class="overflow-x-auto">
-              <table class="min-w-full text-left text-[0.6875rem]">
-                <thead class="text-[0.5625rem] font-bold text-slate-400 uppercase tracking-wider font-mono">
+              <table class="min-w-full text-left text-xs">
+                <thead class="text-xs font-semibold text-slate-500 dark:text-zinc-400">
                   <tr><th class="py-1.5 pr-4">Started</th><th class="py-1.5 pr-4">Took</th><th class="py-1.5 pr-4">Result</th><th class="py-1.5 pr-4">New</th><th class="py-1.5">Details</th></tr>
                 </thead>
                 <tbody id="ts-runs" class="divide-y divide-slate-100 dark:divide-zinc-800/60"></tbody>
@@ -375,17 +366,17 @@
     <div class="flex items-center gap-3 min-w-0">
       <div class="flex items-center gap-1.5 flex-shrink-0">
         <span class="w-2 h-2 rounded-full bg-emerald-500" id="dock-status-dot"></span>
-        <span class="font-bold text-slate-900 dark:text-zinc-200 text-[0.6875rem] uppercase tracking-wider">Activity</span>
+        <span class="font-bold text-slate-900 dark:text-zinc-200 text-xs uppercase tracking-wider">Activity</span>
       </div>
       <span class="hidden sm:inline text-slate-300 dark:text-zinc-700">|</span>
-      <span class="hidden sm:inline font-mono text-[0.6875rem] text-slate-500 dark:text-zinc-400 truncate" id="dock-latest-log">Dashboard initialized.</span>
+      <span class="hidden sm:inline font-mono text-xs text-slate-500 dark:text-zinc-400 truncate" id="dock-latest-log">Dashboard initialized.</span>
     </div>
 
     <div class="flex items-center gap-2 flex-shrink-0">
       <div class="hidden seg p-0.5" id="dock-terminal-level-filters">
-        <button class="text-[0.625rem] px-2 py-0.5" aria-pressed="true" data-action="log-level" data-level="all">ALL</button>
-        <button class="text-[0.625rem] px-2 py-0.5" aria-pressed="false" data-action="log-level" data-level="info">INFO</button>
-        <button class="text-[0.625rem] px-2 py-0.5" aria-pressed="false" data-action="log-level" data-level="error">ERR</button>
+        <button class="text-xs px-2 py-0.5" aria-pressed="true" data-action="log-level" data-level="all">ALL</button>
+        <button class="text-xs px-2 py-0.5" aria-pressed="false" data-action="log-level" data-level="info">INFO</button>
+        <button class="text-xs px-2 py-0.5" aria-pressed="false" data-action="log-level" data-level="error">ERR</button>
       </div>
       <button data-action="copy-logs" class="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 rounded" title="Copy logs" aria-label="Copy logs">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect height="13" rx="2" ry="2" width="13" x="9" y="9"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
@@ -396,7 +387,7 @@
     </div>
   </div>
 
-  <div class="bg-slate-950 p-3 font-mono text-[0.6875rem] leading-relaxed text-zinc-300 overflow-y-auto flex-col gap-1 shadow-inner h-60 max-h-[60vh] hidden" id="terminal-body"></div>
+  <div class="bg-slate-950 p-3 font-mono text-xs leading-relaxed text-zinc-300 overflow-y-auto flex-col gap-1 shadow-inner h-60 max-h-[60vh] hidden" id="terminal-body"></div>
 </div>
 
 <!-- Command palette -->
@@ -442,7 +433,7 @@
     <div class="flex flex-col gap-1.5">
       <label class="label" for="add-input">Profile links or @handles</label>
       <textarea id="add-input" rows="2" autocomplete="off" spellcheck="false" class="input px-3.5 py-2.5 font-mono resize-y" placeholder="x.com/name&#10;instagram.com/other&#10;@handle" data-input-action="add-input"></textarea>
-      <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500">Paste one or many — one per line. Links pick their platform; bare handles use the platform below.</p>
+      <p class="text-xs text-slate-400 dark:text-zinc-500">Paste one or many — one per line. Links pick their platform; bare handles use the platform below.</p>
     </div>
 
     <div class="flex flex-wrap items-center justify-between gap-2">
@@ -470,7 +461,7 @@
           <div class="flex flex-wrap gap-1.5" data-chips="add"></div>
           <input class="input bg-white dark:bg-zinc-950 px-2.5 py-1.5" id="add-filter-input" data-chip-input="add" placeholder="Type a keyword and press Enter…" type="text"/>
         </div>
-        <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500">Only posts whose text contains at least one keyword are downloaded (case-insensitive). Leave empty to take everything.</p>
+        <p class="text-xs text-slate-400 dark:text-zinc-500">Only posts whose text contains at least one keyword are downloaded (case-insensitive). Leave empty to take everything.</p>
       </div>
     </div>
 
@@ -489,7 +480,7 @@
         <input type="date" id="add-since" class="input w-40 px-2.5 py-1.5 font-mono"/>
         <span class="text-slate-500 dark:text-zinc-400">nothing older is ever downloaded</span>
       </div>
-      <p class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" id="add-depth-error"></p>
+      <p class="text-xs text-rose-600 dark:text-rose-400 hidden" id="add-depth-error"></p>
     </div>
 
     <label class="flex items-center gap-2 text-xs cursor-pointer border-t border-slate-200 dark:border-zinc-800/80 pt-3">
@@ -528,24 +519,24 @@
           <div class="flex flex-col gap-1.5 cookie-field">
             <div class="flex items-center justify-between gap-2">
               <label class="text-xs font-bold text-slate-800 dark:text-zinc-200" data-slot="label"></label>
-              <span class="text-[0.625rem] text-slate-400 font-mono">Netscape or Cookie-Editor JSON</span>
+              <span class="text-xs text-slate-400 font-mono">Netscape or Cookie-Editor JSON</span>
             </div>
-            <div class="flex flex-wrap items-center justify-between gap-2 text-[0.6875rem] font-mono">
+            <div class="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
               <span data-slot="status"></span>
               <span class="flex items-center gap-3">
-                <button type="button" class="btn-link text-[0.6875rem]" data-action="check-session">Check now</button>
-                <button type="button" class="hidden text-[0.6875rem] font-semibold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" data-action="remove-cookies">Remove saved</button>
+                <button type="button" class="btn-link text-xs" data-action="check-session">Check now</button>
+                <button type="button" class="hidden text-xs font-semibold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer" data-action="remove-cookies">Remove saved</button>
               </span>
             </div>
-            <span class="text-[0.6875rem] font-mono" data-slot="check"></span>
+            <span class="text-xs font-mono" data-slot="check"></span>
             <textarea class="input p-3 font-mono resize-y min-h-24 leading-relaxed" rows="4" spellcheck="false"></textarea>
-            <p class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-slot="error"></p>
-            <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500" data-slot="help"></p>
+            <p class="text-xs text-rose-600 dark:text-rose-400 hidden" data-slot="error"></p>
+            <p class="text-xs text-slate-400 dark:text-zinc-500" data-slot="help"></p>
           </div>
         </template>
         <div id="cookie-fields" class="flex flex-col gap-5"></div>
-        <p class="text-[0.625rem] font-mono text-slate-400 dark:text-zinc-500 -mt-3" id="ig-session-status"></p>
-        <p class="text-[0.6875rem] text-slate-500 dark:text-zinc-400" id="own-session-count"></p>
+        <p class="text-xs font-mono text-slate-400 dark:text-zinc-500 -mt-3" id="ig-session-status"></p>
+        <p class="text-xs text-slate-500 dark:text-zinc-400" id="own-session-count"></p>
       </section>
 
       <!-- Sync -->
@@ -566,8 +557,8 @@
             <input class="input w-24 px-2.5 py-1.5 font-mono" id="auto-sync-interval" min="0" max="168" step="1" type="number"/>
             <span>hours (1–168)</span>
           </label>
-          <p class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="interval"></p>
-          <p class="text-[0.625rem] text-slate-400" id="interval-hint"></p>
+          <p class="text-xs text-rose-600 dark:text-rose-400 hidden" data-error="interval"></p>
+          <p class="text-xs text-slate-400" id="interval-hint"></p>
         </div>
 
         <div class="flex flex-col gap-2">
@@ -579,8 +570,8 @@
             <select id="quiet-to" class="input w-20 px-2 py-1.5 font-mono"></select>
             <span class="text-slate-400">server time</span>
           </div>
-          <p class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="quiet"></p>
-          <p class="text-[0.625rem] text-slate-400">Manual syncs still run. A run that reaches quiet hours leaves the remaining targets for the next one.</p>
+          <p class="text-xs text-rose-600 dark:text-rose-400 hidden" data-error="quiet"></p>
+          <p class="text-xs text-slate-400">Manual syncs still run. A run that reaches quiet hours leaves the remaining targets for the next one.</p>
         </div>
 
         <div class="flex flex-col gap-2">
@@ -589,13 +580,13 @@
             <input type="number" id="max-concurrent" min="1" max="8" class="input w-20 px-2.5 py-1.5 font-mono"/>
             <span class="text-slate-500 dark:text-zinc-400">targets at once (1–8). Lower is gentler on the platforms; X targets always run one at a time.</span>
           </div>
-          <p class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="concurrency"></p>
+          <p class="text-xs text-rose-600 dark:text-rose-400 hidden" data-error="concurrency"></p>
         </div>
 
         <div class="flex items-center justify-between gap-4 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
           <div>
             <span class="text-xs font-bold">Force full resync of all targets</span>
-            <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500 mt-0.5">Rescans every feed from the start to pick up anything missed. Existing files are kept.</p>
+            <p class="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">Rescans every feed from the start to pick up anything missed. Existing files are kept.</p>
           </div>
           <button class="btn btn-secondary" data-action="full-resync-all" type="button">Full Resync All</button>
         </div>
@@ -606,7 +597,7 @@
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-3" id="storage-summary"></div>
         <div class="overflow-x-auto">
           <table class="min-w-full text-left text-xs">
-            <thead class="text-[0.5625rem] font-bold text-slate-400 uppercase tracking-wider font-mono">
+            <thead class="text-xs font-semibold text-slate-500 dark:text-zinc-400">
               <tr><th class="py-1.5 pr-4">Target</th><th class="py-1.5 pr-4 text-right">Files</th><th class="py-1.5 pr-4 text-right">Media</th><th class="py-1.5 text-right">Thumbnails</th></tr>
             </thead>
             <tbody id="storage-targets" class="divide-y divide-slate-100 dark:divide-zinc-800/60"></tbody>
@@ -615,20 +606,20 @@
         <div class="flex items-center justify-between gap-4 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
           <div>
             <span class="text-xs font-bold">Quarantine</span>
-            <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500 mt-0.5" id="quarantine-info">Truncated downloads set aside by the integrity check; their targets were already re-queued.</p>
+            <p class="text-xs text-slate-400 dark:text-zinc-500 mt-0.5" id="quarantine-info">Truncated downloads set aside by the integrity check; their targets were already re-queued.</p>
           </div>
           <button class="btn btn-secondary text-rose-600 dark:text-rose-400" data-action="clear-quarantine" type="button" id="btn-clear-quarantine">Delete</button>
         </div>
         <label class="flex flex-col gap-1 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
           <span class="text-xs font-bold">Thumbnails folder</span>
           <input type="text" id="thumbnails-dir" spellcheck="false" placeholder="inside downloads/ (default)" class="input px-2.5 py-1.5 font-mono"/>
-          <span class="text-[0.625rem] text-slate-400">A folder on fast storage (SSD) makes grids load quicker. Missing previews are generated on demand; existing ones are copied over on the next restart.</span>
+          <span class="text-xs text-slate-400">A folder on fast storage (SSD) makes grids load quicker. Missing previews are generated on demand; existing ones are copied over on the next restart.</span>
         </label>
         <label class="flex flex-col gap-1">
           <span class="text-xs font-bold">Instagram browser sidecar URL <span class="font-normal text-slate-400">· advanced</span></span>
           <input type="url" id="sidecar-url" spellcheck="false" placeholder="http://camoufox:8000" class="input px-2.5 py-1.5 font-mono"/>
-          <span class="text-[0.625rem] text-rose-600 dark:text-rose-400 hidden" data-error="sidecar"></span>
-          <span class="text-[0.625rem] text-slate-400">When set, Instagram is scraped through the camoufox browser container instead of direct API calls.</span>
+          <span class="text-xs text-rose-600 dark:text-rose-400 hidden" data-error="sidecar"></span>
+          <span class="text-xs text-slate-400">When set, Instagram is scraped through the camoufox browser container instead of direct API calls.</span>
         </label>
       </section>
 
@@ -637,18 +628,18 @@
         <div class="flex items-center justify-between gap-4">
           <div>
             <span class="text-xs font-bold">Export targets</span>
-            <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500 mt-0.5">Downloads every target with its options plus the sync settings as JSON. Cookies and sessions are never included.</p>
+            <p class="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">Downloads every target with its options plus the sync settings as JSON. Cookies and sessions are never included.</p>
           </div>
           <a class="btn btn-secondary" href="/api/accounts/export" download>Export</a>
         </div>
         <div class="flex flex-col gap-2 border-t border-slate-200 dark:border-zinc-800/80 pt-4">
           <span class="text-xs font-bold">Import targets</span>
-          <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500">Adds targets from an export. Targets that already exist are left as they are.</p>
+          <p class="text-xs text-slate-400 dark:text-zinc-500">Adds targets from an export. Targets that already exist are left as they are.</p>
           <label class="flex items-center gap-2 text-xs cursor-pointer"><input type="checkbox" id="import-settings" class="accent-[#ff9900]"/>Also replace sync settings (interval, quiet hours, parallel syncs)</label>
           <div class="flex items-center gap-2">
             <input type="file" id="import-file" accept="application/json,.json" class="text-xs file:mr-2 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-slate-200 file:bg-white file:font-semibold file:cursor-pointer dark:file:bg-zinc-900 dark:file:border-zinc-800 dark:file:text-zinc-300"/>
           </div>
-          <p class="text-[0.6875rem] font-mono" id="import-result"></p>
+          <p class="text-xs font-mono" id="import-result"></p>
         </div>
       </section>
 
@@ -657,7 +648,7 @@
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <span class="text-xs font-bold">Interface size</span>
-            <p class="text-[0.625rem] text-slate-400 dark:text-zinc-500 mt-0.5">On top of automatic scaling for the window width. Saved in this browser.</p>
+            <p class="text-xs text-slate-400 dark:text-zinc-500 mt-0.5">On top of automatic scaling for the window width. Saved in this browser.</p>
           </div>
           <div class="seg" role="group" aria-label="Interface size">
             <button type="button" data-action="ui-scale" data-scale="0.875" aria-pressed="false">S</button>
@@ -678,7 +669,7 @@
     </div>
 
     <div class="flex items-center justify-between gap-3 px-6 py-3 border-t border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60">
-      <span class="text-[0.6875rem] text-slate-500 dark:text-zinc-400" id="settings-dirty">No changes</span>
+      <span class="text-xs text-slate-500 dark:text-zinc-400" id="settings-dirty">No changes</span>
       <div class="flex gap-2">
         <button class="btn btn-secondary" data-action="close-dialog" type="button">Close</button>
         <button class="btn btn-primary" type="submit" id="settings-save" disabled>Save</button>

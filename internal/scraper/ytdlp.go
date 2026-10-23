@@ -69,6 +69,10 @@ func updateYTDLP(parent context.Context) {
 	slog.Info("yt-dlp self-update done", "output", strings.TrimSpace(string(out)))
 }
 
+// ytdlpOutput names videos <UTC date>_<id>, the igDatePrefix layout the gallery reads dates from. yt-dlp skips a video
+// whose file already exists, so MigrateTikTokNames must produce exactly this name for the older id-only files.
+const ytdlpOutput = "%(timestamp>%Y-%m-%d_%H-%M-%S,upload_date>%Y-%m-%d_00-00-00)s_%(id)s.%(ext)s"
+
 // ScrapeYTDLP downloads videos from TikTok via yt-dlp. Optional Netscape cookies from config are written to a temp file and cleaned up after.
 func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 	platform := t.Platform
@@ -94,7 +98,7 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 		SocketTimeout(15).
 		ExtractorRetries("1").
 		Paths(outputDir).
-		Output("%(id)s.%(ext)s").
+		Output(ytdlpOutput).
 		ProgressFunc(3*time.Second, func(u ytdlp.ProgressUpdate) {
 			slog.Info("Downloading video stream", "platform", platform, "user", username, "filename", filepath.Base(u.Filename), "percent", u.PercentString(), "status", u.Status)
 		})
