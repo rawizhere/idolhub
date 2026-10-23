@@ -33,7 +33,9 @@ type Options struct {
 	InstagramCookies    string
 	InstagramSidecarURL string
 	TikTokCookies       string
-	Posts               *store.PostStore
+	// ThumbnailsDir is the fast-preview root; renames carry previews along to keep them findable.
+	ThumbnailsDir string
+	Posts         *store.PostStore
 	// Since is the oldest post date a sync fetches; zero means unbounded.
 	Since time.Time
 	// MaxPosts caps the number of posts taken; the orchestrator only sets it when there is no watermark.
