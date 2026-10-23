@@ -11,3 +11,13 @@ services:
     environment:
       - TZ=${TZ:-Europe/Moscow}
       - PORT=8080
+      # PO-token provider for YouTube downloads; runs in the gemfactory stack
+      - BGUTIL_POT_URL=${BGUTIL_POT_URL:-}
+    networks:
+      - default
+      - gemfactory
+
+networks:
+  gemfactory:
+    external: true
+    name: gemfactory_gemfactory

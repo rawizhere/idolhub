@@ -22,7 +22,7 @@ func MigrateTikTokNames(thumbsDir string) []string {
 		if !a.IsDir() || strings.HasPrefix(a.Name(), ".") {
 			continue
 		}
-		SeedTikTokArchive(a.Name())
+		SeedArchiveFromFiles("tiktok", a.Name())
 		if n := NormalizeTikTokNames(filepath.Join(root, a.Name()), thumbsDir, a.Name()); n > 0 {
 			changed = append(changed, a.Name())
 			slog.Info("TikTok file name migration", "user", a.Name(), "renamed", n)
@@ -82,39 +82,62 @@ func ttVideoID(name string) (id, ext string, ok bool) {
 	return id, ext, true
 }
 
-// TikTokArchivePath is the yt-dlp download archive of one target: videos are skipped by id, so TikTok's drifting
-// reported timestamp cannot cause a re-download the way a name mismatch does. Dot-prefixed so media walks skip it.
-func TikTokArchivePath(username string) string {
-	return filepath.Join(mediaRoot, "tiktok", "."+username+".archive.txt")
+// MediaArchivePath is the yt-dlp download archive of one target: entries are skipped by id, so a metadata timestamp
+// drift cannot cause a re-download the way a name mismatch does. Dot-prefixed so media walks skip it.
+func MediaArchivePath(platform, username string) string {
+	return filepath.Join(mediaRoot, platform, "."+username+".archive.txt")
 }
 
-// SeedTikTokArchive records every video already on disk in the target's download archive. Without it the first sync
-// after this change would re-download the whole library once.
-func SeedTikTokArchive(username string) {
-	dir := filepath.Join(mediaRoot, "tiktok", username)
+// SeedArchiveFromFiles records every id-named video already on disk in the target's download archive. Without it the
+// first sync after the archive was introduced would re-download the whole library once. TikTok only: its numeric ids
+// are recoverable from the file name; other platforms seed from yt-dlp's own listing.
+func SeedArchiveFromFiles(platform, username string) {
+	dir := filepath.Join(mediaRoot, platform, username)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
 	seen := map[string]bool{}
-	if b, err := os.ReadFile(TikTokArchivePath(username)); err == nil {
+	if b, err := os.ReadFile(MediaArchivePath(platform, username)); err == nil {
 		for _, line := range strings.Fields(string(b)) {
-			seen[strings.TrimPrefix(line, "tiktok ")] = true
+			seen[strings.TrimPrefix(line, platform+" ")] = true
 		}
 	}
 	var add []string
 	for _, e := range entries {
 		if id, _, ok := ttVideoID(e.Name()); ok && !seen[id] {
 			seen[id] = true
-			add = append(add, "tiktok "+id)
+			add = append(add, platform+" "+id)
 		}
 	}
+	writeArchiveSeed(platform, username, add)
+}
+
+// seedArchiveIDs appends yt-dlp archive lines for ids the extractor actually saw.
+func seedArchiveIDs(platform, username string, ids []string) {
+	seen := map[string]bool{}
+	if b, err := os.ReadFile(MediaArchivePath(platform, username)); err == nil {
+		for _, line := range strings.Fields(string(b)) {
+			seen[strings.TrimPrefix(line, platform+" ")] = true
+		}
+	}
+	var add []string
+	for _, id := range ids {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			add = append(add, platform+" "+id)
+		}
+	}
+	writeArchiveSeed(platform, username, add)
+}
+
+func writeArchiveSeed(platform, username string, add []string) {
 	if len(add) == 0 {
 		return
 	}
-	f, err := os.OpenFile(TikTokArchivePath(username), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(MediaArchivePath(platform, username), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
-		slog.Warn("Failed to open TikTok download archive", "error", err)
+		slog.Warn("Failed to open download archive", "platform", platform, "user", username, "error", err)
 		return
 	}
 	_, err = f.WriteString(strings.Join(add, "\n") + "\n")
@@ -122,8 +145,8 @@ func SeedTikTokArchive(username string) {
 		err = err2
 	}
 	if err != nil {
-		slog.Warn("Failed to write TikTok download archive", "error", err)
+		slog.Warn("Failed to write download archive", "platform", platform, "user", username, "error", err)
 		return
 	}
-	slog.Info("Seeded TikTok download archive", "user", username, "ids", len(add))
+	slog.Info("Seeded download archive", "platform", platform, "user", username, "ids", len(add))
 }

@@ -33,6 +33,7 @@ type Options struct {
 	InstagramCookies    string
 	InstagramSidecarURL string
 	TikTokCookies       string
+	YouTubeCookies      string
 	// ThumbnailsDir is the fast-preview root; renames carry previews along to keep them findable.
 	ThumbnailsDir string
 	Posts         *store.PostStore
@@ -57,6 +58,7 @@ var registry = map[string]scrapeFunc{
 	"twitter":   ScrapeTwitterUser,
 	"instagram": ScrapeInstagramUser,
 	"tiktok":    ScrapeYTDLP,
+	"youtube":   ScrapeYTDLP,
 }
 
 func Get(platform string) (scrapeFunc, bool) {

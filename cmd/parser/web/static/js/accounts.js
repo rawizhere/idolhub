@@ -14,7 +14,9 @@ export function parseProfileInput(raw) {
   const patterns = [
     [/(?:https?:\/\/)?(?:www\.)?instagram\.com\/([a-zA-Z0-9_.]+)/i, "instagram"],
     [/(?:https?:\/\/)?(?:www\.|mobile\.)?(?:twitter\.com|x\.com)\/([a-zA-Z0-9_]+)/i, "twitter"],
-    [/(?:https?:\/\/)?(?:www\.|m\.)?tiktok\.com\/@([a-zA-Z0-9_.]+)/i, "tiktok"]
+    [/(?:https?:\/\/)?(?:www\.|m\.)?tiktok\.com\/@([a-zA-Z0-9_.]+)/i, "tiktok"],
+    [/(?:https?:\/\/)?(?:www\.)?youtube\.com\/@([a-zA-Z0-9_.-]+)/i, "youtube"],
+    [/(?:https?:\/\/)?(?:www\.)?youtube\.com\/channel\/([a-zA-Z0-9_-]+)/i, "youtube"]
   ];
   for (const [re, platform] of patterns) {
     const m = val.match(re);

@@ -12,7 +12,8 @@ const dialog = () => $("settings-dialog");
 const COOKIE_FIELDS = [
   { platform: "twitter", key: "twitter_cookies", label: "Twitter / X", help: "Export of x.com cookies while logged in. auth_token and ct0 are required; device cookies (kdt, twid) keep the session looking like its browser." },
   { platform: "instagram", key: "instagram_cookies", label: "Instagram", help: "Export of instagram.com cookies. sessionid is required; mid, ig_did and datr keep the scraper looking like the browser the session came from." },
-  { platform: "tiktok", key: "tiktok_cookies", label: "TikTok", help: "Export of tiktok.com cookies, handed to yt-dlp. Only needed for age-restricted or private videos. TikTok has no cheap online check." }
+  { platform: "tiktok", key: "tiktok_cookies", label: "TikTok", help: "Export of tiktok.com cookies, handed to yt-dlp. Only needed for age-restricted or private videos. TikTok has no cheap online check." },
+  { platform: "youtube", key: "youtube_cookies", label: "YouTube", help: "Export of youtube.com cookies while logged in, handed to yt-dlp. Only needed when YouTube bot-checks the host; public shorts usually work without." }
 ];
 const PRESETS = [0, 1, 3, 6, 12, 24];
 const TONES = { ok: "text-emerald-600 dark:text-emerald-400", warn: "text-amber-600 dark:text-amber-400", bad: "text-rose-600 dark:text-rose-400", muted: "text-slate-400" };

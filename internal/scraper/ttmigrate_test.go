@@ -59,7 +59,7 @@ func TestMigrateTikTokNames(t *testing.T) {
 	if got := MigrateTikTokNames(""); len(got) != 0 {
 		t.Errorf("rerun changed = %v", got)
 	}
-	SeedTikTokArchive("u")
+	SeedArchiveFromFiles("tiktok", "u")
 	if archive2, _ := os.ReadFile(filepath.Join("downloads", "tiktok", ".u.archive.txt")); string(archive2) != wantArchive {
 		t.Errorf("archive after reseed = %q, want %q", archive2, wantArchive)
 	}

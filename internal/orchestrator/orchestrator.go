@@ -638,6 +638,7 @@ func SessionOptions(c config.Config, opts *scraper.Options) {
 	opts.InstagramCookies = c.InstagramCookies
 	opts.InstagramSidecarURL = c.InstagramSidecarURL
 	opts.TikTokCookies = c.TikTokCookies
+	opts.YouTubeCookies = c.YouTubeCookies
 	opts.ThumbnailsDir = c.ThumbnailsDir
 }
 
@@ -656,6 +657,8 @@ func AccountSession(acc config.Account, opts *scraper.Options) {
 		opts.InstagramSidecarURL = ""
 	case "tiktok":
 		opts.TikTokCookies = acc.Cookies
+	case "youtube":
+		opts.YouTubeCookies = acc.Cookies
 	}
 }
 

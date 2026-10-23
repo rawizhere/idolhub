@@ -36,6 +36,7 @@ type Config struct {
 	InstagramSidecarURL string    `json:"instagram_sidecar_url"`
 	ThumbnailsDir       string    `json:"thumbnails_dir"`
 	TikTokCookies       string    `json:"tiktok_cookies"`
+	YouTubeCookies      string    `json:"youtube_cookies"`
 	AutoSyncInterval    int       `json:"auto_sync_interval"` // In hours
 	// QuietHours is "HH-HH" in server local time; auto-sync does not start inside the window. Empty disables it.
 	QuietHours string `json:"quiet_hours"`
@@ -113,6 +114,7 @@ func LoadConfig(st *store.Store) error {
 		InstagramSidecarURL: setting[string](st, ctx, "instagram_sidecar_url"),
 		ThumbnailsDir:       setting[string](st, ctx, "thumbnails_dir"),
 		TikTokCookies:       setting[string](st, ctx, "tiktok_cookies"),
+		YouTubeCookies:      setting[string](st, ctx, "youtube_cookies"),
 		AutoSyncInterval:    setting[int](st, ctx, "auto_sync_interval"),
 		QuietHours:          setting[string](st, ctx, "quiet_hours"),
 		MaxConcurrent:       setting[int](st, ctx, "max_concurrent"),
@@ -165,6 +167,7 @@ func saveToStore(st *store.Store) error {
 		"instagram_sidecar_url": globalConfig.InstagramSidecarURL,
 		"thumbnails_dir":        globalConfig.ThumbnailsDir,
 		"tiktok_cookies":        globalConfig.TikTokCookies,
+		"youtube_cookies":       globalConfig.YouTubeCookies,
 		"auto_sync_interval":    globalConfig.AutoSyncInterval,
 		"quiet_hours":           globalConfig.QuietHours,
 		"max_concurrent":        globalConfig.MaxConcurrent,

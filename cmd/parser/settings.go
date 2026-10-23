@@ -21,6 +21,7 @@ type configDTO struct {
 	TwitterCookies   *string `json:"twitter_cookies,omitempty"`
 	InstagramCookies *string `json:"instagram_cookies,omitempty"`
 	TikTokCookies    *string `json:"tiktok_cookies,omitempty"`
+	YouTubeCookies   *string `json:"youtube_cookies,omitempty"`
 
 	CookieStatus map[string]cookieStatus `json:"cookie_status,omitempty"`
 }
@@ -39,6 +40,8 @@ var requiredCookies = map[string][]string{
 	"twitter":   {"auth_token", "ct0"},
 	"instagram": {"sessionid"},
 	"tiktok":    {"sessionid"},
+	// public shorts need no auth; an export only helps when YouTube bot-checks the host
+	"youtube": {},
 }
 
 // inspectCookies is a static check of a Netscape export: it cannot tell a revoked session from a live one.
