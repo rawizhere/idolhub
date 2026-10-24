@@ -204,14 +204,19 @@ func ScrapeYTDLP(ctx context.Context, t Target, opts Options) error {
 // youtubeShortsURL points yt-dlp at the channel's shorts tab only. Accepts @handles and /channel/UC… links; a bare
 // handle becomes a handle URL.
 func youtubeShortsURL(username string) string {
-	u := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(username), "@"))
+	u := strings.TrimSpace(username)
 	if i := strings.Index(u, "youtube.com/"); i >= 0 {
 		u = u[i+len("youtube.com/"):]
 		if rest, ok := strings.CutPrefix(u, "channel/"); ok {
 			return "https://www.youtube.com/channel/" + strings.Trim(rest, "/") + "/shorts"
 		}
 	}
-	return "https://www.youtube.com/@" + strings.Trim(u, "/") + "/shorts"
+	u = strings.Trim(strings.Trim(u, "/"), "@")
+	// a raw channel id is not a handle; @UC… does not resolve
+	if len(u) == 24 && strings.HasPrefix(u, "UC") {
+		return "https://www.youtube.com/channel/" + u + "/shorts"
+	}
+	return "https://www.youtube.com/@" + u + "/shorts"
 }
 
 // seedArchiveFromResult records the ids yt-dlp listed, so the archive covers files whose names carry no recoverable id
