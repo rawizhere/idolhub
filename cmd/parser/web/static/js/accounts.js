@@ -6,7 +6,7 @@ import { loadProgress } from "./sse.js";
 import { goTarget } from "./nav.js";
 
 const $ = (id) => document.getElementById(id);
-const PLATFORM_NAMES = { twitter: "X", instagram: "Instagram", tiktok: "TikTok" };
+const PLATFORM_NAMES = { twitter: "X", instagram: "Instagram", tiktok: "TikTok", youtube: "YouTube" };
 
 export function parseProfileInput(raw) {
   const val = (raw || "").trim();
@@ -90,7 +90,7 @@ function lookup(row) {
   if (state.cachedProgress.some(t => t.platform === row.platform && t.username.toLowerCase() === row.username.toLowerCase())) {
     return { code: "exists" };
   }
-  if (row.platform === "tiktok") return { code: "unsupported" };
+  if (row.platform === "tiktok" || row.platform === "youtube") return { code: "unsupported" };
   if (!lookups.has(key)) {
     const entry = { code: "pending" };
     lookups.set(key, entry);
@@ -268,10 +268,10 @@ onClick({
   },
   "add-row-platform": (el) => {
     const r = rows[Number(el.dataset.index)];
-    const order = ["instagram", "twitter", "tiktok"];
+    const order = ["instagram", "twitter", "tiktok", "youtube"];
     const next = order[(order.indexOf(r.platform) + 1) % order.length];
     // a bare handle carries no platform, so rewrite the token as a link the parser understands
-    const link = { instagram: `instagram.com/${r.username}`, twitter: `x.com/${r.username}`, tiktok: `tiktok.com/@${r.username}` }[next];
+    const link = { instagram: `instagram.com/${r.username}`, twitter: `x.com/${r.username}`, tiktok: `tiktok.com/@${r.username}`, youtube: `youtube.com/@${r.username}` }[next];
     $("add-input").value = $("add-input").value.split(/(\s+|,)/).map(t => (t === r.token ? link : t)).join("");
     rows = parseRows();
     renderRows();

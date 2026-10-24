@@ -132,7 +132,7 @@ export async function renderGlobalSearchResults(query) {
   }
 }
 
-const PLATFORM_NAMES = { twitter: "Twitter / X", instagram: "Instagram", tiktok: "TikTok" };
+const PLATFORM_NAMES = { twitter: "Twitter / X", instagram: "Instagram", tiktok: "TikTok", youtube: "YouTube" };
 
 // cookieHealth summarises a platform's saved session for the overview; platforms without targets are skipped.
 export function cookieHealth(platform) {

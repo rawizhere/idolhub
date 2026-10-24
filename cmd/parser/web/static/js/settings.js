@@ -55,7 +55,7 @@ function buildCookieFields() {
     node.querySelector('[data-action="remove-cookies"]').dataset.key = f.key;
     const check = node.querySelector('[data-action="check-session"]');
     check.dataset.platform = f.platform;
-    check.classList.toggle("hidden", f.platform === "tiktok");
+    check.classList.toggle("hidden", f.platform === "tiktok" || f.platform === "youtube");
     box.appendChild(node);
   });
 }

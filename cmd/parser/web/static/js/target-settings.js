@@ -44,7 +44,7 @@ function fillForm(acc) {
 
 function validate(values) {
   const errors = {};
-  if (account.platform !== "tiktok" && !values.download_photos && !values.download_videos) errors.media = "Pick at least photos or videos.";
+  if (!["tiktok", "youtube"].includes(account.platform) && !values.download_photos && !values.download_videos) errors.media = "Pick at least photos or videos.";
   if (values.since && new Date(values.since) > new Date()) errors.since = "The date cannot be in the future.";
   if (!Number.isInteger(values.max_posts) || values.max_posts < 0 || values.max_posts > 100000) errors.max_posts = "Use a whole number up to 100000, or leave empty.";
   form().querySelectorAll("[data-error]").forEach(el => {
@@ -125,7 +125,7 @@ function renderSession() {
   $("ts-cookies-remove").classList.toggle("hidden", !st);
   $("ts-cookies").value = "";
   $("ts-cookies-result").textContent = "";
-  $("ts-cookies-check").classList.toggle("hidden", account.platform === "tiktok");
+  $("ts-cookies-check").classList.toggle("hidden", account.platform === "tiktok" || account.platform === "youtube");
 }
 
 export function renderPauseState() {
