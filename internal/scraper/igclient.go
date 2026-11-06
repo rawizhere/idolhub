@@ -394,8 +394,8 @@ func buildGraphQLForm(username, userID, after string, count int, ownUserID, docI
 			"latest_besties_reel_media":         true,
 			"latest_reel_media":                 true,
 		},
-		"__relay_internal__pv__PolarisMultiCaptionCarouselEnabledrelayprovider":  true,
-		"__relay_internal__pv__PolarisShortDramaEnabledrelayprovider":            true,
+		"__relay_internal__pv__PolarisMultiCaptionCarouselEnabledrelayprovider": true,
+		"__relay_internal__pv__PolarisShortDramaEnabledrelayprovider":           true,
 		// required since the doc_id rotation of 2026-11; without it graphql answers missing_required_variable_value
 		"__relay_internal__pv__PolarisSEOIsCrawlerrelayprovider":                 false,
 		"__relay_internal__pv__PolarisThreadsStyleCommentsEnabledrelayprovider":  false,
