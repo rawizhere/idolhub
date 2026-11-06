@@ -134,11 +134,20 @@ IG_USER_AGENT = os.environ.get("IG_USER_AGENT", "").strip()
 
 async def launch_browser() -> None:
     Path(PROFILE_DIR).mkdir(parents=True, exist_ok=True)
+    # idle CPU savings: sidecar only harvests graphql identity via page JS,
+    # images/videos/animations and 60fps WebRender are pure waste without a GPU
     opts = dict(
         persistent_context=True,
         user_data_dir=PROFILE_DIR,
         headless="virtual",
         i_know_what_im_doing=True,
+        block_images=True,
+        firefox_user_prefs={
+            "media.autoplay.default": 5,
+            "image.animation_mode": "none",
+            "layout.frame_rate": 1,
+            "dom.min_background_timeout_value": 10000,
+        },
     )
     if IG_USER_AGENT:
         # camoufox derives the rest of the fingerprint (os, screen, fonts) from a custom UA
