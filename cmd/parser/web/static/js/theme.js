@@ -2,7 +2,10 @@
 (() => {
   let saved = null;
   try { saved = localStorage.getItem("color-theme"); } catch (_) {}
-  const dark = saved === "dark" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const scheme = saved === "light" || saved === "dark" ? saved : "light dark";
+  const meta = document.querySelector('meta[name="color-scheme"]');
+  if (meta) meta.content = scheme;
+  const dark = scheme === "dark" || (scheme === "light dark" && window.matchMedia("(prefers-color-scheme: dark)").matches);
   document.documentElement.classList.toggle("dark", dark);
 
   // per-browser UI scale multiplier; the root font size already adapts to the window width

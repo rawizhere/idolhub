@@ -134,7 +134,7 @@ export async function renderGallery() {
     openSlideFromHash();
   } catch (err) {
     if (err.name === "AbortError") return;
-    container.innerHTML = "";
+    container.replaceChildren();
     showGalleryState("empty", "Failed to load gallery.");
     toast(`Failed to load gallery: ${err.message}`, "error");
   }

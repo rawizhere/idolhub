@@ -170,19 +170,24 @@ export function confirmDialog({ title = "Confirm", message = "", confirmText = "
   });
 }
 
-// Popovers render in the top layer; anchor each one under the button that opened it.
-document.addEventListener("toggle", (e) => {
-  const pop = e.target;
-  if (!(pop instanceof HTMLElement) || !pop.hasAttribute("popover") || e.newState !== "open") return;
-  const invoker = document.querySelector(`[popovertarget="${pop.id}"]`);
-  if (!invoker) return;
-  const r = invoker.getBoundingClientRect();
-  const w = pop.offsetWidth;
-  const h = pop.offsetHeight;
-  let left = pop.dataset.align === "end" ? r.right - w : r.left;
-  left = Math.min(Math.max(8, left), window.innerWidth - w - 8);
-  let top = r.bottom + 6;
-  if (top + h > window.innerHeight - 8 && r.top - h - 6 > 8) top = r.top - h - 6;
-  pop.style.left = `${left}px`;
-  pop.style.top = `${top}px`;
-}, true);
+// Popovers render in the top layer; browsers with CSS Anchor Positioning tether them via position-area.
+// Fall back to JS positioning where position-area is unsupported.
+if (!CSS.supports("position-area: block-end")) {
+  document.addEventListener("toggle", (e) => {
+    const pop = e.target;
+    if (!(pop instanceof HTMLElement) || !pop.hasAttribute("popover") || e.newState !== "open") return;
+    const invoker = document.querySelector(`[popovertarget="${pop.id}"]`);
+    if (!invoker) return;
+    const r = invoker.getBoundingClientRect();
+    const w = pop.offsetWidth;
+    const h = pop.offsetHeight;
+    let left = pop.dataset.align === "end" ? r.right - w : r.left;
+    left = Math.min(Math.max(8, left), window.innerWidth - w - 8);
+    let top = r.bottom + 6;
+    if (top + h > window.innerHeight - 8 && r.top - h - 6 > 8) top = r.top - h - 6;
+    pop.style.inset = "auto";
+    pop.style.margin = "0";
+    pop.style.left = `${left}px`;
+    pop.style.top = `${top}px`;
+  }, true);
+}

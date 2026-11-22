@@ -1,13 +1,27 @@
 import { onClick } from "./actions.js";
 
 export function toggleTheme() {
-  setTheme(document.documentElement.classList.contains("dark") ? "light" : "dark");
+  const target = document.documentElement.classList.contains("dark") ? "light" : "dark";
+  const system = systemDark.matches ? "dark" : "light";
+  setTheme(target === system ? "system" : target);
 }
 
 const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
 
 function storedTheme() {
-  try { return localStorage.getItem("color-theme") || "system"; } catch (_) { return "system"; }
+  try {
+    const saved = localStorage.getItem("color-theme");
+    return saved === "light" || saved === "dark" ? saved : "system";
+  } catch (_) {
+    return "system";
+  }
+}
+
+function applyTheme(mode) {
+  const meta = document.querySelector('meta[name="color-scheme"]');
+  if (meta) meta.content = mode === "system" ? "light dark" : mode;
+  document.documentElement.classList.toggle("dark", mode === "dark" || (mode === "system" && systemDark.matches));
+  syncThemeButtons(mode);
 }
 
 // setTheme takes "light", "dark" or "system"; system follows the OS setting live.
@@ -16,16 +30,15 @@ export function setTheme(mode) {
     if (mode === "system") localStorage.removeItem("color-theme");
     else localStorage.setItem("color-theme", mode);
   } catch (_) {}
-  document.documentElement.classList.toggle("dark", mode === "dark" || (mode === "system" && systemDark.matches));
-  syncThemeButtons();
+  applyTheme(mode);
 }
 
-export function syncThemeButtons() {
-  const mode = storedTheme();
+export function syncThemeButtons(mode = storedTheme()) {
   document.querySelectorAll('[data-action="set-theme"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.theme === mode ? "true" : "false"));
 }
 
-systemDark.addEventListener("change", () => { if (storedTheme() === "system") setTheme("system"); });
+systemDark.addEventListener("change", () => { if (storedTheme() === "system") applyTheme("system"); });
+window.addEventListener("storage", (e) => { if (e.key === "color-theme" || e.key === null) applyTheme(storedTheme()); });
 
 export const UI_SCALES = [0.875, 1, 1.125, 1.25];
 

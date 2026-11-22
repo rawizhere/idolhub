@@ -143,7 +143,7 @@ async function loadStorage() {
     $("storage-summary").innerHTML = card("Used by targets", formatBytes(st.total_bytes)) +
       (st.free_bytes ? card("Free on disk", formatBytes(st.free_bytes)) : "") +
       card("Quarantine", st.quarantine.files ? `${st.quarantine.files} · ${formatBytes(st.quarantine.bytes)}` : "empty");
-    const targets = [...st.targets].sort((a, b) => (b.bytes + b.thumb_bytes) - (a.bytes + a.thumb_bytes));
+    const targets = st.targets.toSorted((a, b) => (b.bytes + b.thumb_bytes) - (a.bytes + a.thumb_bytes));
     $("storage-targets").innerHTML = targets.map(t => `
       <tr>
         <td class="py-1.5 pr-4 whitespace-nowrap"><span class="text-xs font-bold uppercase px-1 py-0.5 rounded border mr-1.5 ${platformBadgeClass(t.platform)}">${escapeHtml(t.platform)}</span>@${escapeHtml(t.username)}</td>
